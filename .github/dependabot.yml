@@ -1,0 +1,8 @@
+# As actions de terceiros são fixadas pelo SHA do commit, porque uma tag pode ser
+# movida para outro código. O Dependabot propõe as atualizações desses SHAs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

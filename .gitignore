@@ -29,3 +29,9 @@ reference/
 
 # Sandbox
 .ai-jail
+
+# Saída do empacotamento de release
+dist/
+
+# Python
+__pycache__/

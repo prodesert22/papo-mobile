@@ -1,0 +1,119 @@
+name: CI
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('CI do PR #{0}', github.event.pull_request.number) || format('CI de {0}', inputs.ref || github.ref_name) }}
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+  # A release chama este workflow inteiro antes de publicar.
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit ou tag a testar; vazio usa o do evento.
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ inputs.ref || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  quality:
+    name: Release e workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - name: Testes do script de release
+        run: python3 -m unittest discover -s tools/tests -v
+      - name: Mudança de versão acompanha as notas
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 tools/release.py changed-since "$BASE_SHA"
+      - name: Workflows válidos
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+  unit:
+    name: Testes de unidade, lint e build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Aceitar as licenças do Android SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Testes de unidade, lint e APK de debug
+        run: ./gradlew :shared:testAndroidHostTest :androidApp:lintDebug :androidApp:assembleDebug --console=plain
+      - name: Guardar relatórios
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: relatorios-unit
+          path: |
+            shared/build/reports/tests/
+            androidApp/build/reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  device:
+    name: Testes no emulador
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Aceitar as licenças do Android SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Liberar o KVM para o emulador
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Compilar o app e os testes instrumentados
+        run: ./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest --console=plain
+      # Keystore de verdade e SQLCipher nativo: só dá para testar num aparelho.
+      - name: Testes instrumentados
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: tools/dev/run-device-tests.sh emulator-5554
+
+  # Portão único: é o que a proteção da branch e a release exigem.
+  required:
+    name: CI completo
+    if: always()
+    needs: [quality, unit, device]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Conferir os resultados
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "::error::Nem todos os jobs passaram: $RESULTS"
+              exit 1
+            fi
+          done

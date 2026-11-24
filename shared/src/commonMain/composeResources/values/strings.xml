@@ -107,6 +107,7 @@
     <string name="settings_secure_screen">Esconder conteúdo fora do app</string>
     <string name="settings_secure_screen_body">Bloqueia capturas de tela e esconde as conversas na lista de apps recentes.</string>
     <string name="settings_storage">Dados neste aparelho</string>
+    <string name="settings_version">Papo Mobile %1$s</string>
     <string name="settings_storage_body">Contas, sessões e mensagens ficam em bancos cifrados. A chave fica no chip de segurança do aparelho e não sai dele.</string>
 
     <!-- Canais e conversas -->

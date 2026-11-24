@@ -55,6 +55,7 @@ import chat.papo.mobile.resources.settings_security
 import chat.papo.mobile.resources.settings_storage
 import chat.papo.mobile.resources.settings_storage_body
 import chat.papo.mobile.resources.settings_title
+import chat.papo.mobile.resources.settings_version
 import chat.papo.mobile.security.AppLock
 import chat.papo.mobile.security.AuthPrompt
 import chat.papo.mobile.security.LockChange
@@ -65,7 +66,7 @@ import org.jetbrains.compose.resources.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppSettingsScreen(lock: AppLock, onBack: () -> Unit) {
+fun AppSettingsScreen(lock: AppLock, appVersion: String, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val lockEnabled by lock.lockEnabled.collectAsStateWithLifecycle()
     val timeout by lock.timeout.collectAsStateWithLifecycle()
@@ -166,6 +167,14 @@ fun AppSettingsScreen(lock: AppLock, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (appVersion.isNotEmpty()) {
+                Spacer(Modifier.height(28.dp))
+                Text(
+                    stringResource(Res.string.settings_version, appVersion),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Spacer(Modifier.height(24.dp))
         }
     }

@@ -37,6 +37,8 @@ class PlatformDeps(
     val mediaDirectory: String,
     /** Motor de chamadas; null onde a plataforma ainda não tem um. */
     val voice: VoiceEngineFactory? = null,
+    /** Versão instalada do app, como mostrada ao usuário. */
+    val appVersion: String = "",
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -61,6 +63,8 @@ class AppSession internal constructor(
 /** Raiz de dependências do app, criada uma vez por processo. */
 class AppGraph(private val platform: PlatformDeps) {
     val scope = CoroutineScope(SupervisorJob() + platform.dispatchers.main)
+
+    val appVersion: String get() = platform.appVersion
 
     val lock = AppLock(
         keyStore = platform.keyStore,

@@ -79,7 +79,7 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
         when (val current = state) {
             LockState.Starting -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
             is LockState.Locked -> LockScreen(graph.lock, current)
-            is LockState.Unlocked -> Unlocked(current.session as AppSession, graph.lock)
+            is LockState.Unlocked -> Unlocked(current.session as AppSession, graph.lock, graph.appVersion)
         }
         if (wiped) {
             AlertDialog(
@@ -96,7 +96,7 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
 }
 
 @Composable
-private fun Unlocked(session: AppSession, lock: AppLock) {
+private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val loaded by session.accounts.loaded.collectAsStateWithLifecycle()
     val navController = rememberNavController()
@@ -180,7 +180,7 @@ private fun Unlocked(session: AppSession, lock: AppLock) {
             AccountSettingsScreen(session, entry.toRoute<AccountSettingsRoute>().accountId, onBack = { navController.popBackStack() })
         }
         composable<AppSettingsRoute> {
-            AppSettingsScreen(lock, onBack = { navController.popBackStack() })
+            AppSettingsScreen(lock, appVersion, onBack = { navController.popBackStack() })
         }
     }
 }
