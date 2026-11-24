@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Servidores Papo são auto-hospedados e podem estar em http:// numa rede local.
+     O app só usa http depois de um aviso explícito ao adicionar o servidor. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

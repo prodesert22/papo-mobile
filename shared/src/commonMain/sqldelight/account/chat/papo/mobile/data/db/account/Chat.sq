@@ -1,0 +1,224 @@
+import kotlin.Boolean;
+
+CREATE TABLE user (
+    id TEXT NOT NULL PRIMARY KEY,
+    username TEXT NOT NULL,
+    nickname TEXT,
+    status TEXT,
+    status_message TEXT,
+    typing_phrase TEXT,
+    banned INTEGER AS Boolean NOT NULL DEFAULT 0,
+    role_color TEXT,
+    avatar_version INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE channel (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    topic TEXT,
+    parent_id TEXT,
+    last_message_id TEXT,
+    last_message_at TEXT,
+    last_message_text TEXT,
+    last_message_author TEXT,
+    last_read_message TEXT,
+    notification_settings TEXT
+);
+
+CREATE TABLE dm (
+    id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_message_id TEXT,
+    last_message_at TEXT,
+    last_message_text TEXT,
+    last_message_author TEXT,
+    last_read_message TEXT,
+    unread_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE message (
+    id TEXT NOT NULL PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    author_id TEXT,
+    content TEXT,
+    created_at TEXT NOT NULL,
+    -- Microssegundos desde a época, para ordenar sem depender do formato do texto.
+    created_us INTEGER NOT NULL,
+    edited_at TEXT,
+    reply_to TEXT,
+    webhook_id TEXT,
+    external_author TEXT,
+    attachments TEXT NOT NULL DEFAULT '[]',
+    embeds TEXT NOT NULL DEFAULT '[]',
+    reactions TEXT NOT NULL DEFAULT '[]',
+    user_reactions TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX message_by_channel ON message (channel_id, created_us, id);
+
+-- Usuários
+
+upsertUser:
+INSERT INTO user (id, username, nickname, status, status_message, typing_phrase, banned, role_color)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET
+    username = excluded.username,
+    nickname = excluded.nickname,
+    status = excluded.status,
+    status_message = excluded.status_message,
+    typing_phrase = excluded.typing_phrase,
+    banned = excluded.banned,
+    role_color = excluded.role_color;
+
+updatePresenceFields:
+UPDATE user SET status_message = ?, typing_phrase = ?, nickname = ? WHERE id = ?;
+
+bumpAvatar:
+UPDATE user SET avatar_version = avatar_version + 1 WHERE id = ?;
+
+selectUsers:
+SELECT * FROM user;
+
+selectUser:
+SELECT * FROM user WHERE id = ?;
+
+-- Canais
+
+upsertChannel:
+INSERT INTO channel (id, name, type, position, topic, parent_id, last_message_id, last_message_at, last_message_text, last_message_author, last_read_message, notification_settings)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET
+    name = excluded.name,
+    type = excluded.type,
+    position = excluded.position,
+    topic = excluded.topic,
+    parent_id = excluded.parent_id,
+    last_message_id = excluded.last_message_id,
+    last_message_at = excluded.last_message_at,
+    last_message_text = excluded.last_message_text,
+    last_message_author = excluded.last_message_author,
+    last_read_message = excluded.last_read_message,
+    notification_settings = excluded.notification_settings;
+
+insertChannelIfAbsent:
+INSERT OR IGNORE INTO channel (id, name, type, position, topic, parent_id) VALUES (?, ?, ?, ?, ?, ?);
+
+updateChannelInfo:
+UPDATE channel SET name = ?, position = ?, topic = ?, parent_id = ? WHERE id = ?;
+
+deleteChannel:
+DELETE FROM channel WHERE id = ?;
+
+deleteChannelsNotIn:
+DELETE FROM channel WHERE id NOT IN ?;
+
+deleteAllChannels:
+DELETE FROM channel;
+
+selectChannels:
+SELECT * FROM channel ORDER BY position, name;
+
+selectChannel:
+SELECT * FROM channel WHERE id = ?;
+
+setChannelLastMessage:
+UPDATE channel SET last_message_id = ?, last_message_at = ?, last_message_text = ?, last_message_author = ? WHERE id = ?;
+
+setChannelRead:
+UPDATE channel SET last_read_message = ? WHERE id = ?;
+
+setChannelNotification:
+UPDATE channel SET notification_settings = ? WHERE id = ?;
+
+-- Conversas diretas
+
+upsertDm:
+INSERT INTO dm (id, user_id, created_at, last_message_id, last_message_at, last_message_text, last_message_author, last_read_message, unread_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET
+    user_id = excluded.user_id,
+    last_message_id = excluded.last_message_id,
+    last_message_at = excluded.last_message_at,
+    last_message_text = excluded.last_message_text,
+    last_message_author = excluded.last_message_author,
+    last_read_message = excluded.last_read_message,
+    unread_count = excluded.unread_count;
+
+deleteDm:
+DELETE FROM dm WHERE id = ?;
+
+deleteDmsNotIn:
+DELETE FROM dm WHERE id NOT IN ?;
+
+deleteAllDms:
+DELETE FROM dm;
+
+selectDms:
+SELECT * FROM dm ORDER BY COALESCE(last_message_at, created_at) DESC;
+
+selectDm:
+SELECT * FROM dm WHERE id = ?;
+
+setDmLastMessage:
+UPDATE dm SET last_message_id = ?, last_message_at = ?, last_message_text = ?, last_message_author = ?, unread_count = unread_count + ? WHERE id = ?;
+
+setDmRead:
+UPDATE dm SET last_read_message = ?, unread_count = 0 WHERE id = ?;
+
+-- Mensagens
+
+upsertMessage:
+INSERT INTO message (id, channel_id, author_id, content, created_at, created_us, edited_at, reply_to, webhook_id, external_author, attachments, embeds, reactions, user_reactions)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET
+    content = excluded.content,
+    edited_at = excluded.edited_at,
+    reply_to = excluded.reply_to,
+    attachments = excluded.attachments,
+    embeds = excluded.embeds,
+    reactions = excluded.reactions,
+    user_reactions = excluded.user_reactions;
+
+-- Evento de tempo real: traz só o corpo, sem embeds nem reações. Não sobrescreve o que já existe.
+insertMessageIfAbsent:
+INSERT OR IGNORE INTO message (id, channel_id, author_id, content, created_at, created_us, reply_to, webhook_id, external_author, attachments)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectMessages:
+SELECT * FROM message WHERE channel_id = ? ORDER BY created_us DESC, id DESC LIMIT ?;
+
+selectMessage:
+SELECT * FROM message WHERE id = ?;
+
+countMessagesIn:
+SELECT COUNT(*) FROM message WHERE id IN ?;
+
+oldestMessage:
+SELECT * FROM message WHERE channel_id = ? ORDER BY created_us ASC, id ASC LIMIT 1;
+
+newestMessage:
+SELECT * FROM message WHERE channel_id = ? ORDER BY created_us DESC, id DESC LIMIT 1;
+
+deleteMessagesOlderThan:
+DELETE FROM message WHERE channel_id = ? AND created_us < ?;
+
+deleteChannelMessages:
+DELETE FROM message WHERE channel_id = ?;
+
+editMessage:
+UPDATE message SET content = ?, edited_at = ? WHERE id = ?;
+
+deleteMessage:
+DELETE FROM message WHERE id = ?;
+
+setMessageReactions:
+UPDATE message SET reactions = ?, user_reactions = ? WHERE id = ?;
+
+setMessageEmbeds:
+UPDATE message SET embeds = ? WHERE id = ?;
+
+setMessageAttachments:
+UPDATE message SET attachments = ? WHERE id = ?;

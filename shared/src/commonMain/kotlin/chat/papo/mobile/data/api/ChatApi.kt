@@ -1,0 +1,167 @@
+package chat.papo.mobile.data.api
+
+import io.ktor.client.request.delete
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.submitFormWithBinaryData
+import io.ktor.client.request.get
+import io.ktor.client.request.parameter
+import io.ktor.client.request.post
+import io.ktor.client.request.put
+import io.ktor.client.request.setBody
+import io.ktor.client.request.url
+import io.ktor.client.plugins.timeout
+import io.ktor.client.statement.readRawBytes
+import io.ktor.http.ContentType
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+
+/** Endpoints de conversa: canais, DMs, usuários, mensagens, reações, pins e mídia. */
+class ChatApi(private val client: PapoClient) {
+    private val http get() = client.http
+    private fun path(p: String) = client.server.endpoint(p)
+
+    suspend fun channels(): List<ChannelDto> =
+        http.get { url(path("/channels")) }.bodyOrThrow<ChannelsResponse>().channels
+
+    suspend fun dms(): List<DirectConversationDto> =
+        http.get { url(path("/dms")) }.bodyOrThrow<DmsResponse>().dms
+
+    suspend fun openDm(userId: String): DirectConversationDto =
+        http.post {
+            url(path("/dms"))
+            contentType(ContentType.Application.Json)
+            setBody(OpenDmRequest(userId))
+        }.bodyOrThrow()
+
+    suspend fun closeDm(dmId: String) = http.delete { url(path("/dms/$dmId")) }.requireSuccess()
+
+    suspend fun users(since: String? = null, lastId: String? = null): UsersPage =
+        http.get {
+            url(path("/users"))
+            parameter("order", "asc")
+            since?.let { parameter("since", it) }
+            lastId?.let { parameter("last_id", it) }
+        }.bodyOrThrow()
+
+    suspend fun profile(userId: String): UserProfileDto =
+        http.get { url(path("/users/$userId/profile")) }.bodyOrThrow()
+
+    /** Bytes do avatar, ou null se o usuário não tem um. */
+    suspend fun avatar(userId: String): ByteArray? = bytesOrNull("/users/$userId/avatar")
+
+    suspend fun messages(
+        channelId: String,
+        since: String? = null,
+        lastId: String? = null,
+        order: String = "desc",
+        limit: Int = 30,
+    ): MessageListResponse =
+        http.get {
+            url(path("/channels/$channelId/messages"))
+            parameter("order", order)
+            parameter("limit", limit)
+            since?.let { parameter("since", it) }
+            lastId?.let { parameter("last_id", it) }
+        }.bodyOrThrow()
+
+    suspend fun sendMessage(channelId: String, content: String, replyTo: String?, files: List<OutgoingFile>): MessageDto =
+        http.submitFormWithBinaryData(
+            url = path("/messages"),
+            formData = formData {
+                append("channel_id", channelId)
+                if (content.isNotEmpty()) append("content", content)
+                replyTo?.let { append("reply_to", it) }
+                files.forEach { file ->
+                    append(
+                        "attachments",
+                        file.read(),
+                        Headers.build {
+                            append(HttpHeaders.ContentType, file.mimeType)
+                            append(HttpHeaders.ContentDisposition, "filename=\"${file.name.replace("\"", "")}\"")
+                        },
+                    )
+                }
+            },
+        ) {
+            // Envio de anexos pode demorar bem mais que uma requisição comum.
+            timeout { requestTimeoutMillis = 10 * 60_000; socketTimeoutMillis = 120_000 }
+        }.bodyOrThrow()
+
+    suspend fun editMessage(messageId: String, content: String): MessageDto =
+        http.put {
+            url(path("/messages/$messageId"))
+            contentType(ContentType.Application.Json)
+            setBody(UpdateMessageRequest(content))
+        }.bodyOrThrow()
+
+    suspend fun deleteMessage(messageId: String) = http.delete { url(path("/messages/$messageId")) }.requireSuccess()
+
+    suspend fun markRead(channelId: String, messageId: String) =
+        http.put {
+            url(path("/channels/$channelId/read"))
+            contentType(ContentType.Application.Json)
+            setBody(MarkReadRequest(messageId))
+        }.requireSuccess()
+
+    suspend fun pin(channelId: String, messageId: String) =
+        http.post { url(path("/channels/$channelId/messages/$messageId/pin")) }.requireSuccess()
+
+    suspend fun unpin(channelId: String, messageId: String) =
+        http.delete { url(path("/channels/$channelId/messages/$messageId/pin")) }.requireSuccess()
+
+    suspend fun pinned(channelId: String): List<MessageDto> =
+        http.get { url(path("/channels/$channelId/pinned")) }.bodyOrThrow<PinnedMessagesResponse>().pinned
+
+    suspend fun react(channelId: String, messageId: String, reaction: ReactionRequest) =
+        http.post {
+            url(path("/channels/$channelId/messages/$messageId/reactions"))
+            contentType(ContentType.Application.Json)
+            setBody(reaction)
+        }.requireSuccess()
+
+    suspend fun unreact(channelId: String, messageId: String, reaction: ReactionRequest) =
+        http.delete {
+            url(path("/channels/$channelId/messages/$messageId/reactions"))
+            contentType(ContentType.Application.Json)
+            setBody(reaction)
+        }.requireSuccess()
+
+    suspend fun emojis(since: String? = null, lastId: String? = null): EmojisPage =
+        http.get {
+            url(path("/emojis"))
+            parameter("order", "asc")
+            since?.let { parameter("since", it) }
+            lastId?.let { parameter("last_id", it) }
+        }.bodyOrThrow()
+
+    suspend fun iceServers(): List<IceServerDto> =
+        http.get { url(path("/voice/ice-servers")) }.bodyOrThrow<IceServersResponse>().iceServers
+
+    suspend fun attachment(fileId: String): ByteArray = bytes("/attachments/$fileId")
+
+    suspend fun attachmentThumbnail(fileId: String): ByteArray = bytes("/attachments/$fileId/thumbnail")
+
+    suspend fun media(sha: String): ByteArray = bytes("/media/$sha")
+
+    suspend fun embedImageBase64(embedId: String): String? =
+        http.get { url(path("/embeds/$embedId")) }.bodyOrThrow<EmbedWithImageDto>().imageData
+
+    fun attachmentUrl(fileId: String): String = path("/attachments/$fileId")
+
+    private suspend fun bytes(p: String): ByteArray {
+        val response = http.get { url(path(p)) }
+        if (!response.status.isSuccess()) throw response.toApiException()
+        return response.readRawBytes()
+    }
+
+    private suspend fun bytesOrNull(p: String): ByteArray? {
+        val response = http.get { url(path(p)) }
+        return when {
+            response.status.isSuccess() -> response.readRawBytes()
+            response.status.value == 404 -> null
+            else -> throw response.toApiException()
+        }
+    }
+}

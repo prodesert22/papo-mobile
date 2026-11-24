@@ -1,0 +1,31 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Kotlin
+.kotlin/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Android
+*.apk
+*.aab
+*.keystore
+# A keystore de debug é pública por definição (senha "android") e precisa ser a mesma para todos.
+!androidApp/debug.keystore
+*.jks
+captures/
+
+# Segredos e configuração local
+google-services.json
+keystore.properties
+
+# Código de referência copiado de outros repositórios
+reference/
+
+# Sandbox
+.ai-jail

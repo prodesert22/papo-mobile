@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Papo</string>
+
+    <!-- Ações comuns -->
+    <string name="action_continue">Continuar</string>
+    <string name="action_back">Voltar</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="action_save">Salvar</string>
+    <string name="action_retry">Tentar de novo</string>
+    <string name="action_close">Fechar</string>
+
+    <!-- Erros -->
+    <string name="error_network">Não foi possível falar com o servidor. Confira o endereço e a sua conexão.</string>
+    <string name="error_url_empty">Digite o endereço do servidor.</string>
+    <string name="error_url_scheme">O endereço precisa começar com https:// ou http://.</string>
+    <string name="error_url_host">Esse endereço não parece válido. Exemplo: papo.exemplo.com</string>
+    <string name="error_url_port">A porta precisa ser um número entre 1 e 65535.</string>
+    <string name="error_url_credentials">Não coloque usuário e senha no endereço.</string>
+    <string name="error_url_path">O caminho do endereço tem caracteres inválidos.</string>
+    <string name="error_not_papo">Esse endereço respondeu, mas não parece ser um servidor Papo.</string>
+
+    <!-- Bloqueio -->
+    <string name="lock_title">Papo está bloqueado</string>
+    <string name="lock_body">Use sua digital para abrir as conversas.</string>
+    <string name="lock_unlock">Desbloquear</string>
+    <string name="lock_prompt_title">Desbloquear o Papo</string>
+    <string name="lock_prompt_subtitle">Confirme que é você para abrir as conversas</string>
+    <string name="lock_enable_prompt_title">Ativar bloqueio por digital</string>
+    <string name="lock_enable_prompt_subtitle">Confirme que é você para proteger as conversas</string>
+    <string name="lock_disable_prompt_title">Desativar bloqueio por digital</string>
+    <string name="lock_reset">Apagar dados deste aparelho</string>
+    <string name="lock_reset_title">Apagar os dados deste aparelho?</string>
+    <string name="lock_reset_body">As contas saem deste aparelho e o histórico guardado aqui é apagado. Nada muda nos servidores: basta entrar de novo.</string>
+    <string name="lock_reset_confirm">Apagar</string>
+    <string name="wiped_title">Os dados locais foram apagados</string>
+    <string name="wiped_body">A chave de segurança deste aparelho deixou de valer (isso acontece quando o bloqueio de tela é removido). Entre de novo nas suas contas; as conversas continuam nos servidores.</string>
+
+    <!-- Adicionar servidor -->
+    <string name="welcome_title">Onde é o seu papo?</string>
+    <string name="welcome_body">Cada servidor Papo tem o próprio endereço. Digite o do servidor em que você quer entrar.</string>
+    <string name="add_server_title">Adicionar servidor</string>
+    <string name="add_server_address">Endereço do servidor</string>
+    <string name="add_server_address_hint">papo.exemplo.com</string>
+    <string name="add_server_find">Procurar servidor</string>
+    <string name="add_server_insecure_title">Conexão sem criptografia</string>
+    <string name="add_server_insecure_body">Este endereço usa http://. Sua senha e suas mensagens trafegam abertas e podem ser lidas por quem estiver na mesma rede. Use só em redes em que você confia.</string>
+    <string name="add_server_insecure_accept">Continuar sem criptografia</string>
+    <string name="add_server_members">%1$d membros</string>
+    <string name="add_server_private">Servidor fechado</string>
+    <string name="add_server_password_title">Senha do servidor</string>
+    <string name="add_server_password_body">Este servidor é fechado. Peça a senha de entrada a quem administra.</string>
+    <string name="add_server_password_label">Senha do servidor</string>
+    <string name="add_server_change">Trocar servidor</string>
+    <string name="login_tab">Entrar</string>
+    <string name="register_tab">Criar conta</string>
+    <string name="login_username">Nome de usuário</string>
+    <string name="login_password">Senha</string>
+    <string name="login_submit">Entrar</string>
+    <string name="register_submit">Criar conta e entrar</string>
+    <string name="register_password_rule">Pelo menos 8 caracteres, com uma letra maiúscula e um caractere especial.</string>
+    <string name="password_show">Mostrar senha</string>
+    <string name="password_hide">Esconder senha</string>
+    <string name="add_account_updated">Você já tinha essa conta aqui. A sessão foi renovada.</string>
+
+    <!-- Tela principal -->
+    <string name="rail_add">Adicionar servidor ou conta</string>
+    <string name="rail_unread">, com mensagens não lidas</string>
+    <string name="rail_settings">Configurações do app</string>
+    <string name="account_settings">Configurações da conta</string>
+    <string name="session_expired_title">Sessão encerrada</string>
+    <string name="session_expired_body">Esta conta foi desconectada pelo servidor. Entre de novo para continuar.</string>
+    <string name="session_expired_action">Entrar de novo</string>
+    <string name="security_alert_title">Sessões revogadas pelo servidor</string>
+    <string name="security_alert_body">O servidor detectou o reuso de um token desta conta e encerrou todas as conexões. Se não foi você, troque a senha.</string>
+    <string name="security_alert_dismiss">Entendi</string>
+
+    <!-- Configurações da conta -->
+    <string name="account_label">Apelido desta conta</string>
+    <string name="account_label_hint">Ex.: Trabalho, Pessoal</string>
+    <string name="account_label_help">Aparece no lugar do nome do servidor. Ajuda a separar contas do mesmo servidor.</string>
+    <string name="account_color">Cor</string>
+    <string name="account_color_none">Sem cor</string>
+    <string name="account_devices">Dispositivos conectados</string>
+    <string name="account_devices_empty">Nenhuma conexão ativa.</string>
+    <string name="account_device_since">Conectado em %1$s</string>
+    <string name="account_device_drop">Desconectar</string>
+    <string name="account_devices_drop_all">Desconectar todos</string>
+    <string name="account_devices_drop_all_body">Todos os aparelhos saem desta conta, inclusive este. Você vai precisar entrar de novo.</string>
+    <string name="account_remove">Sair desta conta</string>
+    <string name="account_remove_title">Sair de %1$s?</string>
+    <string name="account_remove_body">A conta sai deste aparelho e as mensagens guardadas aqui são apagadas. Nada é apagado no servidor.</string>
+    <string name="account_remove_confirm">Sair</string>
+
+    <!-- Configurações do app -->
+    <string name="settings_title">Configurações</string>
+    <string name="settings_security">Segurança</string>
+    <string name="settings_lock">Bloquear com digital</string>
+    <string name="settings_lock_body">Pede sua digital (ou a senha do aparelho) para abrir o Papo. Sem ela, os dados guardados aqui não podem ser lidos.</string>
+    <string name="settings_lock_not_enrolled">Cadastre uma digital nas configurações do aparelho para usar o bloqueio.</string>
+    <string name="settings_lock_unsupported">Este aparelho não tem um leitor biométrico compatível.</string>
+    <string name="settings_lock_failed">Não foi possível mudar o bloqueio. Tente de novo.</string>
+    <string name="settings_lock_timeout">Bloquear ao sair do app</string>
+    <string name="settings_lock_timeout_immediately">Na hora</string>
+    <string name="settings_lock_timeout_1m">Depois de 1 minuto</string>
+    <string name="settings_lock_timeout_5m">Depois de 5 minutos</string>
+    <string name="settings_secure_screen">Esconder conteúdo fora do app</string>
+    <string name="settings_secure_screen_body">Bloqueia capturas de tela e esconde as conversas na lista de apps recentes.</string>
+    <string name="settings_storage">Dados neste aparelho</string>
+    <string name="settings_storage_body">Contas, sessões e mensagens ficam em bancos cifrados. A chave fica no chip de segurança do aparelho e não sai dele.</string>
+
+    <!-- Canais e conversas -->
+    <string name="channels_direct">Conversas diretas</string>
+    <string name="channels_new_dm">Nova conversa</string>
+    <string name="channels_none">Este servidor ainda não tem canais.</string>
+    <string name="channels_uncategorized">Canais</string>
+    <string name="channels_reconnecting">Sem conexão em tempo real. Tentando reconectar…</string>
+    <string name="channels_sync_failed">Não foi possível atualizar a lista.</string>
+    <string name="channels_in_voice">%1$d na chamada</string>
+    <string name="dm_pick_title">Com quem você quer falar?</string>
+    <string name="dm_pick_search">Buscar pessoa</string>
+    <string name="dm_close">Fechar conversa</string>
+    <string name="presence_online">online</string>
+    <string name="presence_away">ausente</string>
+    <string name="presence_busy">ocupado</string>
+    <string name="presence_offline">offline</string>
+
+    <!-- Chat -->
+    <string name="chat_empty">Nenhuma mensagem por aqui ainda. Diga oi.</string>
+    <string name="chat_history_start">Início da conversa</string>
+    <string name="chat_edited">(editada)</string>
+    <string name="chat_placeholder">Mensagem em %1$s</string>
+    <string name="chat_placeholder_dm">Mensagem para %1$s</string>
+    <string name="chat_send">Enviar</string>
+    <string name="chat_attach">Anexar arquivo</string>
+    <string name="chat_remove_attachment">Remover anexo</string>
+    <string name="chat_replying_to">Respondendo a %1$s</string>
+    <string name="chat_editing">Editando mensagem</string>
+    <string name="chat_reply_missing">Mensagem não disponível</string>
+    <string name="chat_typing_one">%1$s está digitando…</string>
+    <string name="chat_typing_many">Várias pessoas estão digitando…</string>
+    <string name="chat_today">Hoje</string>
+    <string name="chat_yesterday">Ontem</string>
+    <string name="chat_sensitive">Conteúdo sensível. Toque para ver.</string>
+    <string name="chat_pinned">Mensagens fixadas</string>
+    <string name="chat_pinned_empty">Nada fixado neste canal.</string>
+    <string name="chat_unknown_user">Usuário removido</string>
+    <string name="chat_file_saved">Arquivo salvo em Downloads.</string>
+    <string name="chat_file_failed">Não foi possível baixar o arquivo.</string>
+    <string name="msg_reply">Responder</string>
+    <string name="msg_copy">Copiar texto</string>
+    <string name="msg_edit">Editar</string>
+    <string name="msg_delete">Apagar</string>
+    <string name="msg_pin">Fixar</string>
+    <string name="msg_unpin">Desafixar</string>
+    <string name="msg_delete_title">Apagar esta mensagem?</string>
+    <string name="msg_delete_body">Ela some para todo mundo e não dá para desfazer.</string>
+    <string name="msg_download">Baixar</string>
+
+    <!-- Chamadas -->
+    <string name="call_joining">Entrando na chamada…</string>
+    <string name="call_connecting">Conectando…</string>
+    <string name="call_reconnecting">Conexão instável. Reconectando…</string>
+    <string name="call_alone">Só você por aqui por enquanto.</string>
+    <string name="call_you">Você</string>
+    <string name="call_screen_of">Tela de %1$s</string>
+    <string name="call_your_screen">Sua tela está sendo transmitida</string>
+    <string name="call_mute">Desligar microfone</string>
+    <string name="call_unmute">Ligar microfone</string>
+    <string name="call_camera_on">Ligar câmera</string>
+    <string name="call_camera_off">Desligar câmera</string>
+    <string name="call_switch_camera">Trocar de câmera</string>
+    <string name="call_screen_on">Transmitir a tela</string>
+    <string name="call_screen_off">Parar de transmitir a tela</string>
+    <string name="call_speaker_on">Usar alto-falante</string>
+    <string name="call_speaker_off">Usar o fone do aparelho</string>
+    <string name="call_hangup">Desligar</string>
+    <string name="call_muted">Microfone desligado</string>
+    <string name="call_bar">Em chamada em %1$s</string>
+    <string name="call_bar_open">Abrir chamada</string>
+    <string name="call_ended_title">A chamada terminou</string>
+    <string name="call_end_denied">Você não tem permissão para entrar neste canal de voz.</string>
+    <string name="call_end_full">A sala está cheia.</string>
+    <string name="call_end_no_microphone">O Papo precisa do microfone para entrar na chamada. Libere a permissão nas configurações do aparelho.</string>
+    <string name="call_end_connection_lost">A conexão com o servidor caiu.</string>
+    <string name="call_end_room_closed">O canal de voz foi encerrado.</string>
+    <string name="call_end_failed">Não foi possível entrar na chamada.</string>
+    <string name="call_unsupported">Chamadas ainda não estão disponíveis neste aparelho.</string>
+</resources>

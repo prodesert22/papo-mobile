@@ -1,0 +1,53 @@
+import kotlin.Boolean;
+
+-- Uma linha por conta. O mesmo servidor pode aparecer várias vezes, com usuários diferentes.
+CREATE TABLE account (
+    id TEXT NOT NULL PRIMARY KEY,
+    base_url TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    nickname TEXT,
+    server_name TEXT NOT NULL,
+    server_icon BLOB,
+    label TEXT,
+    color INTEGER,
+    position INTEGER NOT NULL,
+    auth_cookie TEXT,
+    session_expired INTEGER AS Boolean NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    UNIQUE (base_url, user_id)
+);
+
+selectAll:
+SELECT * FROM account ORDER BY position, created_at;
+
+selectById:
+SELECT * FROM account WHERE id = ?;
+
+selectByServerUser:
+SELECT * FROM account WHERE base_url = ? AND user_id = ?;
+
+nextPosition:
+SELECT COALESCE(MAX(position), -1) + 1 FROM account;
+
+insert:
+INSERT INTO account (id, base_url, user_id, username, nickname, server_name, server_icon, position, auth_cookie, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateCookie:
+UPDATE account SET auth_cookie = ?, session_expired = 0 WHERE id = ?;
+
+markSessionExpired:
+UPDATE account SET auth_cookie = NULL, session_expired = 1 WHERE id = ?;
+
+updateIdentity:
+UPDATE account SET username = ?, nickname = ? WHERE id = ?;
+
+updateServer:
+UPDATE account SET server_name = ?, server_icon = ? WHERE id = ?;
+
+updateAppearance:
+UPDATE account SET label = ?, color = ? WHERE id = ?;
+
+delete:
+DELETE FROM account WHERE id = ?;
