@@ -21,7 +21,9 @@ Betas não têm arquivo: a release `vX.Y.Z-beta.N` é publicada com o conteúdo 
 2. Crie `releases/v0.2.0.md` a partir do `Unreleased.md` e deixe o `Unreleased.md` vazio.
 3. Leve esse commit para a `main`.
 4. Dispare a release, de um dos dois jeitos:
-   - envie a tag: `git tag v0.2.0 && git push origin v0.2.0`; ou
+   - crie e envie a tag: `git tag -a v0.2.0 -m "Papo Mobile 0.2.0" && git push origin v0.2.0`
+     (o `-a -m` evita que o Git abra o editor pedindo a mensagem quando a assinatura de
+     tags está ligada); ou
    - no GitHub, em **Actions → Release → Run workflow**, escolha a `main`. O workflow lê
      `papo.version` e cria a tag.
 
