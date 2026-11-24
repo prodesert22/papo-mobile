@@ -17,6 +17,7 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
@@ -56,4 +57,11 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.compose.runtime)
     implementation(libs.compose.ui)
+
+    // Testes que só fazem sentido num aparelho: Keystore de verdade e SQLCipher nativo.
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.kotlin.test)
+    androidTestImplementation(libs.coroutines.test)
+    androidTestImplementation(libs.sqldelight.android.driver)
 }

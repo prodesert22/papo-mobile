@@ -42,8 +42,12 @@ class AndroidMasterKeyStore(
     private val context: Context,
     private val crypto: Crypto,
     private val activities: ActivityHolder,
+    /** Nome do cofre: define o arquivo e os aliases no Keystore. Os testes usam outro para não tocar no do app. */
+    name: String = "master",
 ) : MasterKeyStore {
-    private val file = File(context.noBackupFilesDir, "master.key")
+    private val file = File(context.noBackupFilesDir, "$name.key")
+    private val aliasDevice = "papo.$name.device"
+    private val aliasUserAuth = "papo.$name.userauth"
     private val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
     override fun protection(): KeyProtection {
@@ -101,28 +105,28 @@ class AndroidMasterKeyStore(
     override suspend fun protect(masterKey: ByteArray, userAuth: Boolean, prompt: AuthPrompt): KeyResult {
         return try {
             if (userAuth) {
-                deleteKey(ALIAS_USER_AUTH)
+                deleteKey(aliasUserAuth)
                 val cipher = encryptCipher(userAuthKey(create = true)!!)
                 when (val auth = authenticate(cipher, prompt)) {
                     is AuthOutcome.Ok -> {
                         writeFile(MODE_USER_AUTH, auth.cipher.iv, auth.cipher.doFinal(masterKey))
-                        deleteKey(ALIAS_DEVICE)
+                        deleteKey(aliasDevice)
                         KeyResult.Success(masterKey)
                     }
                     AuthOutcome.Cancelled -> {
-                        deleteKey(ALIAS_USER_AUTH)
+                        deleteKey(aliasUserAuth)
                         KeyResult.Cancelled
                     }
                     is AuthOutcome.Error -> {
-                        deleteKey(ALIAS_USER_AUTH)
+                        deleteKey(aliasUserAuth)
                         KeyResult.Failed(auth.message)
                     }
                 }
             } else {
-                deleteKey(ALIAS_DEVICE)
+                deleteKey(aliasDevice)
                 val cipher = encryptCipher(deviceKey(create = true)!!)
                 writeFile(MODE_DEVICE, cipher.iv, cipher.doFinal(masterKey))
-                deleteKey(ALIAS_USER_AUTH)
+                deleteKey(aliasUserAuth)
                 KeyResult.Success(masterKey)
             }
         } catch (e: Exception) {
@@ -132,18 +136,18 @@ class AndroidMasterKeyStore(
 
     override fun wipe() {
         file.delete()
-        deleteKey(ALIAS_DEVICE)
-        deleteKey(ALIAS_USER_AUTH)
+        deleteKey(aliasDevice)
+        deleteKey(aliasUserAuth)
     }
 
     private fun encryptCipher(key: SecretKey?): Cipher =
         Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
 
     private fun deviceKey(create: Boolean): SecretKey? =
-        existingKey(ALIAS_DEVICE) ?: if (create) generateKey(ALIAS_DEVICE) { } else null
+        existingKey(aliasDevice) ?: if (create) generateKey(aliasDevice) { } else null
 
     private fun userAuthKey(create: Boolean): SecretKey? =
-        existingKey(ALIAS_USER_AUTH) ?: if (!create) null else generateKey(ALIAS_USER_AUTH) {
+        existingKey(aliasUserAuth) ?: if (!create) null else generateKey(aliasUserAuth) {
             setUserAuthenticationRequired(true)
             // 0 = autenticação a cada operação, amarrada ao CryptoObject do pedido.
             setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL)
@@ -237,8 +241,6 @@ class AndroidMasterKeyStore(
     private companion object {
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
-        const val ALIAS_DEVICE = "papo.master.device"
-        const val ALIAS_USER_AUTH = "papo.master.userauth"
         const val VERSION: Byte = 1
         const val MODE_DEVICE: Byte = 1
         const val MODE_USER_AUTH: Byte = 2

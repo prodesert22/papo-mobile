@@ -29,7 +29,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Backend falso: usuários por servidor, senha de servidor opcional, sessão por cookie. */
-private class FakeBackend(private val serverPassword: String? = null) {
+internal class FakeBackend(private val serverPassword: String? = null) {
     val users = mutableMapOf("ana" to "Senha@123", "bia" to "Senha@456")
     val loggedOut = mutableListOf<String>()
 
@@ -60,6 +60,18 @@ private class FakeBackend(private val serverPassword: String? = null) {
                     serverPassword != null && cookie != "temp" -> denied("Servidor não público")
                     users[user] != field("password") -> denied("Credenciais inválidas")
                     else -> json("""{"user":{"id":"id-$user","username":"$user"}}""", setCookie = "jwt-$host-$user")
+                }
+            }
+            "/auth/register" -> {
+                val user = field("username").orEmpty()
+                when {
+                    serverPassword != null && cookie != "temp" -> denied("Servidor não público")
+                    user in users -> json("""{"type":"t","title":"Conflito","status":409,"detail":"Username já existe"}""", HttpStatusCode.Conflict)
+                    else -> {
+                        users[user] = field("password").orEmpty()
+                        // Como no backend real: 201 sem cookie; é preciso entrar em seguida.
+                        json("""{"id":"id-$user","username":"$user"}""", HttpStatusCode.Created)
+                    }
                 }
             }
             "/auth/whoami" -> {
