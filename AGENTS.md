@@ -4,7 +4,7 @@ This file defines how to work in this repository. Read it before changing files.
 
 ## Project
 
-Papo Mobile is the Android client for Papo, a self-hosted chat service. The service contract is in `openapi.yml`, a copy of the backend's file. `releases/README.md` describes versions and the release process.
+Papo Mobile is the Android client for Papo, a self-hosted chat service. The service contract is in `openapi.yml`, a copy of the backend's file. `README.md` covers what the app does, installation and building, with a Portuguese version in `README.pt-BR.md`; `releases/README.md` describes versions and the release process. The code is licensed under the AGPL-3.0 (`LICENSE`).
 
 The app is written in Kotlin with Kotlin Multiplatform and Compose Multiplatform. Only the Android target is built; the iOS targets are declared so that shared code compiles against the common standard library, and they have no implementation yet. The main dependencies are Ktor (HTTP and WebSocket), kotlinx.serialization, SQLDelight over SQLCipher, AndroidX Biometric and libwebrtc (`stream-webrtc-android`). Versions are in `gradle/libs.versions.toml`.
 
@@ -14,7 +14,7 @@ There are host unit tests that run on the JVM with a mocked HTTP engine and an i
 
 ## Working rules
 
-1. Read the relevant parts of `openapi.yml` and `releases/README.md` before proposing or implementing a change.
+1. Read `README.md` and the relevant parts of `openapi.yml` and `releases/README.md` before proposing or implementing a change.
 2. Keep each change limited to the work in progress. Do not mix in future features or unrelated refactoring.
 3. Do not invent endpoints, fields, events, permissions or synchronization guarantees. When the specification does not define a behavior, record the gap and choose a solution that does not promise support the backend lacks. Changes to `openapi.yml` require confirmation of the backend's behavior.
 4. Treat each account as an isolated context. An account is the pair (server address, user). Cookies, session state, the database, the media cache and the WebSocket of one account are never shared with another, including two accounts on the same server. The same UUID on different servers names different entities.
@@ -24,7 +24,7 @@ There are host unit tests that run on the JVM with a mocked HTTP engine and an i
 8. Everything the app stores on the device stays encrypted: structured data in SQLCipher databases and media in the encrypted cache, with keys derived from the master key held by the Android Keystore. Do not add plaintext files, plaintext preferences holding user data, or an unencrypted disk cache from a library.
 9. Platform features go behind an interface in `commonMain` with the implementation in `androidMain`. Do not use Android or Java APIs in `commonMain`; the build fails if you do, because the iOS targets are declared.
 10. Text shown to the user lives in `shared/src/commonMain/composeResources/values/strings.xml`, in Portuguese. Do not hard-code interface text in Kotlin. Write code comments in the language already used in the file you are editing.
-11. Keep documentation and release notes consistent with what is actually implemented. Do not describe a feature as available before it works.
+11. Keep documentation and release notes consistent with what is actually implemented. Do not describe a feature as available before it works. `README.md` and `README.pt-BR.md` say the same thing: change both in the same commit, including the feature list, the limitations and the commands.
 12. Prefer small, reviewable changes. Do not declare a change finished without meeting its acceptance criteria and recording evidence.
 13. Use existing libraries for new functionality. Before writing your own implementation, check whether the project's dependencies already provide it; if not, look for a library that supports Kotlin Multiplatform, or Android behind a platform interface. Weigh maintenance, license, documentation and integration cost, and check the current version instead of assuming one. Write it from scratch only when no library fits, and record the technical reason.
 14. Write every commit message in English, title and body.
