@@ -1,17 +1,17 @@
 name: CI
 run-name: >-
-  ${{ github.event_name == 'pull_request' && format('CI do PR #{0}', github.event.pull_request.number) || format('CI de {0}', inputs.ref || github.ref_name) }}
+  ${{ github.event_name == 'pull_request' && format('CI for PR #{0}', github.event.pull_request.number) || format('CI on {0}', inputs.ref || github.ref_name) }}
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
-  # A release chama este workflow inteiro antes de publicar.
+  # The release calls this whole workflow before publishing.
   workflow_call:
     inputs:
       ref:
-        description: Commit ou tag a testar; vazio usa o do evento.
+        description: Commit or tag to test; empty uses the one from the event.
         type: string
         default: ''
 permissions:
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   quality:
-    name: Release e workflows
+    name: Release script and workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -29,18 +29,18 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
-      - name: Testes do script de release
+      - name: Test the release script
         run: python3 -m unittest discover -s tools/tests -v
-      - name: Mudança de versão acompanha as notas
+      - name: Check that a version change comes with its notes
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/release.py changed-since "$BASE_SHA"
-      - name: Workflows válidos
+      - name: Lint the workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
   unit:
-    name: Testes de unidade, lint e build
+    name: Unit tests, lint and build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -52,15 +52,15 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-      - name: Aceitar as licenças do Android SDK
+      - name: Accept the Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-      - name: Testes de unidade, lint e APK de debug
+      - name: Run unit tests, lint and build the debug APK
         run: ./gradlew :shared:testAndroidHostTest :androidApp:lintDebug :androidApp:assembleDebug --console=plain
-      - name: Guardar relatórios
+      - name: Keep the reports
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: relatorios-unit
+          name: unit-reports
           path: |
             shared/build/reports/tests/
             androidApp/build/reports/
@@ -68,7 +68,7 @@ jobs:
           retention-days: 7
 
   device:
-    name: Testes no emulador
+    name: Emulator tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -80,17 +80,17 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-      - name: Aceitar as licenças do Android SDK
+      - name: Accept the Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-      - name: Liberar o KVM para o emulador
+      - name: Enable KVM for the emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Compilar o app e os testes instrumentados
+      - name: Build the app and the instrumented tests
         run: ./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest --console=plain
-      # Keystore de verdade e SQLCipher nativo: só dá para testar num aparelho.
-      - name: Testes instrumentados
+      # The real Keystore and native SQLCipher can only be tested on a device.
+      - name: Run the instrumented tests
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 34
@@ -100,20 +100,20 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           script: tools/dev/run-device-tests.sh emulator-5554
 
-  # Portão único: é o que a proteção da branch e a release exigem.
+  # Single gate: this is what branch protection and the release require.
   required:
-    name: CI completo
+    name: Full CI
     if: always()
     needs: [quality, unit, device]
     runs-on: ubuntu-24.04
     steps:
-      - name: Conferir os resultados
+      - name: Check the results
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           for result in $RESULTS; do
             if [ "$result" != success ]; then
-              echo "::error::Nem todos os jobs passaram: $RESULTS"
+              echo "::error::Not every job passed: $RESULTS"
               exit 1
             fi
           done

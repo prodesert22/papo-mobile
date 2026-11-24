@@ -1,13 +1,14 @@
 name: Release
 run-name: >-
-  ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || format('Release manual a partir de {0}', github.ref_name) }}
+  ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || format('Manual release from {0}', github.ref_name) }}
 on:
-  # Enviar a tag publica a versão: `git tag v1.0.1 && git push origin v1.0.1`.
+  # Pushing the tag publishes the version:
+  # `git tag -a v1.0.1 -m "Papo Mobile 1.0.1" && git push origin v1.0.1`.
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'
-  # Disparo manual: lê `papo.version` do ref escolhido e cria a tag.
+  # Manual run: reads `papo.version` from the chosen ref and creates the tag.
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,11 +17,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   identity:
-    name: Identificar a versão
+    name: Identify the version
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write # o disparo manual cria a tag
+      contents: write # a manual run creates the tag
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
       version: ${{ steps.identity.outputs.version }}
@@ -31,14 +32,14 @@ jobs:
         with:
           fetch-depth: 0
       - id: identity
-        name: Validar tag, versão e notas
+        name: Validate the tag, the version and the notes
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # A versão final só sai de um commit da main; garante a referência para conferir.
+          # A final version only ships from a commit on main; make sure the reference exists to check it.
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
 
           if [ "$EVENT" = push ]; then
@@ -46,13 +47,13 @@ jobs:
           else
             tag="v$(python3 tools/release.py version)"
           fi
-          # Confere antes de gastar o CI: a tag bate com papo.version e as notas existem.
+          # Check before spending CI time: the tag matches papo.version and the notes exist.
           version="$(python3 tools/release.py check "$tag" --require-main)"
 
-          # Uma release publicada nunca é substituída.
+          # A published release is never replaced.
           if state="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)"; then
             if [ "$state" != true ]; then
-              echo "::error::A release $tag já foi publicada. Para corrigir, lance uma nova versão."
+              echo "::error::Release $tag is already published. To fix it, release a new version."
               exit 1
             fi
           fi
@@ -61,11 +62,11 @@ jobs:
             head="$(git rev-parse HEAD)"
             if existing="$(git rev-parse --quiet --verify "refs/tags/$tag^{commit}")"; then
               if [ "$existing" != "$head" ]; then
-                echo "::error::A tag $tag já existe em outro commit ($existing)."
+                echo "::error::Tag $tag already exists on another commit ($existing)."
                 exit 1
               fi
             else
-              # Tag criada com o token do workflow não dispara este workflow de novo.
+              # A tag created with the workflow token does not trigger this workflow again.
               git tag "$tag" "$head"
               git push origin "refs/tags/$tag"
             fi
@@ -86,7 +87,7 @@ jobs:
       ref: ${{ needs.identity.outputs.tag }}
 
   build:
-    name: Compilar os APKs
+    name: Build the APKs
     needs: [identity, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -99,9 +100,9 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-      - name: Aceitar as licenças do Android SDK
+      - name: Accept the Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-      - name: Preparar a keystore de release
+      - name: Prepare the release keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -115,22 +116,22 @@ jobs:
           [ -n "$KEY_ALIAS" ] || missing="$missing RELEASE_KEY_ALIAS"
           [ -n "$KEY_PASSWORD" ] || missing="$missing RELEASE_KEY_PASSWORD"
           if [ -n "$missing" ]; then
-            echo "::error::Faltam secrets de assinatura:$missing. Rode tools/dev/setup-release-signing.sh --secrets."
+            echo "::error::Missing signing secrets:$missing. Run tools/dev/setup-release-signing.sh --secrets."
             exit 1
           fi
           printf %s "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-      - name: Compilar os APKs assinados
+      - name: Build the signed APKs
         env:
           PAPO_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
           PAPO_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           PAPO_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           PAPO_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-        # Sem cache de configuração: ele guardaria em disco os valores lidos do ambiente, senhas incluídas.
+        # No configuration cache: it would store on disk the values read from the environment, passwords included.
         run: ./gradlew :androidApp:assembleRelease -Ppapo.abiSplits=true --no-configuration-cache --console=plain
-      - name: Apagar a keystore
+      - name: Delete the keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
-      - name: Conferir e nomear os APKs
+      - name: Verify and name the APKs
         env:
           VERSION: ${{ needs.identity.outputs.version }}
         run: |
@@ -141,14 +142,14 @@ jobs:
           for abi in arm64-v8a armeabi-v7a x86_64 universal; do
             apk="androidApp/build/outputs/apk/release/androidApp-$abi-release.apk"
             if [ ! -f "$apk" ]; then
-              echo "::error::Não encontrei $apk (um APK sem assinatura teria o sufixo -unsigned)."
+              echo "::error::$apk was not found (an unsigned APK would carry the -unsigned suffix)."
               exit 1
             fi
             "$build_tools/apksigner" verify "$apk"
             badging="$("$build_tools/aapt2" dump badging "$apk")"
-            # O Gradle e o release.py calculam a versão cada um por si; têm de concordar.
+            # Gradle and release.py each compute the version on their own; they must agree.
             if ! grep -q "versionName='$VERSION'" <<< "$badging" || ! grep -q "versionCode='$code'" <<< "$badging"; then
-              echo "::error::$apk não é da versão $VERSION (versionCode $code)."
+              echo "::error::$apk is not version $VERSION (versionCode $code)."
               exit 1
             fi
             cp "$apk" "dist/papo-mobile-$VERSION-$abi.apk"
@@ -162,7 +163,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publicar a release
+    name: Publish the release
     needs: [identity, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -172,12 +173,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.identity.outputs.tag }}
-          fetch-depth: 0 # as tags anteriores definem o link de comparação
+          fetch-depth: 0 # the earlier tags define the comparison link
       - uses: actions/download-artifact@v8
         with:
           name: release-apks
           path: dist
-      - name: Publicar
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.identity.outputs.tag }}
@@ -189,7 +190,7 @@ jobs:
           notes="$RUNNER_TEMP/notes.md"
           python3 tools/release.py notes "$TAG" --repo "$GITHUB_REPOSITORY" > "$notes"
 
-          # Um beta é marcado como pré-release e nunca vira a versão mais recente.
+          # A beta is marked as a pre-release and never becomes the latest version.
           if [ "$PRERELEASE" = true ]; then
             kind=(--prerelease)
             latest=(--prerelease --latest=false)
@@ -200,12 +201,12 @@ jobs:
 
           if state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)"; then
             if [ "$state" != true ]; then
-              echo "::error::A release $TAG já foi publicada."
+              echo "::error::Release $TAG is already published."
               exit 1
             fi
           else
             gh release create "$TAG" --draft "${kind[@]}" --verify-tag --title "$TITLE" --notes-file "$notes"
           fi
-          # Só deixa de ser rascunho depois que todos os arquivos subiram.
+          # It only stops being a draft after every file has been uploaded.
           gh release upload "$TAG" dist/* --clobber
           gh release edit "$TAG" --title "$TITLE" --notes-file "$notes" --draft=false "${latest[@]}"

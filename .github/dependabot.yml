@@ -1,5 +1,5 @@
-# As actions de terceiros são fixadas pelo SHA do commit, porque uma tag pode ser
-# movida para outro código. O Dependabot propõe as atualizações desses SHAs.
+# Third-party actions are pinned to a commit SHA, because a tag can be moved to
+# different code. Dependabot proposes the updates to those SHAs.
 version: 2
 updates:
   - package-ecosystem: github-actions
