@@ -220,6 +220,47 @@ class SemPermissoesTest(FakeTestCase):
         self.assertFalse([e for e in seen if e["type"] == "error"])
 
 
+class EmojisAnimadosTest(FakeTestCase):
+    """Os emojis do servidor falso incluem um GIF e um WebP animados, para ver a animação do app."""
+
+    def emojis(self):
+        ana, found, last_id = self.login("ana"), [], None
+        while True:
+            status, page = ana.call("GET", "/emojis" + (f"?last_id={last_id}" if last_id else ""))
+            self.assertEqual(200, status)
+            found += page["emojis"]
+            if not page["has_more"]:
+                return found
+            last_id = page["emojis"][-1]["id"]
+
+    def test_o_total_continua_duzentos_e_so_dois_nao_sao_png(self):
+        emojis = self.emojis()
+        self.assertEqual(200, len(emojis))
+        self.assertEqual({"party_gif": "GIF", "wave_webp": "WEBP"}, {e["name"]: e["format"] for e in emojis if e["format"] != "PNG"})
+
+    def test_o_gif_tem_tres_quadros_e_cabe_em_quatro_kb(self):
+        blob = base64.b64decode(next(e for e in self.emojis() if e["name"] == "party_gif")["image_blob"])
+        self.assertTrue(blob.startswith(b"GIF89a"))
+        self.assertLessEqual(len(blob), 4096)
+        # Cada quadro tem um bloco de controle gráfico (extensão 0xF9) ligado ao descritor de imagem (0x2C).
+        self.assertEqual(3, blob.count(b"\x21\xf9\x04"))
+
+    def test_o_webp_tem_animacao_ligada_e_tres_quadros_e_cabe_em_quatro_kb(self):
+        blob = base64.b64decode(next(e for e in self.emojis() if e["name"] == "wave_webp")["image_blob"])
+        self.assertEqual((b"RIFF", b"WEBP", b"VP8X"), (blob[:4], blob[8:12], blob[12:16]))
+        self.assertTrue(blob[20] & 0x02, "bit de animação do VP8X")
+        self.assertLessEqual(len(blob), 4096)
+        self.assertEqual(3, blob.count(b"ANMF"))
+
+    def test_as_mensagens_de_exemplo_usam_os_dois(self):
+        ana = self.login("ana")
+        papo = self.channel("papo", ana)["id"]
+        _, body = ana.call("GET", f"/channels/{papo}/messages")
+        texts = [m["content"] for m in body["messages"]]
+        self.assertTrue(any(":party_gif:" in t and ":wave_webp:" in t for t in texts))
+        self.assertIn(":party_gif:", texts)
+
+
 class CenarioDemoTest(FakeTestCase):
     permissions = "demo"
 

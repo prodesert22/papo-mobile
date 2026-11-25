@@ -103,6 +103,35 @@ def noisy_png(r, g, b, size=96):
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
+# Emojis animados do servidor falso: três quadros de 64x64 (um disco vermelho, amarelo e verde sobre fundo transparente),
+# com menos de 1 KB cada. O GIF vem do Pillow (`save_all`, `loop=0`, `disposal=2`) e o WebP do ffmpeg
+# (`-framerate 4 -i f%d.png -c:v libwebp_anim -lossless 1 -loop 0`).
+ANIMATED_EMOJIS = {
+    "party_gif": ("GIF", (
+        "R0lGODlhQABAAIEAAAAAAP9GRgAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQJGQAAACwAAAAAQABAAAAI2AABCBxIsKDB"
+        "gwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyARBhhJkmTIiSVTqjzZUKXLlSwPvpwJM6ZAmjhL2gSQs+fImD6DngxKFCTR"
+        "ox6PKu2oFOnGpks1QnWKcWrUi1apWsxaFCvXrhW/gqUoVujWsj29osWpdu3Mtm5dwo2bci5dk3bpZrxb8yxfvFX/BngqmONf"
+        "pnyT6v0YdyhaoGJ3ft150yplgk0vy/SpeeHbzqBDix5NujRlwVM3o76KeTXrga5fV45ttiDtsbBvczbNu3fogAAh+QQJGQAA"
+        "ACwAAAAAQABAAIEAAAD/yCgAAAAAAAAI2AABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyAhBhhJkmTIiSVT"
+        "qjzZUKXLlSwPvpwJM6ZAmjhL2gSQs+fImD6DngxKFCTRox6PKu2oFOnGpks1QnWKcWrUi1apWsxaFCvXrhW/gqUoVujWsj29"
+        "osWpdu3Mtm5dwo2bci5dk3bpZrxb8yxfvFX/BngqmONfpnyT6v0YdyhaoGJ3ft150yplgk0vy/SpeeHbzqBDix5NujRjwVA3"
+        "o76KeTXrga5fV45ttiDtsbBvczbNu3fogAAh+QQJGQAAACwAAAAAQABAAIEAAAA8yHgAAAAAAAAI2AABCBxIsKDBgwgTKlzI"
+        "sKHDhxAjSpxIsaLFixgzatzIsaPHjyAxBhhJkmTIiSVTqjzZUKXLlSwPvpwJM6ZAmjhL2gSQs+fImD6DngxKFCTRox6PKu2o"
+        "FOnGpks1QnUqcipVi1avVsxa9CLXrli/+qwqNifZsjTPon2pdm3NrW5nto1r0itdlxnvvoWrt67dvj/zAn46mPBdpnqT0jXq"
+        "dihaoGJ3ft150yplgk0vyxyrWaHczqBDix5NuvRfwFELooa6ebXWyq7BYo4teyDt2rBvmzXNu3fogAA7"
+    )),
+    "wave_webp": ("WEBP", (
+        "UklGRt4BAABXRUJQVlA4WAoAAAASAAAAPwAAPwAAQU5JTQYAAAD/////AABBTk1GjAAAAAIAAAQAADgAADQAAPoAAAJWUDhM"
+        "cwAAAC84AA0QDzBG8z9G8x/wcBNJkiP1a3MhDJSDdgvtoCyEMV+X0fP6AUT0fwKkDJV3ig4bG9AsIewIk11htjtgACup2+aZ"
+        "xQ7PDGvvSIt/MKy9Y7HDM902z8hWku6AJF1htiNMlhA2oFmHjemOyozqW6lX3wcAQU5NRowAAAACAAAEAAA4AAA0AAD6AAAC"
+        "VlA4THMAAAAvOAANEA8wyPM/KPMf8HATSZIj9WtzIQyUg3YL7aAshDFfl9Hz+gFE9H8CJGWovFN02NiAZglhR5jsCrPdAQNY"
+        "Sd02zyx2eGZYe0da/INh7R2LHZ7ptnlGtpJ0ByTpCrMdYbKEsAHNOmxMd1RmVF9Kvfo+AEFOTUaKAAAAAgAABAAAOwAANAAA"
+        "+gAAAlZQOExyAAAALzsADRAPMMjDM3jzH/BwFEmS4/QZSc+FsFAO2i20g7IQ5ilfjx55AYjo/wRIUlSld5IGk3UoFlDtCItd"
+        "YbU7YACD1Gx6ZrPDM93KO+Jv9Ldtdnim2fSMbJB0ByTpCqsdYbGAah2KNZhMd5RGzb6TfPg+"
+    )),
+}
+
+
 def stamp():
     SEQ[0] += 1
     return (datetime(2026, 11, 24, 12, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=SEQ[0])).isoformat().replace("+00:00", "Z")
@@ -1088,17 +1117,25 @@ if __name__ == "__main__":
     # Emojis do servidor: 5 com nome de verdade e o resto para passar de duas páginas.
     palette = [(255, 99, 71), (60, 179, 113), (65, 105, 225), (218, 165, 32), (186, 85, 211)]
     # 200 emojis: 8 páginas, uns 8 s de carga no app (que espaça as páginas), para ver o carregamento.
-    names = ["party_parrot", "ok_hand", "blob_wave", "cat_vibe", "check_ok"] + ["emoji_%03d" % i for i in range(6, 201)]
+    # Os dois animados (GIF e WebP) ocupam as vagas 6 e 7 e não mudam o total de 200.
+    names = ["party_parrot", "ok_hand", "blob_wave", "cat_vibe", "check_ok", *ANIMATED_EMOJIS] + ["emoji_%03d" % i for i in range(8, 201)]
     for i, name in enumerate(names):
         r, g, b = palette[i % len(palette)]
-        EMOJIS.append({"id": str(uuid.uuid4()), "name": name, "format": "PNG",
-                       # FAKE_EMOJI_SMALL=1 usa imagens minúsculas, para separar o custo dos dados do resto da carga.
-                       "image_blob": base64.b64encode(png(r, g, b, 32, 32) if os.environ.get("FAKE_EMOJI_SMALL") else noisy_png((r + i * 7) % 256, g, b)).decode(),
+        if name in ANIMATED_EMOJIS:
+            image_format, image_blob = ANIMATED_EMOJIS[name]
+        else:
+            image_format = "PNG"
+            # FAKE_EMOJI_SMALL=1 usa imagens minúsculas, para separar o custo dos dados do resto da carga.
+            image_blob = base64.b64encode(png(r, g, b, 32, 32) if os.environ.get("FAKE_EMOJI_SMALL") else noisy_png((r + i * 7) % 256, g, b)).decode()
+        EMOJIS.append({"id": str(uuid.uuid4()), "name": name, "format": image_format, "image_blob": image_blob,
                        "created_at": "2026-02-%02dT10:%02d:%02dZ" % (1 + i // 60, (i // 60) % 60, i % 60)})
     parrot, ok = EMOJIS[0]["id"], EMOJIS[1]["id"]
     new_message(PAPO, uid("bia"), "Chegou o emoji novo :party_parrot: e este também :ok_hand: mas :nao_existe: não")
     new_message(PAPO, uid("caio"), ":party_parrot:")
     new_message(PAPO, uid("bia"), "😀🎉👍")
+    # Emojis animados (GIF e WebP): no meio do texto, e sozinhos, quando aparecem maiores.
+    new_message(PAPO, uid("bia"), "Agora o emoji anima :party_gif: no meio do texto e também :wave_webp: de outro formato")
+    new_message(PAPO, uid("caio"), ":party_gif:")
     new_message(PAPO, uid("caio"), "em código `:party_parrot:` não vira imagem, **negrito :ok_hand:** vira")
     reacted = new_message(PAPO, uid("bia"), "reaja com um emoji do servidor")
     react(reacted, (parrot, None), uid("bia"), "2026-11-24T12:30:00Z")
