@@ -13,6 +13,7 @@ import re
 import struct
 import sys
 import threading
+import unicodedata
 import uuid
 import zlib
 from datetime import datetime, timedelta, timezone
@@ -69,12 +70,77 @@ def name_of(user_id):
     return next((n for n, u in USERS.items() if u["id"] == user_id), None)
 
 
-def new_message(channel_id, author_id, content, reply_to=None, attachments=None):
+def new_message(channel_id, author_id, content, reply_to=None, attachments=None, created_at=None, external_author=None):
     m = {"id": str(uuid.uuid4()), "channel_id": channel_id, "author_id": author_id, "content": content,
-         "created_at": stamp(), "edited_at": None, "reply_to": reply_to, "webhook_id": None, "external_author": None,
+         "created_at": created_at or stamp(), "edited_at": None, "reply_to": reply_to,
+         "webhook_id": str(uuid.uuid4()) if external_author else None, "external_author": external_author,
          "attachments": attachments or [], "embeds": [], "reactions": {}, }
     MESSAGES.setdefault(channel_id, []).append(m)
     return m
+
+
+def fold(text):
+    return "".join(c for c in unicodedata.normalize("NFD", text.lower()) if unicodedata.category(c) != "Mn")
+
+
+def search_messages(data, query, me):
+    """POST /search como na OpenAPI. Devolve o corpo da resposta, ou None se o pedido é inválido.
+
+    O backend real usa busca textual do Postgres em português (com radicais);
+    aqui um termo casa quando aparece em qualquer lugar do texto, sem acento.
+    """
+    text = (data.get("text") or "").strip()
+    author, channel_id, mention = data.get("author") or "", data.get("channel_id") or "", data.get("mention") or ""
+    has, order, attached = data.get("has") or "", data.get("order") or "desc", data.get("contains_attachment")
+    start, end = data.get("date_start") or "", data.get("date_end") or ""
+    since, last_id = query.get("since", [""])[0], query.get("last_id", [""])[0]
+    if not (text or author or channel_id or mention or has or start or end or attached is not None):
+        return None
+    if has not in ("", "link") or order not in ("asc", "desc") or bool(since) != bool(last_id):
+        return None
+    try:
+        for value in (channel_id, mention):
+            if value:
+                uuid.UUID(value)
+        first = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc) if start else None
+        # date_end é inclusivo: o limite é o começo do dia seguinte, em UTC.
+        limit = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1) if end else None
+    except ValueError:
+        return None
+    if first and limit and first >= limit:
+        return None
+
+    # Sem channel_id, as conversas diretas ficam de fora; com ele, uma DM só entra se o usuário participa dela.
+    if channel_id:
+        channels = [channel_id] if channel_id not in DMS or me in DMS[channel_id] else []
+    else:
+        channels = [c["id"] for c in CHANNELS]
+    names = {c["id"]: c["name"] for c in CHANNELS}
+    terms = [fold(t) for t in text.split()]
+    token = "@mention(<@%s>)" % mention.lower()
+    found = []
+    for cid in channels:
+        for m in MESSAGES.get(cid, []):
+            content = m["content"] or ""
+            when = datetime.fromisoformat(m["created_at"].replace("Z", "+00:00"))
+            hits = sum(1 for t in terms if t in fold(content))
+            if (terms and not hits) or (author and m["author_id"] != author) or (mention and token not in content.lower()):
+                continue
+            if (has and not re.search(r"https?://", content, re.I)) or (first and when < first) or (limit and when >= limit):
+                continue
+            if attached is not None and bool(m["attachments"]) != attached:
+                continue
+            external = m["external_author"]
+            found.append({"type": "message", "id": m["id"], "content": m["content"], "channel_id": cid,
+                          "channel_name": names.get(cid, ""), "author_id": m["author_id"],
+                          "author_username": name_of(m["author_id"]) or (external or {}).get("name"),
+                          "webhook_id": m["webhook_id"], "external_author": external, "created_at": m["created_at"],
+                          **({"score": round(hits / len(terms), 3)} if terms else {})})
+    desc = order == "desc"
+    found.sort(key=lambda r: (r["created_at"], r["id"]), reverse=desc)
+    if since:
+        found = [r for r in found if ((r["created_at"], r["id"]) < (since, last_id) if desc else (r["created_at"], r["id"]) > (since, last_id))]
+    return {"results": found[:100], "has_more": len(found) > 100}
 
 
 def view(m, user_id=None):
@@ -328,6 +394,11 @@ class Handler(BaseHTTPRequestHandler):
                     emit({"type": "dm_update", "dm": dm_view(m["channel_id"], u)}, only={u})
             return self.send(201, view(m, me))
         data = self.body()
+        if method == "POST" and path == "/search":
+            found = search_messages(data, parse_qs(url.query), me)
+            if found is None:
+                return self.problem(400, "Parâmetro inválido", "pelo menos 1 filtro é obrigatório; since e last_id devem ser informados juntos")
+            return self.send(200, found)
         if method == "POST" and path == "/dms":
             other = data["user_id"]
             dm_id = next((d for d, pair in DMS.items() if set(pair) == {me, other}), None)
@@ -461,8 +532,12 @@ if __name__ == "__main__":
     USERS["bia"] = {"id": str(uuid.uuid4()), "password": "Senha@456", "created": "2026-01-02T00:00:00Z", "nickname": "Bia Borges",
                     "roles": [{"id": str(uuid.uuid4()), "name": "Admin", "color": "#E86CA5"}]}
     USERS["caio"] = {"id": str(uuid.uuid4()), "password": "Senha@789", "created": "2026-01-03T00:00:00Z"}
-    for i in range(1, 76):
-        new_message(PAPO, uid("bia" if i % 3 else "caio"), "mensagem antiga número %d" % i)
+    # Histórico longo e espalhado por vários dias: dá para paginar a conversa, a busca e os filtros de data.
+    old = datetime(2026, 11, 10, 9, 0, 0, tzinfo=timezone.utc)
+    for i in range(1, 261):
+        when = (old + timedelta(hours=i)).isoformat().replace("+00:00", "Z")
+        new_message(PAPO, uid("bia" if i % 3 else "caio"), "mensagem antiga número %d" % i, created_at=when)
+    new_message(PAPO, None, "Deploy da versão 1.4 concluído em produção.", external_author={"name": "Robô de Deploy"})
     first = new_message(PAPO, uid("caio"), "Alguém viu o deploy de ontem? https://papo.example.com/status")
     aid = str(uuid.uuid4())
     FILES[aid] = ("image/png", png(255, 178, 56))
@@ -471,5 +546,10 @@ if __name__ == "__main__":
                               "thumbnail_id": aid, "thumbnail_width": 96, "thumbnail_height": 64, "moderation_status": "clean"}])
     first["reactions"]["👍"] = {uid("bia")}
     new_message(CHANNELS[2]["id"], uid("bia"), "Manutenção no sábado às 10h.")
+    # Uma conversa direta já existente: a busca geral não a alcança, só a busca com channel_id.
+    dm = str(uuid.uuid4())
+    DMS[dm] = (uid("ana"), uid("bia"))
+    new_message(dm, uid("bia"), "Ana, o deploy de ontem passou nos testes?")
+    new_message(dm, uid("ana"), "Passou! Só faltou atualizar a documentação.")
     print(f"{NAME} em http://0.0.0.0:{PORT}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
