@@ -186,6 +186,7 @@
     <string name="msg_delete_title">Apagar esta mensagem?</string>
     <string name="msg_delete_body">Ela some para todo mundo e não dá para desfazer.</string>
     <string name="msg_download">Baixar</string>
+    <string name="msg_select">Selecionar texto</string>
 
     <!-- Busca -->
     <string name="search_title">Buscar mensagens</string>

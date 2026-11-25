@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -163,6 +164,7 @@ import chat.papo.mobile.resources.msg_delete_title
 import chat.papo.mobile.resources.msg_edit
 import chat.papo.mobile.resources.msg_pin
 import chat.papo.mobile.resources.msg_reply
+import chat.papo.mobile.resources.msg_select
 import chat.papo.mobile.resources.msg_unpin
 import chat.papo.mobile.resources.presence_away
 import chat.papo.mobile.resources.presence_busy
@@ -221,6 +223,7 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
     var reactingTo by remember { mutableStateOf<Message?>(null) }
+    var selecting by remember { mutableStateOf<Message?>(null) }
     var columnPx by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
     var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
@@ -445,6 +448,7 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
         MessageActionsSheet(
             session = session,
             message = message,
+            users = users,
             mine = message.authorId == session.userId,
             canPin = channel != null,
             pinned = isPinned,
@@ -462,6 +466,17 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
             },
             onDelete = { confirmDelete = message },
             onTogglePin = { viewModel.setPinned(message, !isPinned) },
+            onSelectText = { selecting = message },
+        )
+    }
+    selecting?.let { message ->
+        SelectTextSheet(
+            session = session,
+            content = message.content,
+            users = users,
+            emojiIds = serverEmojis.idByName,
+            unicodeEmojis = unicodeEmojis,
+            onDismiss = { selecting = null },
         )
     }
     confirmDelete?.let { message ->
@@ -923,6 +938,7 @@ private fun insertAtCursor(value: TextFieldValue, text: String): TextFieldValue 
 private fun MessageActionsSheet(
     session: AccountSession,
     message: Message,
+    users: Map<String, User>,
     mine: Boolean,
     canPin: Boolean,
     pinned: Boolean,
@@ -933,6 +949,7 @@ private fun MessageActionsSheet(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
+    onSelectText: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
@@ -970,7 +987,11 @@ private fun MessageActionsSheet(
             SheetAction(Icons.AutoMirrored.Filled.Reply, stringResource(Res.string.msg_reply)) { onReply(); onDismiss() }
             if (message.content.isNotBlank()) {
                 SheetAction(Icons.Filled.ContentCopy, stringResource(Res.string.msg_copy)) {
-                    clipboard.setText(AnnotatedString(message.content))
+                    clipboard.setText(AnnotatedString(copyableText(message.content, users)))
+                    onDismiss()
+                }
+                SheetAction(Icons.Filled.SelectAll, stringResource(Res.string.msg_select)) {
+                    onSelectText()
                     onDismiss()
                 }
             }
