@@ -36,6 +36,19 @@ Para mudar ao vivo, entre como o dono e use as rotas da OpenAPI (com cookie), qu
 `POST /users/{id}/roles` e `DELETE /users/{id}/roles/{role_id}` (`role_add`/`role_remove`),
 `PUT /channels/{id}/permissions/{role_id}` e `DELETE /channels/{id}/role/{role_id}` (`channel_update`).
 Os ids dos cargos são fixos (derivados do nome) e saem na linha de partida, junto com os dos usuários.
+
+Vídeos anexados (tudo desligado por padrão; sem estas variáveis o fake responde como sempre). `GET /attachments/{id}`
+atende `Range` como o `http.ServeContent` do servidor: 206 com `Content-Range` para um trecho (`N-M`, `N-`, `-N`), 200 sem
+`Range` (ou com vários trechos, que o fake não monta em multipart), 416 com `Content-Range: bytes */tamanho` para um
+trecho fora do arquivo e 416 para um `Range` ilegível; sempre com `Accept-Ranges: bytes`. O log da linha de comando mostra
+o `Range` e o status de cada pedido, para conferir que buscar no vídeo pede só o trecho novo.
+
+    FAKE_VIDEO_DIR=<pasta>    semeia no `papo` uma mensagem de `bia` para cada .mp4, .webm e .ogv da pasta (com
+                              largura e altura lidas pelo `ffprobe`, se existir) e mais três do menor arquivo:
+                              sensível, em retrato (360x640) e sem dimensões
+    FAKE_VIDEO_KBPS=500       entrega os vídeos a 500 KB/s, para o player ter o que bufferizar
+    FAKE_VIDEO_401_ONCE=N     responde 401 uma vez, no N-ésimo pedido de vídeo desde a partida (1 = o primeiro): o
+                              cliente renova a sessão (`POST /auth/refresh`, que aqui segue valendo) e repete
 """
 import base64
 import hashlib
@@ -44,6 +57,7 @@ import os
 import random
 import re
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -52,6 +66,7 @@ import uuid
 import zlib
 from datetime import datetime, timedelta, timezone
 from email.parser import BytesParser
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -130,6 +145,115 @@ ANIMATED_EMOJIS = {
         "YbU7YACD1Gx6ZrPDM93KO+Jv9Ldtdnim2fSMbJB0ByTpCqsdYbGAah2KNZhMd5RGzb6TfPg+"
     )),
 }
+
+
+# Tipos de vídeo que o servidor aceita como arquivo; o MIME do anexo é farejado no upload, aqui pela extensão.
+VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".ogv": "video/ogg"}
+GENERIC_TYPES = {"", "application/octet-stream"}
+VIDEO = {"kbps": 0.0, "expire_at": 0, "requests": 0}   # FAKE_VIDEO_KBPS, FAKE_VIDEO_401_ONCE e os pedidos de vídeo vistos
+CHUNK = 16384
+
+
+def sniffed_mime(declared, file_name):
+    """O MIME de um anexo: o declarado, ou, se ele é genérico, o do vídeo que a extensão do nome indica."""
+    if declared in GENERIC_TYPES:
+        return VIDEO_TYPES.get(os.path.splitext(file_name or "")[1].lower(), "application/octet-stream")
+    return declared
+
+
+def range_spec(spec, size):
+    """Um item de `Range: bytes=`: (primeiro, último) inclusivos; "beyond" se cai fora do arquivo; None se não é legível."""
+    found = re.fullmatch(r"(\d*)-(\d*)", spec, re.ASCII)
+    if found is None or not any(found.groups()):
+        return None
+    first, last = found.groups()
+    if not first:   # "-N": os N últimos bytes
+        count = min(int(last), size)
+        return (size - count, size - 1) if count else "beyond"
+    if int(first) >= size:
+        return "beyond"
+    if last and int(last) < int(first):
+        return None
+    return int(first), min(int(last), size - 1) if last else size - 1
+
+
+def byte_range(header, size):
+    """Lê o `Range` de um pedido como o `http.ServeContent` do servidor (só a unidade `bytes`).
+
+    Devolve (tipo, trecho): ("partial", (primeiro, último)) com os dois inclusivos; ("full", None) sem `Range` ou com
+    vários trechos (o fake serve o arquivo inteiro, que o HTTP permite, em vez de montar multipart); ("unsatisfiable",
+    None) se nenhum trecho cai dentro do arquivo; ("invalid", None) se o cabeçalho não é legível.
+    """
+    if not header:
+        return "full", None
+    if not header.startswith("bytes="):
+        return "invalid", None
+    spans, beyond = [], False
+    for spec in (item.strip() for item in header[len("bytes="):].split(",") if item.strip()):
+        found = range_spec(spec, size)
+        if found is None:
+            return "invalid", None
+        if found == "beyond":
+            beyond = True
+        else:
+            spans.append(found)
+    if not spans:
+        return ("unsatisfiable", None) if beyond else ("full", None)
+    return ("partial", spans[0]) if len(spans) == 1 else ("full", None)
+
+
+def video_dimensions(path):
+    """Largura e altura do vídeo, lidas do contêiner pelo `ffprobe` (o servidor também as lê do contêiner); (None, None) sem ele."""
+    try:
+        done = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                               "-of", "csv=p=0", str(path)], capture_output=True, text=True, timeout=20)
+        width, height = done.stdout.strip().split(",")
+        return int(width), int(height)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None, None
+
+
+def video_attachment(name, data, mime, width, height, moderation="clean"):
+    """Registra o arquivo de um vídeo e devolve o anexo como o servidor o descreve: sem miniatura, com as dimensões."""
+    aid = str(uuid.uuid4())
+    FILES[aid] = (mime, data)
+    return {"id": aid, "mime_type": mime, "original_file_name": name, "size_bytes": len(data), "width": width, "height": height,
+            "thumbnail_id": None, "thumbnail_width": None, "thumbnail_height": None, "moderation_status": moderation}
+
+
+def seed_videos(folder):
+    """FAKE_VIDEO_DIR: uma mensagem de `bia` no `papo` para cada vídeo da pasta, e três variações dos metadados do menor."""
+    root = Path(folder)
+    files = sorted(p for p in root.iterdir() if p.suffix.lower() in VIDEO_TYPES) if root.is_dir() else []
+    if not files:
+        raise SystemExit("FAKE_VIDEO_DIR: nenhum .mp4, .webm ou .ogv em %s" % folder)
+    loaded = []
+    for path in files:
+        width, height = video_dimensions(path)
+        loaded.append((path.name, path.read_bytes(), VIDEO_TYPES[path.suffix.lower()], width, height))
+        new_message(PAPO, uid("bia"), "vídeo %s" % path.name, attachments=[video_attachment(*loaded[-1])])
+    # Do menor arquivo (e, empatando, do de nome mais curto): as variações não pesam quando alguém as toca.
+    name, data, mime, width, height = min(loaded, key=lambda f: (len(f[1]), len(f[0])))
+    for label, change in (("sensível", {"moderation": "sensitive"}), ("em retrato (360x640)", {"width": 360, "height": 640}),
+                          ("sem dimensões", {"width": None, "height": None})):
+        fields = {"width": width, "height": height, "moderation": "clean", **change}
+        new_message(PAPO, uid("bia"), "vídeo %s %s" % (name, label), attachments=[video_attachment(name, data, mime, **fields)])
+
+
+def video_settings():
+    """Lê FAKE_VIDEO_KBPS e FAKE_VIDEO_401_ONCE; valor ilegível derruba o fake na partida, não no primeiro pedido."""
+    try:
+        VIDEO["kbps"] = float(os.environ.get("FAKE_VIDEO_KBPS") or 0)
+        VIDEO["expire_at"] = int(os.environ.get("FAKE_VIDEO_401_ONCE") or 0)
+    except ValueError as error:
+        raise SystemExit("FAKE_VIDEO_KBPS e FAKE_VIDEO_401_ONCE: valor ilegível (%s)" % error)
+
+
+def video_session_expires():
+    """Conta um pedido de vídeo; é o que FAKE_VIDEO_401_ONCE manda responder 401."""
+    with LOCK:
+        VIDEO["requests"] += 1
+        return VIDEO["requests"] == VIDEO["expire_at"]
 
 
 def stamp():
@@ -535,7 +659,10 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("%s %s\n" % (self.command, self.path))
+        wanted = self.headers.get("Range") if getattr(self, "headers", None) else None
+        # Com `Range` o pedido é de vídeo: o trecho e o status mostram que buscar não baixa o começo de novo.
+        status = " -> %s" % args[1] if wanted and len(args) > 1 else ""
+        sys.stderr.write("%s %s%s%s\n" % (self.command, self.path, " Range: " + wanted if wanted else "", status))
 
     def cookie(self):
         for part in self.headers.get("Cookie", "").split(";"):
@@ -577,12 +704,50 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
         return s
 
-    def raw(self, status, mime, data):
-        self.send_response(status)
+    def attachment(self, file_id):
+        """`GET /attachments/{id}` como o `http.ServeContent` do servidor: 200, 206, 416 e `Accept-Ranges`. Vídeo pode ser
+        entregue devagar (FAKE_VIDEO_KBPS) e ter um 401 simulado (FAKE_VIDEO_401_ONCE)."""
+        mime, data = FILES[file_id]
+        video = mime.startswith("video/")
+        if video and video_session_expires():
+            sys.stderr.write("401 simulado por FAKE_VIDEO_401_ONCE\n")
+            return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+        size = len(data)
+        kind, span = byte_range(self.headers.get("Range", ""), size)
+        if kind in ("invalid", "unsatisfiable"):
+            text = b"invalid range" if kind == "invalid" else b"invalid range: failed to overlap"
+            self.send_response(416)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            if kind == "unsatisfiable":
+                self.send_header("Content-Range", "bytes */%d" % size)
+            self.send_header("Content-Length", str(len(text)))
+            self.end_headers()
+            self.wfile.write(text)
+            return
+        first, last = span if kind == "partial" else (0, size - 1)
+        self.send_response(206 if kind == "partial" else 200)
         self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Accept-Ranges", "bytes")
+        if kind == "partial":
+            self.send_header("Content-Range", "bytes %d-%d/%d" % (first, last, size))
+        self.send_header("Content-Length", str(last - first + 1))
         self.end_headers()
-        self.wfile.write(data)
+        self.stream(data, first, last + 1, VIDEO["kbps"] if video else 0)
+
+    def stream(self, data, start, stop, kbps):
+        """Escreve data[start:stop], no ritmo de `kbps` KB/s se for maior que 0. Quem desiste no meio (buscar em outro ponto
+        fecha a conexão) só encerra esta resposta."""
+        chunk = min(CHUNK, max(1024, int(kbps * 1024 / 20))) if kbps > 0 else CHUNK
+        begin, sent = time.monotonic(), 0
+        try:
+            for offset in range(start, stop, chunk):
+                piece = data[offset:min(offset + chunk, stop)]
+                self.wfile.write(piece)
+                sent += len(piece)
+                if kbps > 0:
+                    time.sleep(max(0.0, begin + sent / (kbps * 1024) - time.monotonic()))
+        except OSError:
+            self.close_connection = True
 
     def websocket(self):
         s = SESSIONS.get(self.cookie())
@@ -656,8 +821,11 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(404, "Não encontrado", "Sem avatar")
             return True
         m = re.fullmatch(r"/attachments/([^/]+)(/thumbnail)?", path)
-        if m and self.cookie() in SESSIONS and m.group(1) in FILES:
-            self.raw(200, *FILES[m.group(1)])
+        if m and self.cookie() not in SESSIONS:
+            self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+            return True
+        if m and m.group(1) in FILES:
+            self.attachment(m.group(1))
             return True
         s = SESSIONS.get(self.cookie())
         if s is None:
@@ -781,7 +949,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = part.get_payload(decode=True)
                 if name == "attachments":
                     aid = str(uuid.uuid4())
-                    mime = part.get_content_type()
+                    mime = sniffed_mime(part.get_content_type(), part.get_filename())
                     FILES[aid] = (mime, data)
                     image = mime.startswith("image/")
                     attachments.append({"id": aid, "mime_type": mime, "original_file_name": part.get_filename() or "arquivo", "size_bytes": len(data),
@@ -1156,6 +1324,9 @@ if __name__ == "__main__":
             # Frações de 0, .25, .5 e .75 s: o Go corta os zeros à direita, então os textos têm tamanhos diferentes.
             moment = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=i // 2, microseconds=(i % 4) * 250000)
             react(crowd, keys[i % 3], uid(name), nano(moment))
+    video_settings()
+    if os.environ.get("FAKE_VIDEO_DIR"):
+        seed_videos(os.environ["FAKE_VIDEO_DIR"])
     if os.environ.get("FAKE_PERMISSIONS"):
         setup_access(permission_spec(os.environ["FAKE_PERMISSIONS"]))
         announce_access()

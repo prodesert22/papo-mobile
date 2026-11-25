@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -40,14 +41,19 @@ def moment(text):
     return datetime.strptime(whole, "%Y-%m-%dT%H:%M:%S") + timedelta(microseconds=int((fraction + "000000")[:6]))
 
 
-def start_fake(extra_env):
+def clean_env():
+    """O ambiente de quem roda os testes, sem as variáveis FAKE_* (que ligariam cenários que o teste não pediu)."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("FAKE_")}
+
+
+def start_fake(extra_env, stderr=subprocess.DEVNULL):
     """Sobe o fake numa porta livre e espera o `/health`; devolve (processo, porta). Tenta outra porta se a escolhida foi tomada."""
-    env = {k: v for k, v in os.environ.items() if k not in ("FAKE_PERMISSIONS", "FAKE_MANY_REACTORS")}
+    env = clean_env()
     env.update({"FAKE_EMOJI_SMALL": "1", **extra_env})
     for _ in range(5):
         port = free_port()
         process = subprocess.Popen([sys.executable, str(FAKE), str(port)], env=env,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   stdout=subprocess.DEVNULL, stderr=stderr)
         while process.poll() is None:
             try:
                 urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=0.2).close()
@@ -83,18 +89,32 @@ class Session:
             return error.code, (json.loads(payload) if payload else None)
 
     def send(self, channel_id, content, file=False):
-        """POST /messages como o app: multipart com `channel_id`, `content` e, se `file`, um anexo."""
+        """POST /messages como o app: multipart com `channel_id`, `content` e, se `file`, um anexo.
+
+        `file` é True (uma nota de texto) ou (nome, tipo declarado, conteúdo).
+        """
         boundary = "b" + uuid.uuid4().hex
-        parts = [("channel_id", None, channel_id), ("content", None, content)]
+        parts = [("channel_id", None, None, channel_id), ("content", None, None, content)]
         if file:
-            parts.append(("attachments", "nota.txt", "texto do anexo"))
+            filename, declared, body = file if isinstance(file, tuple) else ("nota.txt", "text/plain", "texto do anexo")
+            parts.append(("attachments", filename, declared, body))
         raw = b""
-        for name, filename, value in parts:
+        for name, filename, declared, value in parts:
             disposition = f'form-data; name="{name}"' + (f'; filename="{filename}"' if filename else "")
             raw += f"--{boundary}\r\nContent-Disposition: {disposition}\r\n".encode()
-            raw += (b"Content-Type: text/plain\r\n" if filename else b"") + b"\r\n" + value.encode() + b"\r\n"
+            raw += (f"Content-Type: {declared}\r\n".encode() if filename else b"") + b"\r\n" + value.encode() + b"\r\n"
         raw += f"--{boundary}--\r\n".encode()
         return self.call("POST", "/messages", raw=raw, content_type=f"multipart/form-data; boundary={boundary}")
+
+    def fetch(self, path, headers=None):
+        """GET sem ler o corpo como JSON: (status, cabeçalhos, bytes). Erro HTTP também devolve, não levanta."""
+        request = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", headers=headers or {})
+        try:
+            with self.opener.open(request, timeout=5) as response:
+                return response.status, response.headers, response.read()
+        except urllib.error.HTTPError as error:
+            with error:
+                return error.code, error.headers, error.read()
 
     def watch(self):
         return Watcher(self)
@@ -162,10 +182,12 @@ class Watcher:
 
 class FakeTestCase(unittest.TestCase):
     permissions = None  # valor de FAKE_PERMISSIONS, ou None para o fake sem permissões
-    env = {}  # o resto do ambiente do fake (FAKE_MANY_REACTORS, ...)
+    env = {}            # outras variáveis FAKE_* do cenário
+    stderr = subprocess.DEVNULL   # subprocess.PIPE nos testes que leem o log do fake
 
     def setUp(self):
-        self.process, self.port = start_fake({**({"FAKE_PERMISSIONS": self.permissions} if self.permissions else {}), **self.env})
+        self.process, self.port = start_fake(
+            {**self.env, **({"FAKE_PERMISSIONS": self.permissions} if self.permissions else {})}, self.stderr)
         self.addCleanup(self.stop)
         self.watchers = []
         self.addCleanup(lambda: [w.close() for w in self.watchers])
@@ -587,146 +609,246 @@ class SemDonoTest(FakeTestCase):
         self.assertEqual(403, ana.call("DELETE", f"/messages/{sent['id']}")[0])
 
 
-class QuemReagiuTest(FakeTestCase):
-    """`GET .../reactions` do fake sem permissões: o que o app lê para mostrar quem reagiu."""
-
-    def seeded(self, session):
-        """A mensagem do `papo` com 🔥 de caio e o emoji do servidor de bia e caio, e o caminho das reações dela."""
-        papo = self.channel("papo", session)["id"]
-        _, body = session.call("GET", f"/channels/{papo}/messages?limit=100")
-        message = next(m for m in body["messages"] if m["content"] == "reaja com um emoji do servidor")
-        return papo, message, f"/channels/{papo}/messages/{message['id']}/reactions"
-
-    def test_agrupa_por_emoji_da_reacao_mais_nova_para_a_mais_antiga(self):
-        bia, caio = self.login("bia"), self.login("caio")
-        _, message, path = self.seeded(bia)
-        status, body = bia.call("GET", path)
-        self.assertEqual(200, status)
-        self.assertEqual(message["id"], body["message_id"])
-        self.assertFalse(body["has_more"])
-        # A mais nova é o 🔥 de caio: o primeiro grupo é o da primeira linha da página, e o emoji do servidor vem depois.
-        self.assertEqual([None, message["reactions"][0]["emoji_id"]], [g["emoji_id"] for g in body["reactions"]])
-        fire, parrot = body["reactions"]
-        self.assertEqual("🔥", fire["unicode"])
-        self.assertEqual([(1, caio.id)], [(fire["count"], u["user_id"]) for u in fire["users"]])
-        self.assertEqual([caio.id, bia.id], [u["user_id"] for u in parrot["users"]])
-        self.assertEqual(2, parrot["count"])
-        # O horário vai como o Go o escreve: sem os zeros à direita da fração, e sem fração quando ela é zero.
-        self.assertEqual(["2026-11-24T12:30:02.25Z"], [u["created_at"] for u in fire["users"]])
-        self.assertEqual(["2026-11-24T12:30:01.5Z", "2026-11-24T12:30:00Z"], [u["created_at"] for u in parrot["users"]])
-
-    def test_order_asc_inverte_a_ordem(self):
-        bia = self.login("bia")
-        _, _, path = self.seeded(bia)
-        _, body = bia.call("GET", path + "?order=asc")
-        self.assertEqual([None, "🔥"], [g["unicode"] for g in body["reactions"]])
-        self.assertEqual(["2026-11-24T12:30:00Z", "2026-11-24T12:30:01.5Z"], [u["created_at"] for u in body["reactions"][0]["users"]])
-
-    def test_cursor_since_e_last_id_pega_so_o_que_vem_depois_na_ordem(self):
-        bia, caio = self.login("bia"), self.login("caio")
-        _, _, path = self.seeded(bia)
-        _, body = bia.call("GET", path)
-        parrot = body["reactions"][1]["users"]
-        newest_parrot = next(u for u in parrot if u["user_id"] == caio.id)
-        _, older = bia.call("GET", f"{path}?order=desc&since={newest_parrot['created_at']}&last_id={newest_parrot['id']}")
-        self.assertEqual([[bia.id]], [[u["user_id"] for u in g["users"]] for g in older["reactions"]])
-        self.assertFalse(older["has_more"])
-        # `since` sozinho, como no servidor, é "criado depois" mesmo em desc; `last_id` sozinho não filtra nada.
-        _, alone = bia.call("GET", f"{path}?order=desc&since={newest_parrot['created_at']}")
-        self.assertEqual(["🔥"], [g["unicode"] for g in alone["reactions"]])
-        _, no_since = bia.call("GET", f"{path}?last_id={newest_parrot['id']}")
-        self.assertEqual(body, no_since)
-
-    def own_reactions(self, session, channel_id, message_id):
-        _, body = session.call("GET", f"/channels/{channel_id}/messages?limit=100")
-        return next(m for m in body["messages"] if m["id"] == message_id)["user_reactions"]
-
-    def test_reagir_guarda_horario_e_id_que_a_mensagem_e_a_lista_mostram(self):
-        ana = self.login("ana")
-        papo, message, path = self.seeded(ana)
-        self.assertEqual(201, ana.call("POST", path, {"unicode": "👍"})[0])
-        _, body = ana.call("GET", path)
-        mine = next(g for g in body["reactions"] if g["unicode"] == "👍")["users"][0]
-        self.assertEqual(ana.id, mine["user_id"])
-        self.assertRegex(mine["created_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d*[1-9])?Z$")
-        self.assertEqual([mine["id"]], [r["id"] for r in self.own_reactions(ana, papo, message["id"]) if r["unicode"] == "👍"])
-        # Reagir de novo (a rota é idempotente) não troca o id nem o horário; tirar a reação a tira da lista.
-        ana.call("POST", path, {"unicode": "👍"})
-        self.assertEqual(body, ana.call("GET", path)[1])
-        self.assertEqual(204, ana.call("DELETE", path, {"unicode": "👍"})[0])
-        self.assertNotIn("👍", [g["unicode"] for g in ana.call("GET", path)[1]["reactions"]])
-        self.assertEqual([], [r for r in self.own_reactions(ana, papo, message["id"]) if r["unicode"] == "👍"])
-
-    def test_pedidos_invalidos(self):
-        bia = self.login("bia")
-        papo, _, path = self.seeded(bia)
-        self.assertEqual(400, bia.call("GET", path + "?order=sideways")[0])
-        self.assertEqual(400, bia.call("GET", path + "?since=ontem&last_id=x")[0])
-        outro = self.channel("avisos", bia)["id"]
-        _, message = bia.send(papo, "outra")
-        self.assertEqual(404, bia.call("GET", f"/channels/{outro}/messages/{message['id']}/reactions")[0])
-        self.assertEqual(404, bia.call("GET", f"/channels/{papo}/messages/{uuid.uuid4()}/reactions")[0])
-        self.assertEqual(404, bia.call("GET", f"/channels/{uuid.uuid4()}/messages/{message['id']}/reactions")[0])
+# Dois "vídeos" sintéticos: o fake não decodifica nada, só serve bytes. O conteúdo é o índice do byte, para ver que o trecho certo veio.
+CLIP = bytes(range(256)) * 250       # 64000 bytes
+OTHER = bytes(range(255, -1, -1)) * 274   # 70144 bytes
 
 
-class MuitosReagiramTest(FakeTestCase):
-    """`FAKE_MANY_REACTORS=1`: 130 usuários, três emojis intercalados, duas páginas."""
-
-    env = {"FAKE_MANY_REACTORS": "1"}
+class VideoTestCase(FakeTestCase):
+    """Fake com uma pasta de vídeos (FAKE_VIDEO_DIR): `clip.mp4` e `outro.webm`."""
 
     def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        Path(folder.name, "clip.mp4").write_bytes(CLIP)
+        Path(folder.name, "outro.webm").write_bytes(OTHER)
+        Path(folder.name, "leia-me.txt").write_text("não é vídeo")
+        self.env = {**self.env, "FAKE_VIDEO_DIR": folder.name}
         super().setUp()
-        self.bia = self.login("bia")
-        papo = self.channel("papo", self.bia)["id"]
-        _, body = self.bia.call("GET", f"/channels/{papo}/messages?limit=500")
-        message = next(m for m in body["messages"] if m["content"] == "muita gente reagiu a esta mensagem")
-        self.path = f"/channels/{papo}/messages/{message['id']}/reactions"
-        self.counts = {(r["emoji_id"], r["unicode"]): r["count"] for r in message["reactions"]}
 
-    def rows(self, body):
-        return [(u["created_at"], u["id"], u["user_id"], g["unicode"] or g["emoji_id"]) for g in body["reactions"] for u in g["users"]]
+    def attachments(self, session=None):
+        """Os anexos de vídeo do `papo`, do mais novo ao mais antigo, com a legenda da mensagem."""
+        session = session or self.login("ana")
+        _, body = session.call("GET", f"/channels/{self.channel('papo', session)['id']}/messages?limit=30")
+        return [(m["content"], a) for m in body["messages"] for a in m["attachments"] if a["mime_type"].startswith("video/")]
 
-    def test_a_primeira_pagina_traz_cem_e_a_segunda_o_resto(self):
-        _, first = self.bia.call("GET", self.path)
-        self.assertTrue(first["has_more"])
-        self.assertEqual(100, len(self.rows(first)))
-        self.assertEqual(3, len(first["reactions"]))
-        self.assertEqual(100, sum(g["count"] for g in first["reactions"]))
-        self.assertEqual({"🔥", "❤", None}, {g["unicode"] for g in first["reactions"]})
+    def clip(self):
+        return next(a for content, a in self.attachments() if content == "vídeo clip.mp4")
 
-    def test_o_cursor_da_pagina_e_a_linha_mais_antiga_de_todos_os_grupos(self):
-        _, first = self.bia.call("GET", self.path)
-        rows = self.rows(first)
-        oldest = min(rows, key=lambda r: (moment(r[0]), r[1]))
-        # Os dados obrigam o caso difícil: a reação mais antiga não é a última do último grupo da página.
-        self.assertNotEqual(oldest[1], first["reactions"][-1]["users"][-1]["id"])
-        _, second = self.bia.call("GET", f"{self.path}?order=desc&since={oldest[0]}&last_id={oldest[1]}")
-        self.assertFalse(second["has_more"])
-        self.assertEqual(30, len(self.rows(second)))
-        self.assertTrue(all((moment(r[0]), r[1]) < (moment(oldest[0]), oldest[1]) for r in self.rows(second)))
-        # Nada se repete entre as páginas, e as duas juntas são as 130 reações, todas de usuários diferentes.
-        both = rows + self.rows(second)
-        self.assertEqual(130, len({r[1] for r in both}))
-        self.assertEqual(130, len({r[2] for r in both}))
-        # Cada emoji continua na segunda página, e os totais batem com os da mensagem.
-        self.assertEqual(3, len(second["reactions"]))
-        totals = {}
-        for row in both:
-            totals[row[3]] = totals.get(row[3], 0) + 1
-        self.assertEqual(sorted(self.counts.values()), sorted(totals.values()))
 
-    def test_os_horarios_tem_fracoes_de_tamanhos_diferentes(self):
-        _, first = self.bia.call("GET", self.path)
-        stamps = [r[0] for r in self.rows(first)]
-        self.assertTrue(any("." not in t for t in stamps))
-        self.assertTrue(any(t.endswith(".5Z") for t in stamps))
-        self.assertTrue(any(t.endswith(".25Z") for t in stamps))
-        self.assertTrue(any(t.endswith(".75Z") for t in stamps))
+class VideoSementesTest(VideoTestCase):
+    def test_uma_mensagem_por_video_da_pasta_e_tres_variacoes_do_menor(self):
+        found = {content: a for content, a in self.attachments()}
+        self.assertEqual({"vídeo clip.mp4", "vídeo outro.webm", "vídeo clip.mp4 sensível",
+                          "vídeo clip.mp4 em retrato (360x640)", "vídeo clip.mp4 sem dimensões"}, set(found))
+        self.assertEqual(("video/mp4", len(CLIP)), (found["vídeo clip.mp4"]["mime_type"], found["vídeo clip.mp4"]["size_bytes"]))
+        self.assertEqual(("video/webm", len(OTHER)), (found["vídeo outro.webm"]["mime_type"], found["vídeo outro.webm"]["size_bytes"]))
+        self.assertEqual("sensitive", found["vídeo clip.mp4 sensível"]["moderation_status"])
+        self.assertEqual((360, 640), (found["vídeo clip.mp4 em retrato (360x640)"]["width"], found["vídeo clip.mp4 em retrato (360x640)"]["height"]))
+        self.assertEqual((None, None), (found["vídeo clip.mp4 sem dimensões"]["width"], found["vídeo clip.mp4 sem dimensões"]["height"]))
+        # Vídeo não tem miniatura (o servidor só gera para imagem).
+        self.assertTrue(all(a["thumbnail_id"] is None for a in found.values()))
 
-    def test_os_usuarios_inventados_aparecem_na_lista_de_usuarios(self):
-        _, users = self.bia.call("GET", "/users")
-        nicknames = {u["nickname"] for u in users["users"]}
-        self.assertTrue({"Pessoa 001", "Pessoa 130"} <= nicknames)
+    def test_cada_semente_tem_o_proprio_arquivo(self):
+        ids = [a["id"] for _, a in self.attachments()]
+        self.assertEqual(len(ids), len(set(ids)))
+        ana = self.login("ana")
+        self.assertEqual(OTHER, ana.fetch(f"/attachments/{next(a['id'] for c, a in self.attachments() if c == 'vídeo outro.webm')}")[2])
+
+
+class RangeTest(VideoTestCase):
+    def get(self, range_header=None):
+        headers = {"Range": range_header} if range_header is not None else {}
+        return self.login("ana").fetch(f"/attachments/{self.clip()['id']}", headers)
+
+    def test_sem_range_serve_o_arquivo_inteiro_e_diz_que_aceita_trechos(self):
+        status, headers, body = self.get()
+        self.assertEqual(200, status)
+        self.assertEqual(CLIP, body)
+        self.assertEqual("video/mp4", headers["Content-Type"])
+        self.assertEqual("bytes", headers["Accept-Ranges"])
+        self.assertEqual(str(len(CLIP)), headers["Content-Length"])
+        self.assertIsNone(headers["Content-Range"])
+
+    def test_trecho_fechado_devolve_206_com_content_range(self):
+        status, headers, body = self.get("bytes=10-19")
+        self.assertEqual(206, status)
+        self.assertEqual(CLIP[10:20], body)
+        self.assertEqual("bytes 10-19/64000", headers["Content-Range"])
+        self.assertEqual("10", headers["Content-Length"])
+        self.assertEqual("bytes", headers["Accept-Ranges"])
+        self.assertEqual("video/mp4", headers["Content-Type"])
+
+    def test_trecho_aberto_vai_ate_o_fim(self):
+        status, headers, body = self.get("bytes=63990-")
+        self.assertEqual((206, CLIP[63990:], "bytes 63990-63999/64000"), (status, body, headers["Content-Range"]))
+
+    def test_sufixo_pede_os_ultimos_bytes_e_passar_do_tamanho_devolve_tudo(self):
+        status, headers, body = self.get("bytes=-5")
+        self.assertEqual((206, CLIP[-5:], "bytes 63995-63999/64000"), (status, body, headers["Content-Range"]))
+        status, headers, body = self.get("bytes=-999999")
+        self.assertEqual((206, CLIP, "bytes 0-63999/64000"), (status, body, headers["Content-Range"]))
+
+    def test_fim_alem_do_arquivo_e_cortado_no_ultimo_byte(self):
+        status, headers, body = self.get("bytes=63990-99999")
+        self.assertEqual((206, CLIP[63990:], "bytes 63990-63999/64000"), (status, body, headers["Content-Range"]))
+
+    def test_ultimo_byte_sozinho(self):
+        status, headers, body = self.get("bytes=63999-63999")
+        self.assertEqual((206, CLIP[63999:], "bytes 63999-63999/64000"), (status, body, headers["Content-Range"]))
+
+    def test_comeco_depois_do_fim_e_416_com_o_tamanho_no_content_range(self):
+        for wanted in ("bytes=64000-", "bytes=100000-200000", "bytes=-0"):
+            status, headers, body = self.get(wanted)
+            self.assertEqual((416, "bytes */64000"), (status, headers["Content-Range"]), wanted)
+            self.assertNotEqual(CLIP, body)
+
+    def test_range_ilegivel_e_416_sem_content_range(self):
+        for wanted in ("bytes=abc", "items=0-1", "bytes=5-2", "bytes=-", "bytes=1", "bytes=--5"):
+            status, headers, _ = self.get(wanted)
+            self.assertEqual(416, status, wanted)
+            self.assertIsNone(headers["Content-Range"], wanted)
+
+    def test_varios_trechos_servem_o_arquivo_inteiro(self):
+        status, headers, body = self.get("bytes=0-1,10-11")
+        self.assertEqual((200, CLIP), (status, body))
+        self.assertIsNone(headers["Content-Range"])
+
+    def test_trechos_vazios_servem_o_arquivo_inteiro(self):
+        status, _, body = self.get("bytes=,")
+        self.assertEqual((200, CLIP), (status, body))
+
+    def test_trecho_alem_do_fim_junto_de_um_dentro_serve_so_o_de_dentro(self):
+        status, headers, body = self.get("bytes=100000-,5-9")
+        self.assertEqual((206, CLIP[5:10], "bytes 5-9/64000"), (status, body, headers["Content-Range"]))
+
+    def test_sem_sessao_e_401_como_no_servidor_e_nao_404(self):
+        attachment = self.clip()["id"]
+        stranger = urllib.request.Request(f"http://127.0.0.1:{self.port}/attachments/{attachment}", headers={"Range": "bytes=0-9"})
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(stranger, timeout=5)
+        caught.exception.close()
+        self.assertEqual(401, caught.exception.code)
+
+    def test_anexo_que_nao_existe_e_404(self):
+        self.assertEqual(404, self.login("ana").fetch(f"/attachments/{uuid.uuid4()}", {"Range": "bytes=0-9"})[0])
+
+    def test_imagem_tambem_aceita_trecho(self):
+        ana = self.login("ana")
+        _, body = ana.call("GET", f"/channels/{self.channel('papo', ana)['id']}/messages?limit=30")
+        image = next(a for m in body["messages"] for a in m["attachments"] if a["mime_type"] == "image/png")
+        status, headers, part = ana.fetch(f"/attachments/{image['id']}", {"Range": "bytes=0-7"})
+        self.assertEqual((206, b"\x89PNG\r\n\x1a\n"), (status, part))
+        self.assertEqual(f"bytes 0-7/{image['size_bytes']}", headers["Content-Range"])
+
+
+class MimeDoUploadTest(FakeTestCase):
+    def test_tipo_generico_vira_o_do_video_pela_extensao_e_o_declarado_vale_quando_nao_e_generico(self):
+        ana = self.login("ana")
+        papo = self.channel("papo", ana)["id"]
+        for name, declared, expected in (("a.mp4", "application/octet-stream", "video/mp4"), ("b.webm", "application/octet-stream", "video/webm"),
+                                         ("c.OGV", "application/octet-stream", "video/ogg"), ("d.mp4", "video/webm", "video/webm"),
+                                         ("e.bin", "application/octet-stream", "application/octet-stream"), ("f.txt", "text/plain", "text/plain")):
+            status, sent = ana.send(papo, name, file=(name, declared, "conteudo"))
+            self.assertEqual(201, status)
+            self.assertEqual(expected, sent["attachments"][0]["mime_type"], name)
+            self.assertEqual(expected, ana.fetch(f"/attachments/{sent['attachments'][0]['id']}")[1]["Content-Type"], name)
+
+
+class VelocidadeTest(VideoTestCase):
+    env = {"FAKE_VIDEO_KBPS": "128"}
+
+    def test_video_chega_no_ritmo_pedido(self):
+        ana, attachment = self.login("ana"), self.clip()["id"]
+        started = time.monotonic()
+        status, _, body = ana.fetch(f"/attachments/{attachment}")
+        elapsed = time.monotonic() - started
+        self.assertEqual((200, CLIP), (status, body))
+        # 64000 bytes a 128 KB/s levam 0,49 s; o último pedaço sai uma fração antes disso. Só se confere o piso: dormir nunca adianta.
+        self.assertGreaterEqual(elapsed, 0.4)
+
+    def test_trecho_tambem_e_entregue_devagar(self):
+        ana, attachment = self.login("ana"), self.clip()["id"]
+        started = time.monotonic()
+        status, _, body = ana.fetch(f"/attachments/{attachment}", {"Range": "bytes=0-39999"})
+        elapsed = time.monotonic() - started
+        self.assertEqual((206, CLIP[:40000]), (status, body))
+        self.assertGreaterEqual(elapsed, 0.2)  # 40000 bytes a 128 KB/s: 0,31 s; o último pedaço sai antes disso
+
+
+class DesistenciaNoMeioTest(VideoTestCase):
+    env = {"FAKE_VIDEO_KBPS": "128"}
+    stderr = subprocess.PIPE
+
+    def test_quem_desiste_no_meio_do_video_nao_enche_o_log_de_erros(self):
+        ana, clip = self.login("ana"), self.clip()["id"]
+        cookie = "; ".join(f"{c.name}={c.value}" for c in ana.jar)
+        # Buscar noutro ponto fecha a conexão com o corpo pela metade; é o que o player faz a cada busca.
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            sock.sendall(f"GET /attachments/{clip} HTTP/1.1\r\nHost: x\r\nCookie: {cookie}\r\n\r\n".encode())
+            self.assertIn(b"200 OK", sock.recv(1024))
+        # Um pedido inteiro leva mais de 0,4 s no ritmo do fake: o primeiro já notou a desistência (a escrita seguinte falha).
+        self.assertEqual(CLIP, ana.fetch(f"/attachments/{clip}")[2])
+        self.process.kill()
+        log = self.process.communicate()[1].decode()
+        self.assertIn(f"GET /attachments/{clip}", log)
+        self.assertNotIn("Traceback", log)
+
+
+class VelocidadeLentaTest(FakeTestCase):
+    env = {"FAKE_VIDEO_KBPS": "8"}
+
+    def test_anexo_que_nao_e_video_nao_e_limitado(self):
+        # A 8 KB/s um anexo de 64 KB que fosse limitado levaria 8 s e estouraria o prazo de 5 s do cliente.
+        ana = self.login("ana")
+        papo = self.channel("papo", ana)["id"]
+        status, sent = ana.send(papo, "texto grande", file=("grande.txt", "text/plain", "x" * 64000))
+        self.assertEqual(201, status)
+        self.assertEqual(64000, len(ana.fetch(f"/attachments/{sent['attachments'][0]['id']}")[2]))
+
+
+class SessaoVencidaTest(VideoTestCase):
+    env = {"FAKE_VIDEO_401_ONCE": "2"}
+
+    def test_responde_401_so_no_pedido_escolhido_e_depois_volta_ao_normal(self):
+        ana = self.login("ana")
+        clip = self.clip()["id"]
+        image = next(a for m in ana.call("GET", f"/channels/{self.channel('papo', ana)['id']}/messages?limit=30")[1]["messages"]
+                     for a in m["attachments"] if a["mime_type"] == "image/png")
+        # Imagem não conta como pedido de vídeo.
+        self.assertEqual(200, ana.fetch(f"/attachments/{image['id']}")[0])
+        self.assertEqual(206, ana.fetch(f"/attachments/{clip}", {"Range": "bytes=0-9"})[0])
+        status, _, _ = ana.fetch(f"/attachments/{clip}", {"Range": "bytes=10-19"})
+        self.assertEqual(401, status)
+        # Depois do 401 o cliente renova (o fake mantém a sessão) e repete: o mesmo pedido agora passa.
+        self.assertEqual(200, ana.call("POST", "/auth/refresh")[0])
+        status, headers, body = ana.fetch(f"/attachments/{clip}", {"Range": "bytes=10-19"})
+        self.assertEqual((206, CLIP[10:20]), (status, body))
+        self.assertEqual(206, ana.fetch(f"/attachments/{clip}", {"Range": "bytes=20-29"})[0])
+
+
+class PrimeiroPedido401Test(VideoTestCase):
+    env = {"FAKE_VIDEO_401_ONCE": "1"}
+
+    def test_o_primeiro_pedido_de_video_e_401_e_o_segundo_passa(self):
+        ana = self.login("ana")
+        clip = self.clip()["id"]
+        self.assertEqual(401, ana.fetch(f"/attachments/{clip}")[0])
+        status, _, body = ana.fetch(f"/attachments/{clip}")
+        self.assertEqual((200, CLIP), (status, body))
+
+
+class SemVideosTest(FakeTestCase):
+    def test_sem_as_variaveis_nada_muda_no_papo(self):
+        ana = self.login("ana")
+        _, body = ana.call("GET", f"/channels/{self.channel('papo', ana)['id']}/messages?limit=100")
+        self.assertFalse([a for m in body["messages"] for a in m["attachments"] if a["mime_type"].startswith("video/")])
+
+    def test_sem_a_velocidade_o_anexo_vem_de_uma_vez(self):
+        ana = self.login("ana")
+        papo = self.channel("papo", ana)["id"]
+        _, sent = ana.send(papo, "grande", file=("grande.txt", "text/plain", "x" * 64000))
+        self.assertEqual(64000, len(ana.fetch(f"/attachments/{sent['attachments'][0]['id']}")[2]))
 
 
 class ArquivoInvalidoTest(unittest.TestCase):
@@ -737,7 +859,7 @@ class ArquivoInvalidoTest(unittest.TestCase):
             return self.run_path(str(path))
 
     def run_path(self, path):
-        env = {**os.environ, "FAKE_PERMISSIONS": path, "FAKE_EMOJI_SMALL": "1"}
+        env = {**clean_env(), "FAKE_PERMISSIONS": path, "FAKE_EMOJI_SMALL": "1"}
         done = subprocess.run([sys.executable, str(FAKE), "0"], env=env, capture_output=True, text=True, timeout=20)
         self.assertNotEqual(0, done.returncode)
         return done.stderr
@@ -755,6 +877,24 @@ class ArquivoInvalidoTest(unittest.TestCase):
     def test_arquivo_ilegivel_ou_malformado_derruba_o_fake_com_mensagem(self):
         self.assertIn("não consegui ler", self.run_path("/caminho/que/nao/existe.json"))
         self.assertIn("não consegui ler", self.run_with("{isto não é json"))
+
+
+class VideoInvalidoTest(unittest.TestCase):
+    def run_with(self, **env):
+        done = subprocess.run([sys.executable, str(FAKE), "0"], env={**clean_env(), "FAKE_EMOJI_SMALL": "1", **env},
+                              capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(0, done.returncode)
+        return done.stderr
+
+    def test_pasta_inexistente_ou_sem_video_derruba_o_fake_com_mensagem(self):
+        self.assertIn("FAKE_VIDEO_DIR: nenhum .mp4, .webm ou .ogv em /caminho/que/nao/existe", self.run_with(FAKE_VIDEO_DIR="/caminho/que/nao/existe"))
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "leia-me.txt").write_text("sem vídeo")
+            self.assertIn("FAKE_VIDEO_DIR: nenhum", self.run_with(FAKE_VIDEO_DIR=folder))
+
+    def test_velocidade_ou_pedido_ilegivel_derruba_o_fake_com_mensagem(self):
+        self.assertIn("FAKE_VIDEO_KBPS e FAKE_VIDEO_401_ONCE: valor ilegível", self.run_with(FAKE_VIDEO_KBPS="rápido"))
+        self.assertIn("FAKE_VIDEO_KBPS e FAKE_VIDEO_401_ONCE: valor ilegível", self.run_with(FAKE_VIDEO_401_ONCE="uma vez"))
 
 
 if __name__ == "__main__":

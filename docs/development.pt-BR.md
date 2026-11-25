@@ -41,6 +41,9 @@ usuárias `ana` (`Senha@123`) e `bia` (`Senha@456`). Ele não substitui um
 servidor de verdade e não tem chamadas de voz. Com `FAKE_PERMISSIONS=demo` ele também
 tem cargos, permissões de canal e uma dona (`dona`, `Senha@000`); a docstring do
 `fake_papo.py` descreve o cenário e como carregar o seu de um arquivo JSON.
+`FAKE_VIDEO_DIR` aponta uma pasta de vídeos para semear (servidos com `Range`),
+`FAKE_VIDEO_KBPS` limita a velocidade e `FAKE_VIDEO_401_ONCE=N` responde 401 ao
+N-ésimo pedido de vídeo.
 
 ## Builds de release
 
