@@ -58,7 +58,8 @@ e um [cliente de terminal](https://github.com/prodesert22/papo-tui).
 - Transmita sua câmera ou sua tela e veja as que os outros transmitem.
 - A chamada continua quando você sai do app, com uma notificação para desligar.
 
-A lista completa está nas [notas da versão 0.1.0](releases/v0.1.0.md) (em inglês).
+A lista completa está nas notas das versões [0.1.0](releases/v0.1.0.md) e
+[0.2.0](releases/v0.2.0.md) (em inglês).
 
 ## Limitações atuais
 

@@ -58,7 +58,8 @@ Papo also has a [web client](https://github.com/prodesert22/papo-frontend) and a
 - Share your camera or your screen, and watch the ones other people share.
 - A call continues when you leave the app, with a notification to hang up.
 
-The complete list is in the [0.1.0 release notes](releases/v0.1.0.md).
+The complete list is in the release notes of [0.1.0](releases/v0.1.0.md) and
+[0.2.0](releases/v0.2.0.md).
 
 ## Current limitations
 
