@@ -129,11 +129,86 @@ fun renderMentions(content: String, nameOf: (String) -> String?): String =
 /** Ids dos usuários mencionados em [content]. */
 fun mentionedIds(content: String): List<String> = mentionPattern.findAll(content).map { it.groupValues[1] }.toList()
 
-/** Troca `@nome` pelo formato canônico do backend, só para os nomes escolhidos no autocompletar. */
-fun encodeMentions(text: String, picked: Map<String, String>): String {
-    var result = text
-    for ((username, id) in picked.entries.sortedByDescending { it.key.length }) {
-        result = Regex("@" + Regex.escape(username) + """(?![\w.-])""").replace(result, "@mention(<@$id>)")
+/** Bloco de código cercado por três crases, a mesma regra que o Markdown usa para mostrá-lo. */
+private val codeFence = Regex("""```[^\n`]*\n?([\s\S]*?)```""")
+
+/**
+ * Troca `@nome` pelo formato canônico do backend (`@mention(<@id>)`): os nomes escolhidos no
+ * autocompletar ([picked], username para id) e os digitados à mão, quando exatamente um usuário de
+ * [users] tem aquele username (sem diferenciar maiúsculas; com dois, fica texto). O `@` tem de poder
+ * abrir uma menção (ver [mentionMayStartAt]), então `a@b.com` não muda, e nada muda dentro de código
+ * em linha ou em bloco. Um ponto no fim do nome é pontuação da frase: `@ana.` é a menção `@ana`.
+ */
+fun encodeMentions(text: String, picked: Map<String, String>, users: Collection<User>): String {
+    if ('@' !in text) return text
+    val byUsername = users.groupBy { it.username.lowercase() }
+    fun idOf(name: String): String? = picked[name] ?: byUsername[name.lowercase()]?.singleOrNull()?.id
+    val code = codeRanges(text)
+    val out = StringBuilder(text.length + 40)
+    var nextCode = 0
+    var i = 0
+    while (i < text.length) {
+        val codeRange = code.getOrNull(nextCode)
+        if (codeRange != null && i == codeRange.first) {
+            out.append(text, codeRange.first, codeRange.last + 1)
+            i = codeRange.last + 1
+            nextCode++
+            continue
+        }
+        val mention = if (text[i] == '@' && mentionMayStartAt(text, i)) mentionAt(text, i, ::idOf) else null
+        if (mention == null) {
+            out.append(text[i])
+            i++
+        } else {
+            out.append("@mention(<@").append(mention.id).append(">)")
+            i = mention.end
+        }
     }
-    return result
+    return out.toString()
+}
+
+private class FoundMention(val id: String, val end: Int)
+
+/** O nome que começa depois do `@` em [at], se for de alguém; o fim dele é onde a menção termina. */
+private fun mentionAt(text: String, at: Int, idOf: (String) -> String?): FoundMention? {
+    var end = at + 1
+    while (end < text.length && (text[end].isLetterOrDigit() || text[end] in "_.-")) end++
+    val token = text.substring(at + 1, end)
+    for (name in listOf(token, token.trimEnd('.'))) {
+        val id = if (name.isEmpty()) null else idOf(name)
+        if (id != null) return FoundMention(id, at + 1 + name.length)
+    }
+    return null
+}
+
+/** Trechos de [text] que o Markdown mostra como código, na ordem: blocos cercados e código em linha. */
+private fun codeRanges(text: String): List<IntRange> {
+    val ranges = ArrayList<IntRange>()
+    var from = 0
+    for (fence in codeFence.findAll(text)) {
+        inlineCodeRanges(text, from, fence.range.first, ranges)
+        ranges += fence.range
+        from = fence.range.last + 1
+    }
+    inlineCodeRanges(text, from, text.length, ranges)
+    return ranges
+}
+
+/** Código em linha entre [from] e [to]: duas crases na mesma linha com algo no meio, como o Markdown as lê. */
+private fun inlineCodeRanges(text: String, from: Int, to: Int, out: MutableList<IntRange>) {
+    var i = from
+    while (i < to) {
+        if (text[i] != '`') {
+            i++
+            continue
+        }
+        val lineEnd = text.indexOf('\n', i).let { if (it in 0 until to) it else to }
+        val close = text.indexOf('`', i + 1)
+        if (close > i + 1 && close < lineEnd) {
+            out += i..close
+            i = close + 1
+        } else {
+            i++
+        }
+    }
 }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Cameraswitch
@@ -89,6 +90,7 @@ import chat.papo.mobile.resources.call_switch_camera
 import chat.papo.mobile.resources.call_unmute
 import chat.papo.mobile.resources.call_you
 import chat.papo.mobile.resources.call_your_screen
+import chat.papo.mobile.resources.channels_open_chat
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.theme.LocalPapoColors
@@ -108,8 +110,9 @@ private data class Tile(
     val video: VideoTrackHandle?,
 )
 
+/** [onOpenChat] abre o chat do canal de voz da chamada (conta e canal). */
 @Composable
-fun CallScreen(session: AppSession, onBack: () -> Unit) {
+fun CallScreen(session: AppSession, onBack: () -> Unit, onOpenChat: (accountId: String, channelId: String) -> Unit) {
     val controller by session.calls.current.collectAsStateWithLifecycle()
     val current = controller
     if (current == null) {
@@ -126,7 +129,7 @@ fun CallScreen(session: AppSession, onBack: () -> Unit) {
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            Header(accountSession, state, onBack)
+            Header(accountSession, state, onBack) { onOpenChat(state.accountId, state.channelId) }
             if (state.phase == CallPhase.Ended) {
                 Ended(state) {
                     session.calls.dismissEnded()
@@ -141,7 +144,7 @@ fun CallScreen(session: AppSession, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Header(session: AccountSession, state: CallState, onBack: () -> Unit) {
+private fun Header(session: AccountSession, state: CallState, onBack: () -> Unit, onOpenChat: () -> Unit) {
     val channels by session.chat.channels.collectAsStateWithLifecycle()
     val name = channels.firstOrNull { it.id == state.channelId }?.name.orEmpty()
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -165,6 +168,9 @@ private fun Header(session: AccountSession, state: CallState, onBack: () -> Unit
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        IconButton(onClick = onOpenChat) {
+            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = stringResource(Res.string.channels_open_chat))
         }
     }
 }

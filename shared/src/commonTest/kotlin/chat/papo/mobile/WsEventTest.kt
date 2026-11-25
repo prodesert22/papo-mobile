@@ -123,8 +123,8 @@ class WsEventTest {
         assertEquals("oi @Ana, tudo bem?", renderMentions(raw) { if (it == id) "Ana" else null })
         assertEquals("oi @usuário, tudo bem?", renderMentions(raw) { null })
         assertEquals(listOf(id), mentionedIds(raw))
-        assertEquals(raw, encodeMentions("oi @ana, tudo bem?", mapOf("ana" to id)))
+        assertEquals(raw, encodeMentions("oi @ana, tudo bem?", mapOf("ana" to id), emptyList()))
         // Não confunde um nome que é prefixo de outro, nem e-mails.
-        assertEquals("@anabela e @mention(<@$id>)", encodeMentions("@anabela e @ana", mapOf("ana" to id)))
+        assertEquals("@anabela e @mention(<@$id>)", encodeMentions("@anabela e @ana", mapOf("ana" to id), emptyList()))
     }
 }

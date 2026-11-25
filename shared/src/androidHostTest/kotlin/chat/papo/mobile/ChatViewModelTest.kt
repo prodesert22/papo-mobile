@@ -1,5 +1,6 @@
 package chat.papo.mobile
 
+import androidx.compose.ui.text.input.TextFieldValue
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.PendingStatus
 import chat.papo.mobile.chat.SendFailure
@@ -106,6 +107,9 @@ class ChatViewModelTest {
         state.first { it.loadedOnce }
     }
 
+    /** O usuário escreve [text] no compositor. */
+    private fun ChatViewModel.type(text: String) = onDraftChange(TextFieldValue(text))
+
     private fun String.field(name: String): String? =
         Regex("""name="?$name"?[^\r\n]*\r\n(?:[^\r\n]+\r\n)*\r\n([^\r]*)""").find(this)?.groupValues?.get(1)
 
@@ -183,11 +187,11 @@ class ChatViewModelTest {
         val target = vm.messages.first { it.isNotEmpty() }.first()
         vm.startReply(target)
         vm.pickMention("bia", bia)
-        var cleared = false
+        vm.type("oi @bia, viu? @biazinha não")
 
-        vm.submit("oi @bia, viu? @biazinha não") { cleared = true }
+        vm.submit()
         // O compositor fica livre na hora e a mensagem já aparece como em saída, com a resposta que levava.
-        assertTrue(cleared)
+        assertEquals("", vm.draft.text)
         assertNull(vm.state.value.replyTo)
         val shown = vm.pending.first { it.isNotEmpty() }.single()
         assertEquals("oi @mention(<@$bia>), viu? @biazinha não", shown.content)
@@ -201,7 +205,8 @@ class ChatViewModelTest {
         assertEquals("m50", vm.messages.first { list -> list.any { it.id == "m50" } }.first().id)
 
         // A menção valia só para aquele rascunho.
-        vm.submit("@bia de novo") {}
+        vm.type("@bia de novo")
+        vm.submit()
         session.chat.outbox.first { it.isEmpty() }
         assertEquals("@bia de novo", posted[1].field("content"))
     }
@@ -213,11 +218,11 @@ class ChatViewModelTest {
         val target = vm.messages.first { it.isNotEmpty() }.first()
         vm.startReply(target)
         failSend = true
-        var cleared = false
+        vm.type("não vai")
 
-        vm.submit("não vai") { cleared = true }
+        vm.submit()
         // O compositor não guarda mais o rascunho: quem o guarda é a mensagem que ficou na fila.
-        assertTrue(cleared)
+        assertEquals("", vm.draft.text)
         assertNull(vm.state.value.replyTo)
         val failed = vm.pending.first { it.singleOrNull()?.status is PendingStatus.Failed }.single()
 
@@ -244,15 +249,16 @@ class ChatViewModelTest {
         vm.startReply(mine)
         vm.startEdit(mine)
         assertNull(vm.state.value.replyTo) // editar e responder não convivem
-        var cleared = false
+        assertEquals("msg 2", vm.draft.text) // o compositor passa a ter o texto da mensagem
+        vm.type("corrigida")
 
-        vm.submit("corrigida") { cleared = true }
+        vm.submit()
         vm.state.first { !it.savingEdit && edited.isNotEmpty() }
 
         assertEquals(listOf("/messages/m2 {\"content\":\"corrigida\"}"), edited)
         assertTrue(posted.isEmpty())
-        assertTrue(cleared)
         assertNull(vm.state.value.editing)
+        assertEquals("", vm.draft.text) // o rascunho de antes da edição estava vazio
         assertEquals("corrigida", vm.messages.first { list -> list.any { it.content == "corrigida" } }.first { it.id == "m2" }.content)
     }
 
@@ -263,16 +269,16 @@ class ChatViewModelTest {
         val mine = vm.messages.first { it.size == 3 }.first { it.id == "m2" }
         vm.startEdit(mine)
         failEdit = true
-        var cleared = false
+        vm.type("corrigida")
 
-        vm.submit("corrigida") { cleared = true }
+        vm.submit()
         assertTrue(vm.state.value.savingEdit) // editar segue síncrono: o compositor espera a resposta
-        vm.submit("outra tentativa") { cleared = true } // um segundo toque enquanto salva não faz outro pedido
+        vm.submit() // um segundo toque enquanto salva não faz outro pedido
         val state = vm.state.first { !it.savingEdit && it.error != null }
 
         assertEquals(UiError.Server("Só o autor edita"), state.error)
         assertEquals("m2", state.editing?.id) // a edição continua aberta para tentar de novo
-        assertFalse(cleared)
+        assertEquals("corrigida", vm.draft.text) // e o texto continua no compositor
         assertEquals(1, editAttempts)
         assertTrue(vm.pending.value.isEmpty()) // edição nunca passa pela fila de envio
     }
@@ -282,7 +288,8 @@ class ChatViewModelTest {
         val vm = viewModel()
         vm.loaded()
         failSend = true
-        vm.submit("não vai") {}
+        vm.type("não vai")
+        vm.submit()
         session.chat.enqueue("outra", "de outra conversa", null, emptyList())
         session.chat.outbox.first { list -> list.size == 2 && list.all { it.status is PendingStatus.Failed } }
 
@@ -299,11 +306,11 @@ class ChatViewModelTest {
         val vm = viewModel()
         vm.loaded()
         vm.addFiles(listOf(OutgoingFile("a.bin", "application/octet-stream", 3) { byteArrayOf(1, 2, 3) }))
-        var cleared = false
+        vm.type("   ")
 
-        vm.submit("   ") { cleared = true }
+        vm.submit()
 
-        assertTrue(cleared)
+        assertEquals("", vm.draft.text)
         assertTrue(vm.state.value.files.isEmpty())
         val shown = vm.pending.first { it.isNotEmpty() }.single()
         assertEquals("", shown.content)
@@ -316,10 +323,10 @@ class ChatViewModelTest {
     fun naoEnviaRascunhoVazio() = runTest {
         val vm = viewModel()
         vm.loaded()
-        var cleared = false
-        vm.submit("   ") { cleared = true }
+        vm.type("   ")
+        vm.submit()
         assertFalse(vm.state.value.savingEdit)
-        assertFalse(cleared)
+        assertEquals("   ", vm.draft.text) // nada foi enviado: o compositor fica como estava
         assertTrue(vm.pending.value.isEmpty())
         assertTrue(posted.isEmpty())
     }

@@ -1,15 +1,23 @@
 package chat.papo.mobile.ui.chat
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.Draft
 import chat.papo.mobile.chat.Located
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.PendingMessage
 import chat.papo.mobile.chat.encodeMentions
+import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.toUiError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -156,28 +164,107 @@ class ChatViewModel(
 
     fun removeFile(file: OutgoingFile) = _state.update { it.copy(files = it.files - file) }
 
-    fun startReply(message: Message) = _state.update { it.copy(replyTo = message, editing = null) }
+    fun startReply(message: Message) {
+        if (_state.value.editing != null) finishEdit()
+        _state.update { it.copy(replyTo = message) }
+        saveDraft()
+    }
 
-    fun startEdit(message: Message) = _state.update { it.copy(editing = message, replyTo = null, files = emptyList()) }
+    fun startEdit(message: Message) {
+        // Editar uma segunda mensagem em seguida volta ao mesmo rascunho de antes, não ao texto da primeira.
+        if (stashed == null) stashed = StashedDraft(draft.text, _state.value.replyTo)
+        val shown = renderMentions(message.content) { chat.users.value[it]?.username }
+        draft = TextFieldValue(shown, TextRange(shown.length))
+        _state.update { it.copy(editing = message, replyTo = null, files = emptyList()) }
+    }
 
-    fun cancelContext() = _state.update { it.copy(replyTo = null, editing = null) }
+    fun cancelContext() {
+        if (_state.value.editing != null) {
+            finishEdit()
+        } else {
+            _state.update { it.copy(replyTo = null) }
+            saveDraft()
+        }
+    }
 
     fun dismissError() = _state.update { it.copy(error = null) }
 
+    // Rascunho
+
+    /** O que está escrito no compositor. Mora aqui, e não na tela, para sobreviver a sair da conversa e voltar. */
+    var draft by mutableStateOf(TextFieldValue(""))
+        private set
+
+    /** Texto e resposta de antes de uma edição, para voltar a eles quando ela acabar. Enquanto existe, nada é guardado. */
+    private var stashed: StashedDraft? = null
+
+    /** O usuário já mexeu no texto: o que o banco devolver não pode sobrescrevê-lo. */
+    private var textChanged = false
+
+    private class StashedDraft(val text: String, val replyTo: Message?)
+
+    init {
+        viewModelScope.launch { restoreDraft() }
+    }
+
+    /** O compositor mudou (digitação, emoji, menção escolhida): guarda o rascunho e avisa que está digitando. */
+    fun onDraftChange(value: TextFieldValue) {
+        val changed = value.text != draft.text
+        draft = value
+        if (!changed) return
+        textChanged = true
+        if (value.text.isNotEmpty()) onTyping()
+        saveDraft()
+    }
+
+    /** Guarda o compositor como rascunho da conversa; durante uma edição o que vale é o de antes dela. */
+    private fun saveDraft() {
+        if (stashed != null) return
+        session.drafts.save(channelId, Draft(draft.text, _state.value.replyTo?.id))
+    }
+
+    /** Lê o rascunho guardado e o põe no compositor, sem pisar no que o usuário já escreveu enquanto o banco respondia. */
+    private suspend fun restoreDraft() {
+        val (saved, reply) = try {
+            val saved = session.drafts.load(channelId) ?: return
+            saved to saved.replyTo?.let { chat.storedMessage(channelId, it) } // null se a mensagem sumiu
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return // sem ler o banco a conversa abre vazia, como se não houvesse rascunho
+        }
+        if (stashed != null) return
+        if (!textChanged) draft = TextFieldValue(saved.text, TextRange(saved.text.length))
+        if (_state.value.replyTo == null) _state.update { it.copy(replyTo = reply) }
+    }
+
+    /** A edição acabou, salva ou cancelada: o compositor volta ao que havia antes dela. */
+    private fun finishEdit() {
+        val before = stashed
+        stashed = null
+        val text = before?.text.orEmpty()
+        draft = TextFieldValue(text, TextRange(text.length))
+        _state.update { it.copy(editing = null, replyTo = before?.replyTo) }
+    }
+
     /**
-     * Manda a mensagem para a fila de envio, que a mostra na hora, ou salva a edição. Chama [onSent]
-     * quando o rascunho pode ser limpo: ao enfileirar, de imediato; ao editar, depois de salvar.
+     * Manda o texto do compositor para a fila de envio, que o mostra na hora, ou salva a edição. Ao
+     * enfileirar o compositor e o rascunho guardado são limpos de imediato (se o app fechasse antes de
+     * gravar, o texto já enviado voltaria como rascunho); ao editar, só depois de salvar.
      */
-    fun submit(text: String, onSent: () -> Unit) {
+    fun submit() {
         val s = _state.value
+        val text = draft.text
         if (s.savingEdit || (text.isBlank() && s.files.isEmpty())) return
-        val content = encodeMentions(text, pickedMentions)
+        val content = encodeMentions(text, pickedMentions, chat.users.value.values)
         val editing = s.editing
         if (editing == null) {
             chat.enqueue(channelId, content, s.replyTo?.id, s.files)
             pickedMentions.clear()
             _state.update { it.copy(replyTo = null, files = emptyList(), error = null) }
-            onSent()
+            draft = TextFieldValue("")
+            session.drafts.save(channelId, null)
+            session.drafts.flush()
             return
         }
         _state.update { it.copy(savingEdit = true, error = null) }
@@ -185,8 +272,7 @@ class ChatViewModel(
             val ok = attempt { chat.edit(editing.id, content) }
             if (ok) {
                 pickedMentions.clear()
-                _state.update { it.copy(replyTo = null, editing = null, files = emptyList()) }
-                onSent()
+                finishEdit()
             }
             _state.update { it.copy(savingEdit = false) }
         }

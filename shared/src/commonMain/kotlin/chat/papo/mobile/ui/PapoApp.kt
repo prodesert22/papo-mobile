@@ -190,6 +190,15 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
                     onSearch = { navController.navigate(SearchRoute(route.accountId, route.channelId)) },
+                    onJoinCall = if (session.calls.supported) {
+                        {
+                            session.calls.join(accountSession, route.channelId)
+                            // Se a chamada já está aberta por baixo desta conversa, a conversa sai da frente dela.
+                            navController.navigate(CallRoute) { popUpTo<CallRoute> { inclusive = true } }
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -213,7 +222,12 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
             }
         }
         composable<CallRoute> {
-            CallScreen(session, onBack = { navController.popBackStack(HomeRoute, inclusive = false) })
+            CallScreen(
+                session,
+                // Volta a quem abriu a chamada: a lista de conversas ou o chat do canal de voz.
+                onBack = { navController.popBackStack(CallRoute, inclusive = true) },
+                onOpenChat = { accountId, channelId -> navController.navigate(ChatRoute(accountId, channelId)) },
+            )
         }
         composable<AccountSettingsRoute> { entry ->
             AccountSettingsScreen(session, entry.toRoute<AccountSettingsRoute>().accountId, onBack = { navController.popBackStack() })

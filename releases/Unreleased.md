@@ -20,3 +20,18 @@
   waiting to be sent to discard it, or to cancel an upload in progress.
 - Messages waiting to be sent are kept only while the app is open and
   unlocked.
+- Typing `@` suggests people by any part of their username or name, without
+  caring about accents or case (`joao` finds "João Silva"), with whoever spoke
+  recently in the conversation and whoever is online first; the list scrolls
+  when there are many. A full username typed after `@` without picking it from
+  the list now also mentions that person when it matches exactly one account,
+  and a mention followed by a period, as in `@ana.`, is no longer sent as plain
+  text.
+- Each conversation keeps its own draft: the text and the message you were
+  replying to come back when you return to it, even after the app closes. Drafts
+  are kept encrypted on the phone; files attached to a draft are not kept.
+  Editing a message no longer throws away what you were typing: it comes back
+  when you save or cancel the edit.
+- Voice channels have a chat. Open it with the chat button at the end of a voice
+  channel in the list or with **Abrir chat** during a call; **Entrar na
+  chamada** in its top bar joins the call.

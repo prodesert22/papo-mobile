@@ -33,8 +33,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -99,6 +101,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -114,15 +117,19 @@ import chat.papo.mobile.chat.EmojiCompletion
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiRef
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.ServerEmoji
 import chat.papo.mobile.chat.ServerEmojis
 import chat.papo.mobile.chat.UnicodeEmoji
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.UnicodeEmojis
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.authorsByRecency
 import chat.papo.mobile.chat.continuesGroup
 import chat.papo.mobile.chat.filterPinned
+import chat.papo.mobile.chat.mentionQueryAt
 import chat.papo.mobile.chat.renderMentions
+import chat.papo.mobile.chat.suggestMentions
 import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.data.api.AttachmentDto
@@ -131,6 +138,7 @@ import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
 import chat.papo.mobile.resources.action_close
+import chat.papo.mobile.resources.channels_join_call
 import chat.papo.mobile.resources.chat_attach
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_emoji
@@ -189,7 +197,14 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> Unit, onSearch: () -> Unit) {
+fun ChatScreen(
+    session: AccountSession,
+    viewModel: ChatViewModel,
+    onBack: () -> Unit,
+    onSearch: () -> Unit,
+    /** Entra na chamada do canal de voz; null onde não há chamada. Só é oferecido em canal de voz. */
+    onJoinCall: (() -> Unit)?,
+) {
     val chat = session.chat
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -220,7 +235,12 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     val dmUser = dms.firstOrNull { it.id == viewModel.channelId }?.let { users[it.userId] }
     val title = channel?.name ?: dmUser?.displayName ?: ""
 
-    var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
+    val isVoice = channel?.type == ChannelType.Voice
+    val draft = viewModel.draft
+    // O rascunho vai para o banco quando a tela sai de cena: outra tela por cima, app em segundo plano ou fim da conversa.
+    LifecycleResumeEffect(session) {
+        onPauseOrDispose { session.drafts.flush() }
+    }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
     var reactingTo by remember { mutableStateOf<Message?>(null) }
     var selecting by remember { mutableStateOf<Message?>(null) }
@@ -229,6 +249,8 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
     val listState = rememberLazyListState()
     val byId = remember(messages) { messages.associateBy { it.id } }
+    // Quem falou há pouco no canal vem primeiro nas sugestões de menção.
+    val recentAuthors = remember(messages) { authorsByRecency(messages) }
     // O que ainda está saindo vai num item só no índice 0 da lista invertida (o fim da conversa): `lead` é
     // quanto ele desloca os índices das mensagens quando a lista é lida por posição.
     val pending by viewModel.pending.collectAsStateWithLifecycle()
@@ -311,7 +333,11 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                             UserAvatar(session, dmUser, size = 32.dp)
                             Spacer(Modifier.width(10.dp))
                         } else {
-                            Icon(Icons.Filled.Tag, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Icon(
+                                if (isVoice) Icons.AutoMirrored.Filled.VolumeUp else Icons.Filled.Tag,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
                             Spacer(Modifier.width(6.dp))
                         }
                         Column {
@@ -335,6 +361,11 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                     }
                 },
                 actions = {
+                    if (isVoice && onJoinCall != null) {
+                        IconButton(onClick = onJoinCall) {
+                            Icon(Icons.Filled.Call, contentDescription = stringResource(Res.string.channels_join_call))
+                        }
+                    }
                     IconButton(onClick = onSearch) {
                         Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.chat_search))
                     }
@@ -444,26 +475,22 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                 state = state,
                 draft = draft,
                 users = users,
+                presence = presence,
+                recentAuthors = recentAuthors,
                 serverEmojis = serverEmojis,
                 emojiCatalog = drawableEmojis,
                 availableHeightPx = columnPx,
                 placeholder = if (dmUser != null) {
                     stringResource(Res.string.chat_placeholder_dm, title)
                 } else {
-                    stringResource(Res.string.chat_placeholder, "#$title")
+                    stringResource(Res.string.chat_placeholder, if (isVoice) title else "#$title")
                 },
-                onDraftChange = {
-                    if (it.text != draft.text && it.text.isNotEmpty()) viewModel.onTyping()
-                    draft = it
-                },
+                onDraftChange = viewModel::onDraftChange,
                 onPickMention = viewModel::pickMention,
                 onAddFiles = viewModel::addFiles,
                 onRemoveFile = viewModel::removeFile,
-                onCancelContext = {
-                    if (state.editing != null) draft = TextFieldValue("")
-                    viewModel.cancelContext()
-                },
-                onSubmit = { viewModel.submit(draft.text) { draft = TextFieldValue("") } },
+                onCancelContext = viewModel::cancelContext,
+                onSubmit = viewModel::submit,
             )
         }
     }
@@ -484,11 +511,7 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                 reactingTo = message
             },
             onReply = { viewModel.startReply(message) },
-            onEdit = {
-                viewModel.startEdit(message)
-                val shown = renderForEditing(message.content, users)
-                draft = TextFieldValue(shown, TextRange(shown.length))
-            },
+            onEdit = { viewModel.startEdit(message) },
             onDelete = { confirmDelete = message },
             onTogglePin = { viewModel.setPinned(message, !isPinned) },
             onSelectText = { selecting = message },
@@ -565,10 +588,6 @@ private fun NoticeBar(text: String, onClose: () -> Unit) {
     ) { Text(text) }
 }
 
-/** Ao editar, as menções voltam a aparecer como `@nome`; o envio as recodifica se o nome for escolhido de novo. */
-private fun renderForEditing(content: String, users: Map<String, User>): String =
-    renderMentions(content) { users[it]?.username }
-
 @Composable
 private fun presenceLabel(status: String?): String = stringResource(
     when (status) {
@@ -619,22 +638,14 @@ private fun TypingLine(users: List<User>) {
     )
 }
 
-/** Trecho `@pref` imediatamente antes do cursor, se houver. */
-private fun mentionQuery(value: TextFieldValue): String? {
-    if (!value.selection.collapsed) return null
-    val before = value.text.substring(0, value.selection.start)
-    val at = before.lastIndexOf('@')
-    if (at < 0 || (at > 0 && !before[at - 1].isWhitespace())) return null
-    val query = before.substring(at + 1)
-    return query.takeIf { it.length <= 32 && it.none(Char::isWhitespace) }
-}
-
 @Composable
 private fun Composer(
     session: AccountSession,
     state: ChatUiState,
     draft: TextFieldValue,
     users: Map<String, User>,
+    presence: Map<String, Presence>,
+    recentAuthors: List<String>,
     serverEmojis: ServerEmojis,
     emojiCatalog: UnicodeEmojiCatalog?,
     availableHeightPx: Int,
@@ -723,7 +734,7 @@ private fun Composer(
             keyboard?.hide()
         }
     }
-    val query = mentionQuery(draft)
+    val mention = if (draft.selection.collapsed) mentionQueryAt(draft.text, draft.selection.start) else null
     val emojiQuery = if (draft.selection.collapsed) EmojiCompletion.queryBefore(draft.text, draft.selection.start) else null
     val emojiSuggestions = remember(emojiQuery?.text, emojiCatalog, serverEmojis) {
         if (emojiQuery == null) emptyList() else emojiSuggestions(emojiQuery.text, emojiCatalog, serverEmojis)
@@ -744,42 +755,26 @@ private fun Composer(
         } ?: return
         onDraftChange(insertAtCursor(draft, text))
     }
-    val suggestions = remember(query, users) {
-        if (query == null) {
+    val suggestions = remember(mention, users, presence, recentAuthors) {
+        if (mention == null) {
             emptyList()
         } else {
-            val q = query.lowercase()
-            users.values.asSequence()
-                .filter { it.id != session.userId && !it.banned }
-                .filter { it.username.lowercase().startsWith(q) || it.displayName.lowercase().startsWith(q) }
-                .sortedBy { it.username.lowercase() }
-                .take(5)
-                .toList()
+            suggestMentions(mention.text, users.values, session.userId, recentAuthors, presence)
         }
+    }
+    // Com o teclado aberto sobra pouca conversa: a lista de sugestões nunca passa de 40% da altura da tela.
+    val maxSuggestionsHeight = with(density) {
+        minOf(SUGGESTION_ROW * MAX_SUGGESTION_ROWS, (availableHeightPx * 0.4f).toDp().coerceAtLeast(SUGGESTION_ROW * 2))
     }
 
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
         Column {
         Column(Modifier.onSizeChanged { headerPx = it.height }) {
-            suggestions.forEach { user ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            val cursor = draft.selection.start
-                            val at = draft.text.substring(0, cursor).lastIndexOf('@')
-                            val text = draft.text.substring(0, at) + "@${user.username} " + draft.text.substring(cursor)
-                            onPickMention(user.username, user.id)
-                            onDraftChange(TextFieldValue(text, TextRange(at + user.username.length + 2)))
-                        }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    UserAvatar(session, user, size = 28.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text(user.displayName, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.width(8.dp))
-                    Text("@${user.username}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (suggestions.isNotEmpty() && mention != null) {
+                MentionSuggestions(session, suggestions, queryText = mention.text, maxHeight = maxSuggestionsHeight) { user ->
+                    val text = draft.text.substring(0, mention.start) + "@${user.username} " + draft.text.substring(draft.selection.start)
+                    onPickMention(user.username, user.id)
+                    onDraftChange(TextFieldValue(text, TextRange(mention.start + user.username.length + 2)))
                 }
             }
 
@@ -916,6 +911,58 @@ private fun Composer(
         }
     }
 }
+
+/**
+ * Quem pode ser mencionado, do melhor casamento ao pior. A lista rola quando há mais do que cabe, e volta ao
+ * primeiro resultado quando a consulta ([queryText]) muda.
+ */
+@Composable
+private fun MentionSuggestions(
+    session: AccountSession,
+    users: List<User>,
+    queryText: String,
+    maxHeight: Dp,
+    onPick: (User) -> Unit,
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(queryText) { listState.scrollToItem(0) }
+    LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxHeight), state = listState) {
+        items(users, key = { it.id }) { user ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = SUGGESTION_ROW)
+                    .clickable { onPick(user) }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                UserAvatar(session, user, size = 28.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    user.displayName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "@${user.username}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Altura de uma sugestão de menção: a de um alvo de toque. */
+private val SUGGESTION_ROW = 48.dp
+
+/** Linhas visíveis da lista de menções: seis e meia, para a meia linha de baixo mostrar que a lista rola. */
+private const val MAX_SUGGESTION_ROWS = 6.5f
 
 /** Última altura do teclado vista neste processo, para a gaveta já abrir certa em outra conversa. Só em memória. */
 private object KeyboardMemory {
