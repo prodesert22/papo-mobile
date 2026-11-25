@@ -1151,7 +1151,8 @@ private fun Composer(
 
 /**
  * Quem pode ser mencionado, do melhor casamento ao pior, com `@everyone` na frente quando [showEveryone]. A lista
- * rola quando há mais do que cabe, e volta ao primeiro resultado quando a consulta ([queryText]) muda.
+ * rola quando há mais do que cabe, e volta ao primeiro resultado quando a consulta ([queryText]) muda ou quando
+ * `@everyone` entra ou sai da lista.
  */
 @Composable
 private fun MentionSuggestions(
@@ -1164,7 +1165,9 @@ private fun MentionSuggestions(
     onPick: (User) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    LaunchedEffect(queryText) { listState.scrollToItem(0) }
+    // Uma linha nova no topo (a permissão de `@everyone` chegou com a lista aberta) não move a rolagem: a lista segue
+    // ancorada na linha que já aparecia e deixa a nova acima da área visível, cortada ou escondida.
+    LaunchedEffect(queryText, showEveryone) { listState.scrollToItem(0) }
     LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxHeight), state = listState) {
         if (showEveryone) {
             item(key = EVERYONE_MENTION) { EveryoneSuggestion(onPickEveryone) }
