@@ -39,10 +39,13 @@ import chat.papo.mobile.ui.call.CallScreen
 import chat.papo.mobile.ui.chat.ChannelListPane
 import chat.papo.mobile.ui.chat.ChatScreen
 import chat.papo.mobile.ui.chat.ChatViewModel
+import chat.papo.mobile.ui.chat.MessageTarget
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.PlatformUi
 import chat.papo.mobile.ui.home.HomeScreen
 import chat.papo.mobile.ui.lock.LockScreen
+import chat.papo.mobile.ui.search.SearchScreen
+import chat.papo.mobile.ui.search.SearchViewModel
 import chat.papo.mobile.ui.settings.AccountSettingsScreen
 import chat.papo.mobile.ui.settings.AppSettingsScreen
 import chat.papo.mobile.ui.theme.PapoTheme
@@ -64,8 +67,18 @@ private data object AppSettingsRoute
 @Serializable
 private data object CallRoute
 
+/** [messageId] e [messageAt] pedem para abrir a conversa numa mensagem, como um resultado de busca. */
 @Serializable
-private data class ChatRoute(val accountId: String, val channelId: String)
+private data class ChatRoute(
+    val accountId: String,
+    val channelId: String,
+    val messageId: String? = null,
+    val messageAt: String? = null,
+)
+
+/** Busca na conta; [channelId] já abre com o filtro daquela conversa. */
+@Serializable
+private data class SearchRoute(val accountId: String, val channelId: String? = null)
 
 @Composable
 fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
@@ -129,6 +142,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                     onAddServer = { navController.navigate(AddServerRoute()) },
                     onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
                     onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
+                    onSearch = { navController.navigate(SearchRoute(it.id)) },
                     onAppSettings = { navController.navigate(AppSettingsRoute) },
                     content = { account ->
                         val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
@@ -167,10 +181,34 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                 // A conta saiu (removida ou sessão trocada) com a conversa aberta.
                 LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
             } else {
-                val vm = viewModel(key = "${route.accountId}/${route.channelId}/${accountSession.hashCode()}") {
-                    ChatViewModel(accountSession, route.channelId)
+                val vm = viewModel(key = "${route.accountId}/${route.channelId}/${route.messageId}/${accountSession.hashCode()}") {
+                    ChatViewModel(accountSession, route.channelId, route.messageId?.let { MessageTarget(it, route.messageAt) })
                 }
-                ChatScreen(accountSession, vm, onBack = { navController.popBackStack() })
+                ChatScreen(
+                    session = accountSession,
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onSearch = { navController.navigate(SearchRoute(route.accountId, route.channelId)) },
+                )
+            }
+        }
+        composable<SearchRoute> { entry ->
+            val route = entry.toRoute<SearchRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                // A sessão entra na chave: os resultados de uma sessão nunca aparecem em outra.
+                val vm = viewModel(key = "search/${route.accountId}/${route.channelId}/${accountSession.hashCode()}") {
+                    SearchViewModel(accountSession, route.channelId)
+                }
+                SearchScreen(
+                    session = accountSession,
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onOpen = { hit -> navController.navigate(ChatRoute(route.accountId, hit.channelId, hit.id, hit.createdAtIso)) },
+                )
             }
         }
         composable<CallRoute> {

@@ -38,7 +38,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,6 +50,7 @@ import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.groupChannels
 import chat.papo.mobile.chat.renderMentions
+import chat.papo.mobile.chat.searchByName
 import chat.papo.mobile.data.ws.WsState
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_cancel
@@ -64,6 +64,7 @@ import chat.papo.mobile.resources.channels_sync_failed
 import chat.papo.mobile.resources.channels_uncategorized
 import chat.papo.mobile.resources.dm_pick_search
 import chat.papo.mobile.resources.dm_pick_title
+import chat.papo.mobile.resources.search_clear_filter
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import kotlinx.coroutines.launch
@@ -132,6 +133,7 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
     if (pickingUser) {
         UserPickerDialog(
             session = session,
+            title = stringResource(Res.string.dm_pick_title),
             users = users.values.filter { it.id != session.userId && !it.banned }.sortedBy { it.displayName.lowercase() },
             onDismiss = { pickingUser = false },
             onPick = { user ->
@@ -272,16 +274,24 @@ fun PresenceDot(presence: Presence?, modifier: Modifier = Modifier) {
     )
 }
 
+/**
+ * Escolha de uma pessoa, com busca por nome ou `@usuário` sem diferenciar acento
+ * nem maiúsculas. [onClear], quando dado, oferece desfazer a escolha atual.
+ */
 @Composable
-private fun UserPickerDialog(session: AccountSession, users: List<User>, onDismiss: () -> Unit, onPick: (User) -> Unit) {
+internal fun UserPickerDialog(
+    session: AccountSession,
+    title: String,
+    users: List<User>,
+    onDismiss: () -> Unit,
+    onPick: (User) -> Unit,
+    onClear: (() -> Unit)? = null,
+) {
     var query by remember { mutableStateOf("") }
-    val filtered = remember(users, query) {
-        val q = query.trim().lowercase()
-        if (q.isEmpty()) users else users.filter { q in it.username.lowercase() || q in it.displayName.lowercase() }
-    }
+    val filtered = remember(users, query) { searchByName(query, users) { listOf(it.username, it.displayName) } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.dm_pick_title)) },
+        title = { Text(title) },
         text = {
             Column {
                 OutlinedTextField(
@@ -315,9 +325,12 @@ private fun UserPickerDialog(session: AccountSession, users: List<User>, onDismi
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            if (onClear != null) TextButton(onClick = onClear) { Text(stringResource(Res.string.search_clear_filter)) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) } },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        textContentColor = Color.Unspecified,
+        // Sem cor explícita os nomes saem pretos, ilegíveis no tema escuro.
+        textContentColor = MaterialTheme.colorScheme.onSurface,
     )
 }

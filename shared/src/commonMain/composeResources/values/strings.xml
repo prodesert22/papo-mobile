@@ -9,6 +9,7 @@
     <string name="action_save">Salvar</string>
     <string name="action_retry">Tentar de novo</string>
     <string name="action_close">Fechar</string>
+    <string name="action_apply">Aplicar</string>
 
     <!-- Erros -->
     <string name="error_network">Não foi possível falar com o servidor. Confira o endereço e a sua conexão.</string>
@@ -145,6 +146,10 @@
     <string name="chat_sensitive">Conteúdo sensível. Toque para ver.</string>
     <string name="chat_pinned">Mensagens fixadas</string>
     <string name="chat_pinned_empty">Nada fixado neste canal.</string>
+    <string name="chat_search">Buscar nesta conversa</string>
+    <string name="chat_locating">Localizando mensagem…</string>
+    <string name="chat_focus_missing">Essa mensagem não está mais na conversa. Ela pode ter sido apagada.</string>
+    <string name="chat_focus_too_old">Essa mensagem é antiga demais para abrir na conversa.</string>
     <string name="chat_unknown_user">Usuário removido</string>
     <string name="chat_file_saved">Arquivo salvo em Downloads.</string>
     <string name="chat_file_failed">Não foi possível baixar o arquivo.</string>
@@ -157,6 +162,45 @@
     <string name="msg_delete_title">Apagar esta mensagem?</string>
     <string name="msg_delete_body">Ela some para todo mundo e não dá para desfazer.</string>
     <string name="msg_download">Baixar</string>
+
+    <!-- Busca -->
+    <string name="search_title">Buscar mensagens</string>
+    <string name="search_submit">Buscar</string>
+    <string name="search_clear_text">Limpar texto</string>
+    <string name="search_filter_conversation">Conversa</string>
+    <string name="search_dm_with">Conversa com %1$s</string>
+    <string name="search_filter_author">Autor</string>
+    <string name="search_filter_author_value">Autor: %1$s</string>
+    <string name="search_filter_mentions">Menciona</string>
+    <string name="search_filter_mentions_value">Menciona: %1$s</string>
+    <string name="search_filter_link">Tem link</string>
+    <string name="search_filter_attachments">Anexos</string>
+    <string name="search_attachments_any">Com ou sem anexos</string>
+    <string name="search_attachments_with">Com anexos</string>
+    <string name="search_attachments_without">Sem anexos</string>
+    <string name="search_filter_date">Data</string>
+    <string name="search_date_title">Período das mensagens</string>
+    <string name="search_date_help">Os dois dias entram na busca. O servidor conta os dias no horário UTC.</string>
+    <string name="search_date_start">Data inicial</string>
+    <string name="search_date_end">Data final</string>
+    <string name="search_date_from">Desde %1$s</string>
+    <string name="search_date_until">Até %1$s</string>
+    <string name="search_date_range">%1$s a %2$s</string>
+    <string name="search_order_oldest">Mais antigas primeiro</string>
+    <string name="search_clear_filters">Limpar filtros</string>
+    <string name="search_clear_filter">Tirar o filtro</string>
+    <string name="search_pick_conversation">Buscar em qual conversa?</string>
+    <string name="search_pick_conversation_search">Buscar conversa</string>
+    <string name="search_pick_author">Mensagens de quem?</string>
+    <string name="search_pick_mention">Mensagens que mencionam quem?</string>
+    <string name="search_idle">Digite o que procura e toque em Buscar, ou escolha um filtro.</string>
+    <string name="search_dm_note">A busca no servidor não inclui as conversas diretas. Para procurar em uma delas, escolha-a em Conversa.</string>
+    <string name="search_recent_filters">Filtros recentes</string>
+    <string name="search_empty">Nenhuma mensagem encontrada.</string>
+    <string name="search_load_more">Carregar mais</string>
+    <string name="search_end">Fim dos resultados</string>
+    <string name="search_truncated">Mostrando os primeiros %1$d resultados. Refine a busca para ver os outros.</string>
+    <string name="search_no_text">Mensagem sem texto</string>
 
     <!-- Chamadas -->
     <string name="call_joining">Entrando na chamada…</string>

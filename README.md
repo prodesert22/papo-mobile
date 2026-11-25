@@ -42,6 +42,8 @@ Papo also has a [web client](https://github.com/prodesert22/papo-frontend) and a
   unread markers.
 - Attachments, replies, editing and deleting, reactions, pinned messages and
   mentions.
+- Message search on the server, by text and by conversation, author, mention,
+  links, attachments and date. A result opens in its conversation.
 - Markdown formatting, link previews, image thumbnails with a full-screen
   viewer, typing indicators and presence.
 
@@ -57,8 +59,11 @@ The complete list is in the [0.1.0 release notes](releases/v0.1.0.md).
 ## Current limitations
 
 - No push notifications: messages arrive only while the app is open.
-- No message search, notification inbox, profile editing, user preferences,
-  blocking or server administration.
+- No notification inbox, profile editing, user preferences, blocking or server
+  administration.
+- A search result opens in its conversation only when it is among the latest
+  messages there, about a thousand; older ones are listed but cannot be opened
+  in context.
 - In calls: no sound from a shared screen, no per-person volume and no Bluetooth
   headset selection.
 - Video attachments play only after being downloaded, GIFs are not animated and
@@ -126,9 +131,9 @@ uninstalls the app when it finishes.
 
 On an emulator, a server running on your computer is reachable at
 `http://10.0.2.2:<port>`. Without a server, `python3 tools/dev/fake_papo.py 8081`
-starts a fake one that covers sign-in and text chat, with the users `ana`
-(`Senha@123`) and `bia` (`Senha@456`). It does not replace a real server and has
-no voice calls.
+starts a fake one that covers sign-in, text chat and message search, with the
+users `ana` (`Senha@123`) and `bia` (`Senha@456`). It does not replace a real
+server and has no voice calls.
 
 A release build is minified and needs a signing key; see
 [releases/README.md](releases/README.md) (in Portuguese).

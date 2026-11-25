@@ -36,7 +36,9 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -74,12 +76,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.ChannelType
@@ -97,13 +101,17 @@ import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.chat_attach
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_empty
+import chat.papo.mobile.resources.chat_focus_missing
+import chat.papo.mobile.resources.chat_focus_too_old
 import chat.papo.mobile.resources.chat_history_start
+import chat.papo.mobile.resources.chat_locating
 import chat.papo.mobile.resources.chat_pinned
 import chat.papo.mobile.resources.chat_pinned_empty
 import chat.papo.mobile.resources.chat_placeholder
 import chat.papo.mobile.resources.chat_placeholder_dm
 import chat.papo.mobile.resources.chat_remove_attachment
 import chat.papo.mobile.resources.chat_replying_to
+import chat.papo.mobile.resources.chat_search
 import chat.papo.mobile.resources.chat_send
 import chat.papo.mobile.resources.chat_today
 import chat.papo.mobile.resources.chat_typing_many
@@ -128,17 +136,19 @@ import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.settings.ConfirmDialog
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 private val quickReactions = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> Unit) {
+fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> Unit, onSearch: () -> Unit) {
     val chat = session.chat
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -181,6 +191,24 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     LaunchedEffect(newest?.id, atBottom) {
         if (newest != null && atBottom) viewModel.markRead(newest)
     }
+    // Outra conversa pode ter sido aberta por cima desta (busca → mensagem): ao voltar, é esta que está na tela.
+    LifecycleResumeEffect(viewModel) {
+        viewModel.onVisible()
+        onPauseOrDispose {}
+    }
+    // Mensagem pedida ao abrir: rola até ela quando entra na lista e a destaca por alguns segundos.
+    val focusIndex = state.focusId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
+    LaunchedEffect(state.focusId, focusIndex >= 0) {
+        if (focusIndex < 0) return@LaunchedEffect
+        try {
+            // A lista é invertida: o deslocamento negativo sobe a mensagem e deixa à vista o que veio depois dela.
+            listState.scrollToItem(focusIndex, -listState.layoutInfo.viewportSize.height / 3)
+            delay(4.seconds)
+        } finally {
+            // Também ao sair da tela antes do tempo: voltar a ela não deve rolar de novo.
+            viewModel.clearFocus()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -215,6 +243,9 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                     }
                 },
                 actions = {
+                    IconButton(onClick = onSearch) {
+                        Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.chat_search))
+                    }
                     if (channel != null && channel.type != ChannelType.Category) {
                         IconButton(onClick = viewModel::showPinned) {
                             Icon(Icons.Filled.PushPin, contentDescription = stringResource(Res.string.chat_pinned))
@@ -252,7 +283,8 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                                 repliedTo = message.replyTo?.let { byId[it] },
                                 compact = compact,
                                 pinned = pinnedIds[viewModel.channelId]?.contains(message.id) == true,
-                                highlighted = state.replyTo?.id == message.id || state.editing?.id == message.id,
+                                highlighted = state.replyTo?.id == message.id || state.editing?.id == message.id ||
+                                    state.focusId == message.id,
                                 onLongPress = { actionsFor = message },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
                                 onOpenImage = { viewing = it },
@@ -276,11 +308,29 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                         }
                     }
                 }
-                state.error?.let { error ->
-                    Snackbar(
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
-                        action = { TextButton(onClick = viewModel::dismissError) { Text(stringResource(Res.string.action_close)) } },
-                    ) { Text(error.text()) }
+                if (state.locating) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shadowElevation = 2.dp,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(12.dp),
+                    ) {
+                        Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(stringResource(Res.string.chat_locating), style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+                Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.focusProblem?.let { problem ->
+                        val text = when (problem) {
+                            FocusProblem.Missing -> Res.string.chat_focus_missing
+                            FocusProblem.TooOld -> Res.string.chat_focus_too_old
+                        }
+                        NoticeBar(stringResource(text), viewModel::dismissFocusProblem)
+                    }
+                    state.error?.let { error -> NoticeBar(error.text(), viewModel::dismissError) }
                 }
             }
 
@@ -345,6 +395,19 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     }
     viewing?.let { ImageViewer(session, it) { viewing = null } }
     state.pinnedList?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
+}
+
+@Composable
+private fun NoticeBar(text: String, onClose: () -> Unit) {
+    Snackbar(
+        action = {
+            // A cor padrão do botão quase some no fundo da faixa; a do texto dela é legível nos dois temas.
+            TextButton(
+                onClick = onClose,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inverseOnSurface),
+            ) { Text(stringResource(Res.string.action_close), fontWeight = FontWeight.SemiBold) }
+        },
+    ) { Text(text) }
 }
 
 /** Ao editar, as menções voltam a aparecer como `@nome`; o envio as recodifica se o nome for escolhido de novo. */

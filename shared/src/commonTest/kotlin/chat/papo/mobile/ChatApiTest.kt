@@ -13,6 +13,7 @@ import chat.papo.mobile.data.api.MemoryCookieStore
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.api.ReactionRequest
+import chat.papo.mobile.data.api.SearchRequest
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
@@ -151,6 +152,55 @@ class ChatApiTest {
             ),
             seen.map { "${it.request.method.value} ${it.request.url.encodedPath} ${it.body}" },
         )
+    }
+
+    @Test
+    fun buscaMandaOsFiltrosNoCorpoEOCursorNaQuery() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) {
+            json(
+                """{"results":[
+                    {"type":"message","id":"m1","content":"deploy feito","channel_id":"c1","channel_name":"papo","author_id":"u2",
+                     "author_username":"bia","created_at":"2026-01-01T00:00:00.123456Z","score":0.6},
+                    {"type":"message","id":"m2","content":null,"channel_id":"c1","channel_name":"papo","author_id":null,
+                     "author_username":"Robô","webhook_id":"w1","external_author":{"name":"Robô","avatar_url":"https://x.test/a.png"},
+                     "created_at":"2026-01-01T00:00:00Z","campo_do_futuro":1}],
+                    "has_more":true}""",
+            )
+        }
+
+        val first = api.search(SearchRequest(text = "deploy", channelId = "c1", order = "desc", containsAttachment = false))
+        // Cursor pela metade não é mandado: o servidor o recusaria com 400.
+        api.search(SearchRequest(author = "u2"), since = "2026-01-01T00:00:00.123456Z")
+        api.search(SearchRequest(author = "u2"), since = "2026-01-01T00:00:00.123456Z", lastId = "m1")
+
+        assertTrue(first.hasMore)
+        assertEquals(listOf("m1", "m2"), first.results.map { it.id })
+        assertEquals(0.6, first.results[0].score)
+        // Resultado de webhook: sem autor nem texto, com a identidade externa para mostrar.
+        assertNull(first.results[1].authorId)
+        assertNull(first.results[1].content)
+        assertNull(first.results[1].score)
+        assertEquals("Robô", first.results[1].externalAuthor?.name)
+
+        assertTrue(seen.all { it.request.method == HttpMethod.Post && it.request.url.encodedPath == "/search" })
+        assertEquals("""{"text":"deploy","channel_id":"c1","order":"desc","contains_attachment":false}""", seen[0].body)
+        assertEquals("", seen[0].request.url.encodedQuery)
+        assertEquals("", seen[1].request.url.encodedQuery)
+        assertEquals("""{"author":"u2"}""", seen[2].body)
+        // O texto de `since` vai exatamente como veio no resultado.
+        assertEquals("2026-01-01T00:00:00.123456Z", seen[2].request.url.parameters["since"])
+        assertEquals("m1", seen[2].request.url.parameters["last_id"])
+    }
+
+    @Test
+    fun buscaRecusadaPeloServidorViraErroComOMotivo() = runTest {
+        val api = api(mutableListOf()) {
+            json("""{"type":"t","title":"Parâmetro inválido","status":400,"detail":"pelo menos 1 filtro é obrigatório"}""", HttpStatusCode.BadRequest)
+        }
+        val error = assertFailsWith<ApiException> { api.search(SearchRequest(order = "asc")) }
+        assertEquals(400, error.status)
+        assertEquals("pelo menos 1 filtro é obrigatório", error.detail)
     }
 
     @Test

@@ -17,6 +17,7 @@ coroutines = "1.11.0"
 serialization = "1.13.0"
 datetime = "0.8.0"
 kotlinx-io = "0.9.3"
+normalize = "1.4.0"
 ktor = "3.6.1"
 navigation = "2.10.0"
 lifecycle = "2.11.0"
@@ -52,6 +53,9 @@ coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", ve
 kotlinx-io = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinx-io" }
 datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "datetime" }
 serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+
+# Texto
+normalize = { module = "com.doist.x:normalize", version.ref = "normalize" }
 
 # Rede
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }

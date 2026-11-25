@@ -3,6 +3,7 @@ package chat.papo.mobile.account
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.chat.ChatStore
 import chat.papo.mobile.chat.EmojiCatalog
+import chat.papo.mobile.chat.RecentSearchFilters
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AuthApi
 import chat.papo.mobile.data.api.ChatApi
@@ -33,6 +34,7 @@ class AccountSession(
     val auth = AuthApi(client)
     val api = ChatApi(client)
     val emojis = EmojiCatalog(api)
+    val recentSearches = RecentSearchFilters()
 
     val ws = WsClient(client, scope, sessionStillValid = ::sessionStillValid)
     val chat = ChatStore(userId, AccountDb(driver), api, ws, scope, io)

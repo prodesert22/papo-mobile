@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -58,6 +59,7 @@ import chat.papo.mobile.resources.account_settings
 import chat.papo.mobile.resources.rail_add
 import chat.papo.mobile.resources.rail_settings
 import chat.papo.mobile.resources.rail_unread
+import chat.papo.mobile.resources.search_title
 import chat.papo.mobile.resources.security_alert_body
 import chat.papo.mobile.resources.security_alert_dismiss
 import chat.papo.mobile.resources.security_alert_title
@@ -75,6 +77,7 @@ fun HomeScreen(
     onAddServer: () -> Unit,
     onReauthenticate: (Account) -> Unit,
     onAccountSettings: (Account) -> Unit,
+    onSearch: (Account) -> Unit,
     onAppSettings: () -> Unit,
     content: @Composable (Account) -> Unit,
 ) {
@@ -99,7 +102,12 @@ fun HomeScreen(
                     WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.End + WindowInsetsSides.Bottom),
                 ),
             ) {
-                AccountHeader(active, onSettings = { onAccountSettings(active) })
+                AccountHeader(
+                    account = active,
+                    // Sem sessão não há o que buscar: a conta precisa entrar de novo antes.
+                    onSearch = if (active.sessionExpired) null else ({ onSearch(active) }),
+                    onSettings = { onAccountSettings(active) },
+                )
                 if (active.sessionExpired) {
                     Notice(
                         title = stringResource(Res.string.session_expired_title),
@@ -218,7 +226,7 @@ private fun RailAction(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AccountHeader(account: Account, onSettings: () -> Unit) {
+private fun AccountHeader(account: Account, onSearch: (() -> Unit)?, onSettings: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(account.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -229,6 +237,11 @@ private fun AccountHeader(account: Account, onSettings: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        if (onSearch != null) {
+            IconButton(onClick = onSearch) {
+                Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.search_title))
+            }
         }
         IconButton(onClick = onSettings) {
             Icon(Icons.Filled.Tune, contentDescription = stringResource(Res.string.account_settings))

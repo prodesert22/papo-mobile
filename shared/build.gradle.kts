@@ -47,6 +47,7 @@ kotlin {
             implementation(libs.serialization.json)
             implementation(libs.datetime)
             implementation(libs.kotlinx.io)
+            implementation(libs.normalize)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.client.websockets)

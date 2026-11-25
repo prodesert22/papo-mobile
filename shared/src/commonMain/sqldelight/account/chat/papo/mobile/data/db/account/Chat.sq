@@ -202,6 +202,11 @@ SELECT * FROM message WHERE channel_id = ? ORDER BY created_us ASC, id ASC LIMIT
 newestMessage:
 SELECT * FROM message WHERE channel_id = ? ORDER BY created_us DESC, id DESC LIMIT 1;
 
+-- Posição de uma mensagem na lista do canal, contada a partir da mais nova.
+countMessagesNewerThan:
+SELECT COUNT(*) FROM message
+WHERE channel_id = :channel_id AND (created_us > :created_us OR (created_us = :created_us AND id > :id));
+
 deleteMessagesOlderThan:
 DELETE FROM message WHERE channel_id = ? AND created_us < ?;
 

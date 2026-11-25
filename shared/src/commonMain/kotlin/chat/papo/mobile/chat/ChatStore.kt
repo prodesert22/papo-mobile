@@ -208,13 +208,38 @@ class ChatStore(
     }
 
     /** Carrega a página anterior à mensagem mais antiga guardada. Devolve false quando o histórico acabou. */
-    suspend fun loadOlder(channelId: String): Boolean {
+    suspend fun loadOlder(channelId: String, pageSize: Int = PAGE_SIZE): Boolean {
         if (hasOlder[channelId] == false) return false
         val oldest = withContext(io) { q.oldestMessage(channelId).executeAsOneOrNull() } ?: return false
-        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = PAGE_SIZE)
+        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = pageSize)
         withContext(io) { q.transaction { page.messages.forEach(::upsert) } }
         hasOlder[channelId] = page.hasMore && page.messages.isNotEmpty()
         return hasOlder[channelId] == true
+    }
+
+    /**
+     * Procura uma mensagem no histórico do canal para a tela poder rolar até ela.
+     * O trecho guardado é sempre contínuo a partir da mensagem mais nova, então
+     * uma mensagem antiga só entra nele junto com tudo o que veio depois dela:
+     * as páginas anteriores são buscadas uma a uma, até [MAX_LOCATE_PAGES].
+     * [createdAtIso], quando conhecido, encerra a procura assim que o trecho
+     * passa do instante da mensagem sem ela aparecer.
+     */
+    suspend fun locate(channelId: String, messageId: String, createdAtIso: String? = null): Located {
+        val target = createdAtIso?.let(::microsOf)?.takeIf { it > 0 }
+        repeat(MAX_LOCATE_PAGES + 1) { page ->
+            val (position, oldest) = withContext(io) {
+                val row = q.selectMessage(messageId).executeAsOneOrNull()?.takeIf { it.channel_id == channelId }
+                val position = row?.let { q.countMessagesNewerThan(channelId, it.created_us, it.id).executeAsOne() }
+                position to q.oldestMessage(channelId).executeAsOneOrNull()
+            }
+            if (position != null) return Located.Found(position.toInt())
+            if (oldest == null || hasOlder[channelId] == false) return Located.Missing
+            if (target != null && oldest.created_us < target) return Located.Missing
+            if (page == MAX_LOCATE_PAGES) return Located.TooOld
+            loadOlder(channelId, LOCATE_PAGE_SIZE)
+        }
+        return Located.TooOld
     }
 
     suspend fun send(channelId: String, content: String, replyTo: String?, files: List<OutgoingFile>) {
@@ -570,6 +595,9 @@ class ChatStore(
 
     private companion object {
         const val PAGE_SIZE = 40
+        // Limite de página do servidor e teto de páginas ao procurar uma mensagem antiga.
+        const val LOCATE_PAGE_SIZE = 100
+        const val MAX_LOCATE_PAGES = 10
         const val MAX_USER_PAGES = 50
         // O servidor nunca avisa que alguém parou de digitar: o indicador expira aqui.
         val TYPING_THROTTLE = 2.seconds

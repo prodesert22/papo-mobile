@@ -128,6 +128,21 @@ class ChatApi(private val client: PapoClient) {
             setBody(reaction)
         }.requireSuccess()
 
+    /**
+     * Busca mensagens no servidor, até 100 por página. A página seguinte leva o
+     * `created_at` e o `id` do último resultado; o servidor recusa o cursor pela metade.
+     */
+    suspend fun search(request: SearchRequest, since: String? = null, lastId: String? = null): SearchResponse =
+        http.post {
+            url(path("/search"))
+            if (since != null && lastId != null) {
+                parameter("since", since)
+                parameter("last_id", lastId)
+            }
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }.bodyOrThrow()
+
     suspend fun emojis(since: String? = null, lastId: String? = null): EmojisPage =
         http.get {
             url(path("/emojis"))

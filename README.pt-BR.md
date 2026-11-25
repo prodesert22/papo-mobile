@@ -43,6 +43,8 @@ e um [cliente de terminal](https://github.com/prodesert22/papo-tui).
 - Canais de texto agrupados por categoria e mensagens diretas, em tempo real,
   com marcação de não lidas.
 - Anexos, respostas, edição e exclusão, reações, mensagens fixadas e menções.
+- Busca de mensagens no servidor, por texto e por conversa, autor, menção, link,
+  anexos e data. O resultado abre na conversa.
 - Formatação Markdown, prévias de links, miniaturas de imagem com visualizador
   em tela cheia, indicador de digitação e presença.
 
@@ -58,8 +60,11 @@ A lista completa está nas [notas da versão 0.1.0](releases/v0.1.0.md) (em ingl
 ## Limitações atuais
 
 - Sem notificações push: as mensagens só chegam com o app aberto.
-- Sem busca de mensagens, caixa de notificações, edição de perfil, preferências
-  do usuário, bloqueio de usuários e administração do servidor.
+- Sem caixa de notificações, edição de perfil, preferências do usuário, bloqueio
+  de usuários e administração do servidor.
+- Um resultado da busca só abre na conversa quando está entre as últimas
+  mensagens dela, cerca de mil; os mais antigos aparecem na lista, mas não abrem
+  no contexto.
 - Nas chamadas: sem o som da tela transmitida, sem volume por pessoa e sem
   escolha de fone Bluetooth.
 - Vídeos anexados só tocam depois de baixados, GIFs não são animados e os emojis
@@ -127,9 +132,9 @@ conectados e desinstala o app ao terminar.
 
 Num emulador, um servidor rodando no seu computador fica acessível em
 `http://10.0.2.2:<porta>`. Sem servidor, `python3 tools/dev/fake_papo.py 8081`
-sobe um falso que cobre login e chat de texto, com as usuárias `ana`
-(`Senha@123`) e `bia` (`Senha@456`). Ele não substitui um servidor de verdade e
-não tem chamadas de voz.
+sobe um falso que cobre login, chat de texto e busca de mensagens, com as
+usuárias `ana` (`Senha@123`) e `bia` (`Senha@456`). Ele não substitui um
+servidor de verdade e não tem chamadas de voz.
 
 O build de release é minificado e precisa de uma chave de assinatura; veja
 [releases/README.md](releases/README.md).

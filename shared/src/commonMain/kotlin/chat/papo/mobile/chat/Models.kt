@@ -76,6 +76,18 @@ data class Message(
         userReactions.any { it.emojiId == reaction.emojiId && it.unicode == reaction.unicode }
 }
 
+/** Resultado de procurar uma mensagem no histórico de um canal. */
+sealed interface Located {
+    /** Está guardada; [position] é quantas mensagens mais novas o canal tem antes dela. */
+    data class Found(val position: Int) : Located
+
+    /** O histórico foi lido até antes dela e ela não apareceu: foi apagada ou não é deste canal. */
+    data object Missing : Located
+
+    /** Fica mais para trás do que o limite de páginas da busca. */
+    data object TooOld : Located
+}
+
 /** online, offline, away ou busy. */
 data class Presence(val status: String, val statusMessage: String?) {
     val online: Boolean get() = status != "offline"

@@ -184,8 +184,43 @@ data class EmojiDto(
 @Serializable
 data class EmojisPage(val emojis: List<EmojiDto> = emptyList(), @SerialName("has_more") val hasMore: Boolean = false)
 
+/**
+ * Corpo de `POST /search`. O servidor exige ao menos um filtro além de [order];
+ * campo nulo não vai no JSON. [containsAttachment] `false` pede mensagens sem anexo.
+ */
 @Serializable
-data class SearchRequest(val query: String, @SerialName("channel_id") val channelId: String? = null)
+data class SearchRequest(
+    val text: String? = null,
+    val author: String? = null,
+    @SerialName("channel_id") val channelId: String? = null,
+    val mention: String? = null,
+    val has: String? = null,
+    val order: String? = null,
+    @SerialName("date_start") val dateStart: String? = null,
+    @SerialName("date_end") val dateEnd: String? = null,
+    @SerialName("contains_attachment") val containsAttachment: Boolean? = null,
+)
+
+/** Resultado de busca: só o corpo da mensagem, sem anexos, embeds nem reações. */
+@Serializable
+data class SearchResultDto(
+    val id: String,
+    @SerialName("channel_id") val channelId: String,
+    @SerialName("channel_name") val channelName: String? = null,
+    @SerialName("author_id") val authorId: String? = null,
+    @SerialName("author_username") val authorUsername: String? = null,
+    val content: String? = null,
+    @SerialName("webhook_id") val webhookId: String? = null,
+    @SerialName("external_author") val externalAuthor: ExternalAuthorDto? = null,
+    @SerialName("created_at") val createdAt: String,
+    val score: Double? = null,
+)
+
+@Serializable
+data class SearchResponse(
+    val results: List<SearchResultDto> = emptyList(),
+    @SerialName("has_more") val hasMore: Boolean = false,
+)
 
 @Serializable
 data class IceServerDto(val urls: List<String> = emptyList(), val username: String? = null, val credential: String? = null)

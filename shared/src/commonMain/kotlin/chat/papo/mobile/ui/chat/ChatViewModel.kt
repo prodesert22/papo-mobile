@@ -3,6 +3,7 @@ package chat.papo.mobile.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.Located
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.encodeMentions
 import chat.papo.mobile.data.api.OutgoingFile
@@ -18,6 +19,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Mensagem que a conversa deve mostrar ao abrir, como um resultado de busca. */
+data class MessageTarget(val id: String, val createdAtIso: String? = null)
+
+/** Por que a mensagem pedida ao abrir não pôde ser mostrada. */
+enum class FocusProblem { Missing, TooOld }
+
 data class ChatUiState(
     val replyTo: Message? = null,
     val editing: Message? = null,
@@ -28,10 +35,19 @@ data class ChatUiState(
     val loadedOnce: Boolean = false,
     val error: UiError? = null,
     val pinnedList: List<Message>? = null,
+    /** Procurando no histórico a mensagem pedida ao abrir. */
+    val locating: Boolean = false,
+    /** Mensagem pedida ao abrir, já ao alcance da lista: a tela rola até ela e a destaca. */
+    val focusId: String? = null,
+    val focusProblem: FocusProblem? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class ChatViewModel(private val session: AccountSession, val channelId: String) : ViewModel() {
+class ChatViewModel(
+    private val session: AccountSession,
+    val channelId: String,
+    private val target: MessageTarget? = null,
+) : ViewModel() {
     private val chat = session.chat
     private val limit = MutableStateFlow(PAGE)
 
@@ -39,7 +55,7 @@ class ChatViewModel(private val session: AccountSession, val channelId: String) 
         .flatMapLatest { chat.messages(channelId, it) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _state = MutableStateFlow(ChatUiState())
+    private val _state = MutableStateFlow(ChatUiState(locating = target != null))
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     /** Nomes escolhidos no autocompletar deste rascunho, para virar menção no envio. */
@@ -50,13 +66,37 @@ class ChatViewModel(private val session: AccountSession, val channelId: String) 
         viewModelScope.launch {
             attempt { chat.refreshLatest(channelId) }
             _state.update { it.copy(loadedOnce = true, reachedStart = !chat.hasOlder(channelId)) }
+            target?.let { locate(it) }
         }
         viewModelScope.launch { runCatching { chat.loadPinned(channelId) } }
     }
 
+    private suspend fun locate(target: MessageTarget) {
+        var located: Located? = null
+        attempt { located = chat.locate(channelId, target.id, target.createdAtIso) }
+        when (val result = located) {
+            is Located.Found -> {
+                // A janela da tela precisa alcançar a mensagem e sobrar contexto antes dela.
+                limit.update { maxOf(it, result.position + PAGE) }
+                _state.update { it.copy(locating = false, focusId = target.id) }
+            }
+            Located.Missing -> _state.update { it.copy(locating = false, focusProblem = FocusProblem.Missing) }
+            Located.TooOld -> _state.update { it.copy(locating = false, focusProblem = FocusProblem.TooOld) }
+            null -> _state.update { it.copy(locating = false) }
+        }
+    }
+
+    /** A tela desta conversa voltou a ser a visível. */
+    fun onVisible() = chat.setViewing(channelId)
+
+    fun clearFocus() = _state.update { it.copy(focusId = null) }
+
+    fun dismissFocusProblem() = _state.update { it.copy(focusProblem = null) }
+
     fun loadOlder() {
         val s = _state.value
-        if (s.loadingOlder || s.reachedStart || !s.loadedOnce) return
+        // Enquanto a mensagem pedida é procurada, é a procura que pagina o histórico.
+        if (s.loadingOlder || s.reachedStart || !s.loadedOnce || s.locating) return
         _state.update { it.copy(loadingOlder = true) }
         viewModelScope.launch {
             // Primeiro mostra o que já está guardado; só vai ao servidor quando acaba.

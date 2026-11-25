@@ -1,6 +1,8 @@
 package chat.papo.mobile
 
 import chat.papo.mobile.ui.chat.ChatViewModel
+import chat.papo.mobile.ui.chat.FocusProblem
+import chat.papo.mobile.ui.chat.MessageTarget
 import chat.papo.mobile.ui.components.UiError
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -61,9 +63,9 @@ class ChatViewModelTest {
         }
     }
 
-    private fun TestScope.viewModel(): ChatViewModel {
+    private fun TestScope.viewModel(target: MessageTarget? = null): ChatViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        return ChatViewModel(TestResources.session(engine, this), "c1")
+        return ChatViewModel(TestResources.session(engine, this), "c1", target)
     }
 
     /** O motor HTTP falso responde em outra thread: espera o estado chegar onde o teste precisa. */
@@ -88,6 +90,42 @@ class ChatViewModelTest {
         assertEquals(listOf("m1"), vm.state.first { it.pinnedList != null }.pinnedList!!.map { it.id })
         vm.hidePinned()
         assertNull(vm.state.value.pinnedList)
+    }
+
+    @Test
+    fun abrirNumaMensagemAntigaCarregaAteElaEADestaca() = runTest {
+        total = 300
+        val vm = viewModel(MessageTarget("m20", "2026-01-01T00:00:20Z"))
+        assertTrue(vm.state.value.locating)
+        vm.loadOlder() // a rolagem não pagina enquanto a mensagem é procurada
+        assertFalse(vm.state.value.loadingOlder)
+
+        val state = vm.state.first { it.focusId != null }
+        assertEquals("m20", state.focusId)
+        assertFalse(state.locating)
+        assertNull(state.focusProblem)
+        // A janela da tela alcança a mensagem e mostra o que vem antes dela.
+        val shown = vm.messages.first { list -> list.any { it.id == "m20" } }.map { it.id }
+        assertEquals("m300", shown.first())
+        assertEquals(280, shown.indexOf("m20"))
+        assertTrue(shown.size > 281)
+
+        vm.clearFocus()
+        assertNull(vm.state.value.focusId)
+    }
+
+    @Test
+    fun mensagemPedidaQueFoiApagadaAvisaSemDestacar() = runTest {
+        total = 120
+        // O instante dela fica entre m100 e m101, mas ela não existe mais.
+        val vm = viewModel(MessageTarget("apagada", "2026-01-01T00:01:40.5Z"))
+
+        val state = vm.state.first { !it.locating }
+        assertEquals(FocusProblem.Missing, state.focusProblem)
+        assertNull(state.focusId)
+        assertNull(state.error)
+        vm.dismissFocusProblem()
+        assertNull(vm.state.value.focusProblem)
     }
 
     @Test

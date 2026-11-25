@@ -2,6 +2,7 @@ package chat.papo.mobile
 
 import chat.papo.mobile.account.ServerUrl
 import chat.papo.mobile.chat.ChatStore
+import chat.papo.mobile.chat.Located
 import chat.papo.mobile.data.api.ChatApi
 import chat.papo.mobile.data.api.MemoryCookieStore
 import chat.papo.mobile.data.api.PapoClient
@@ -114,6 +115,67 @@ class ChatStoreTest {
         assertFalse(f.store.loadOlder("c1")) // chegou em m1
         assertEquals((100 downTo 1).map { "m$it" }, f.ids())
         assertFalse(f.store.loadOlder("c1"))
+    }
+
+    @Test
+    fun localizaMensagemJaGuardadaSemIrAoServidor() = runTest {
+        val f = Fixture(this, Backend(100) { msg(it) })
+        f.store.refreshLatest("c1")
+        val before = f.backend.requests.size
+
+        // m100 é a mais nova: m90 tem dez mensagens mais novas antes dela.
+        assertEquals(Located.Found(10), f.store.locate("c1", "m90", ts(90)))
+        assertEquals(Located.Found(0), f.store.locate("c1", "m100"))
+        assertEquals(before, f.backend.requests.size)
+    }
+
+    @Test
+    fun localizaMensagemAntigaPaginandoParaTras() = runTest {
+        val f = Fixture(this, Backend(350) { msg(it) })
+        f.store.refreshLatest("c1") // m350..m311
+
+        assertEquals(Located.Found(290), f.store.locate("c1", "m60", ts(60)))
+
+        // Três páginas de 100 (o limite do servidor), cada uma continuando da mensagem mais antiga guardada.
+        val pages = f.backend.requests.drop(1)
+        assertEquals(listOf("m311", "m211", "m111"), pages.map { Regex("last_id=(m\\d+)").find(it)!!.groupValues[1] })
+        assertTrue(pages.all { "limit=100" in it })
+        // O trecho guardado continua sem buracos, da mais nova até a página da mensagem.
+        assertEquals((350 downTo 11).map { "m$it" }, f.ids())
+    }
+
+    @Test
+    fun mensagemApagadaNaoPaginaAlemDoInstanteDela() = runTest {
+        val f = Fixture(this, Backend(350) { msg(it) })
+        f.store.refreshLatest("c1")
+
+        // O instante dela fica entre m300 e m301: uma página basta para saber que não existe mais.
+        assertEquals(Located.Missing, f.store.locate("c1", "apagada", "2026-01-01T00:05:00.5Z"))
+        assertEquals(2, f.backend.requests.size)
+
+        // Sem o instante, só o fim do histórico encerra a procura.
+        val short = Fixture(this, Backend(30) { msg(it) })
+        short.store.refreshLatest("c1")
+        assertEquals(Located.Missing, short.store.locate("c1", "apagada"))
+        assertEquals(1, short.backend.requests.size)
+    }
+
+    @Test
+    fun mensagemDeOutroCanalNaoContaComoAchada() = runTest {
+        val f = Fixture(this, Backend(30) { msg(it) })
+        f.store.refreshLatest("c1")
+        assertEquals(Located.Missing, f.store.locate("d1", "m5"))
+    }
+
+    @Test
+    fun procuraParaNoLimiteDePaginas() = runTest {
+        val f = Fixture(this, Backend(2000) { msg(it) })
+        f.store.refreshLatest("c1")
+
+        assertEquals(Located.TooOld, f.store.locate("c1", "m5", ts(5)))
+        assertEquals(1 + 10, f.backend.requests.size)
+        // O que foi lido fica guardado e continua contínuo.
+        assertEquals((2000 downTo 961).map { "m$it" }, f.ids(limit = 5000))
     }
 
     @Test
