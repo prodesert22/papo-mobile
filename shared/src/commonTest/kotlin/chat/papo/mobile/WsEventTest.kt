@@ -96,7 +96,7 @@ class WsEventTest {
     }
 
     private fun channel(id: String, type: ChannelType, position: Int, parent: String? = null) =
-        Channel(id, id, type, position, null, parent, null, null, null, null, null)
+        Channel(id, id, type, position, null, parent, null, null, null, null, null, null)
 
     @Test
     fun agrupaCanaisPorCategoriaComParentIdOuPelaOrdem() {

@@ -40,6 +40,8 @@ data class Channel(
     val topic: String?,
     val parentId: String?,
     val lastMessageId: String?,
+    /** Quando a última mensagem foi enviada, em ISO 8601; é a atividade mais recente do canal. */
+    val lastMessageAt: String?,
     val lastMessageText: String?,
     val lastMessageAuthor: String?,
     val lastReadMessage: String?,

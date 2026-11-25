@@ -720,6 +720,7 @@ class ChatStore(
         topic = topic,
         parentId = parent_id,
         lastMessageId = last_message_id,
+        lastMessageAt = last_message_at,
         lastMessageText = last_message_text,
         lastMessageAuthor = last_message_author,
         lastReadMessage = last_read_message,

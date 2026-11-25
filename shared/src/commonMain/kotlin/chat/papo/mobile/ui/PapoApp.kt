@@ -26,6 +26,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.AppSession
+import chat.papo.mobile.chat.OpenConversation
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.wiped_body
@@ -48,6 +49,8 @@ import chat.papo.mobile.ui.search.SearchScreen
 import chat.papo.mobile.ui.search.SearchViewModel
 import chat.papo.mobile.ui.settings.AccountSettingsScreen
 import chat.papo.mobile.ui.settings.AppSettingsScreen
+import chat.papo.mobile.ui.switcher.QuickSwitcherScreen
+import chat.papo.mobile.ui.switcher.QuickSwitcherViewModel
 import chat.papo.mobile.ui.theme.PapoTheme
 import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.stringResource
@@ -79,6 +82,10 @@ private data class ChatRoute(
 /** Busca na conta; [channelId] já abre com o filtro daquela conversa. */
 @Serializable
 private data class SearchRoute(val accountId: String, val channelId: String? = null)
+
+/** Troca rápida entre as conversas de todas as contas; [accountId] e [channelId] são a conversa de onde veio, se houve. */
+@Serializable
+private data class SwitcherRoute(val accountId: String? = null, val channelId: String? = null)
 
 @Composable
 fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
@@ -143,6 +150,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                     onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
                     onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
                     onSearch = { navController.navigate(SearchRoute(it.id)) },
+                    onSwitch = { navController.navigate(SwitcherRoute()) },
                     onAppSettings = { navController.navigate(AppSettingsRoute) },
                     content = { account ->
                         val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
@@ -190,6 +198,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
                     onSearch = { navController.navigate(SearchRoute(route.accountId, route.channelId)) },
+                    onSwitch = { navController.navigate(SwitcherRoute(route.accountId, route.channelId)) },
                     onJoinCall = if (session.calls.supported) {
                         {
                             session.calls.join(accountSession, route.channelId)
@@ -234,6 +243,23 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
         }
         composable<AppSettingsRoute> {
             AppSettingsScreen(lock, appVersion, onBack = { navController.popBackStack() })
+        }
+        composable<SwitcherRoute> { entry ->
+            val route = entry.toRoute<SwitcherRoute>()
+            val open = if (route.accountId != null && route.channelId != null) OpenConversation(route.accountId, route.channelId) else null
+            val vm = viewModel(key = "switcher/${route.accountId}/${route.channelId}") { QuickSwitcherViewModel(session.accounts, open) }
+            QuickSwitcherScreen(
+                viewModel = vm,
+                accounts = accounts,
+                onBack = { navController.popBackStack() },
+                onOpen = { target ->
+                    // A conta da conversa passa a ser a ativa; ao voltar do chat se chega na tela principal dela.
+                    session.accounts.select(target.accountId)
+                    navController.navigate(ChatRoute(target.accountId, target.channelId)) {
+                        popUpTo<HomeRoute> { inclusive = false }
+                    }
+                },
+            )
         }
     }
 }

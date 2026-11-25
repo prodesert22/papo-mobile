@@ -249,6 +249,17 @@
     <string name="search_truncated">Mostrando os primeiros %1$d resultados. Refine a busca para ver os outros.</string>
     <string name="search_no_text">Mensagem sem texto</string>
 
+    <!-- Troca rápida de conversa -->
+    <string name="switcher_title">Trocar de conversa</string>
+    <string name="switcher_hint">Ir para uma conversa</string>
+    <string name="switcher_empty">Nenhuma conversa encontrada.</string>
+    <string name="switcher_kind_text">Canal de texto</string>
+    <string name="switcher_kind_voice">Canal de voz</string>
+    <string name="switcher_kind_dm">Conversa direta</string>
+    <string name="switcher_mention">Menção não lida</string>
+    <string name="switcher_unread">Mensagens não lidas</string>
+    <string name="switcher_unread_count">Não lidas: %1$d</string>
+
     <!-- Chamadas -->
     <string name="call_joining">Entrando na chamada…</string>
     <string name="call_connecting">Conectando…</string>

@@ -41,3 +41,9 @@
   whether the original is still to be loaded or no longer exists.
 - Swipe a message sideways to reply to it, and double tap it to react with 👍
   (double tap again to take the reaction back).
+- The new switch button beside search, on the home screen and at the top of a
+  conversation, lists the channels and direct messages of every account you
+  are signed in to, with mentions first, then unread, then the most recent.
+  Type part of a name, or of an account's label, to narrow the list, without
+  caring about accents, and tap one to open it in its account. It uses only
+  what the app already has, without asking the servers.

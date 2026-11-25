@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -180,6 +181,7 @@ import chat.papo.mobile.resources.presence_away
 import chat.papo.mobile.resources.presence_busy
 import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
+import chat.papo.mobile.resources.switcher_title
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.formatBytes
@@ -204,6 +206,8 @@ fun ChatScreen(
     viewModel: ChatViewModel,
     onBack: () -> Unit,
     onSearch: () -> Unit,
+    /** Abre a troca rápida de conversa. */
+    onSwitch: () -> Unit,
     /** Entra na chamada do canal de voz; null onde não há chamada. Só é oferecido em canal de voz. */
     onJoinCall: (() -> Unit)?,
 ) {
@@ -369,6 +373,9 @@ fun ChatScreen(
                         IconButton(onClick = onJoinCall) {
                             Icon(Icons.Filled.Call, contentDescription = stringResource(Res.string.channels_join_call))
                         }
+                    }
+                    IconButton(onClick = onSwitch) {
+                        Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(Res.string.switcher_title))
                     }
                     IconButton(onClick = onSearch) {
                         Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.chat_search))
