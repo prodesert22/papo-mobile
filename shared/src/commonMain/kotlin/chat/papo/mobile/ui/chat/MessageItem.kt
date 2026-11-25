@@ -293,7 +293,11 @@ fun EmojiImage(session: AccountSession, emojiId: String, modifier: Modifier = Mo
  * procurá-la com [onOpenReply].
  *
  * Gestos: deslizar para o lado do fim da linha chama [onReply], o toque duplo chama [onQuickReact]
- * e o toque longo, [onLongPress]. Os dois primeiros também são ações de acessibilidade.
+ * e o toque longo, [onLongPress]. Os dois primeiros também são ações de acessibilidade. Nulos (sem permissão
+ * para enviar ou reagir), o gesto e a ação de acessibilidade correspondentes não existem.
+ *
+ * [canReact] e [canRemoveOwnReaction] dizem quais bolinhas de reação respondem ao toque: com [canReact] todas;
+ * sem ele, só a minha, e só com [canRemoveOwnReaction] (ver [reactionToggleable]).
  *
  * [addressedToMe] marca a mensagem dirigida a quem usa a conta, que a menciona, responde a ela ou é um `@everyone`
  * de quem pode usá-lo (a própria também, como no web): fundo dourado e uma barra no começo da linha.
@@ -318,9 +322,11 @@ fun MessageItem(
     addressedToMe: Boolean,
     highlightEveryone: Boolean,
     highlighted: Boolean,
+    canReact: Boolean,
+    canRemoveOwnReaction: Boolean,
     onOpenReply: () -> Unit,
-    onReply: () -> Unit,
-    onQuickReact: () -> Unit,
+    onReply: (() -> Unit)?,
+    onQuickReact: (() -> Unit)?,
     onLongPress: () -> Unit,
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
@@ -337,7 +343,7 @@ fun MessageItem(
         else -> Color.Transparent
     }
 
-    SwipeToReply(onReply, Modifier.fillMaxWidth()) {
+    SwipeToReply(onReply = { onReply?.invoke() }, modifier = Modifier.fillMaxWidth(), enabled = onReply != null) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -345,9 +351,9 @@ fun MessageItem(
                 .then(if (addressedToMe) Modifier.startBar(papoColors.highlightBar, HighlightBarWidth) else Modifier)
                 .combinedClickable(onClick = {}, onLongClick = onLongPress, onDoubleClick = onQuickReact)
                 .semantics {
-                    customActions = listOf(
-                        CustomAccessibilityAction(replyLabel) { onReply(); true },
-                        CustomAccessibilityAction(reactLabel) { onQuickReact(); true },
+                    customActions = listOfNotNull(
+                        onReply?.let { reply -> CustomAccessibilityAction(replyLabel) { reply(); true } },
+                        onQuickReact?.let { react -> CustomAccessibilityAction(reactLabel) { react(); true } },
                     )
                 }
                 .padding(start = 12.dp, end = 12.dp, top = if (compact) 1.dp else 8.dp, bottom = 1.dp),
@@ -403,7 +409,7 @@ fun MessageItem(
                 }
                 if (message.reactions.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
-                    ReactionRow(session, message, onReact)
+                    ReactionRow(session, message, canReact, canRemoveOwnReaction, onReact)
                 }
             }
             if (pinned) {
@@ -690,17 +696,25 @@ private fun EmbedCard(session: AccountSession, embed: EmbedDto) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ReactionRow(session: AccountSession, message: Message, onReact: (ReactionSummaryDto) -> Unit) {
+private fun ReactionRow(
+    session: AccountSession,
+    message: Message,
+    canReact: Boolean,
+    canRemoveOwnReaction: Boolean,
+    onReact: (ReactionSummaryDto) -> Unit,
+) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         message.reactions.forEach { reaction ->
             val mine = message.reactedWith(reaction)
+            // Sem toque a bolinha continua mostrando quem reagiu; só deixa de somar ou tirar a reação.
+            val toggleable = reactionToggleable(canReact, canRemoveOwnReaction, mine)
             val scheme = MaterialTheme.colorScheme
             Row(
                 Modifier
                     .clip(RoundedCornerShape(14.dp))
                     .background(if (mine) scheme.primaryContainer else scheme.surfaceContainerHigh)
                     .border(1.dp, if (mine) scheme.primary else Color.Transparent, RoundedCornerShape(14.dp))
-                    .clickable { onReact(reaction) }
+                    .then(if (toggleable) Modifier.clickable { onReact(reaction) } else Modifier)
                     .padding(horizontal = 9.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
