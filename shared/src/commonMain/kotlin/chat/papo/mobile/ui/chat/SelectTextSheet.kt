@@ -31,7 +31,8 @@ fun copyableText(content: String, users: Map<String, User>): String =
 
 /**
  * Folha com o texto da mensagem para selecionar um trecho. A seleção fica numa folha à parte
- * porque, na lista, o toque longo já abre as ações da mensagem.
+ * porque, na lista, o toque longo já abre as ações da mensagem. [highlightEveryone] é o mesmo da mensagem
+ * na lista, para o `@everyone` aparecer igual (copiar leva o texto cru, ver [copyableText]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +42,7 @@ fun SelectTextSheet(
     users: Map<String, User>,
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
+    highlightEveryone: Boolean,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -48,7 +50,7 @@ fun SelectTextSheet(
             Text(stringResource(Res.string.msg_select), style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(12.dp))
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                SelectionContainer { MessageBodyText(session, content, users, emojiIds, unicodeEmojis) }
+                SelectionContainer { MessageBodyText(session, content, users, emojiIds, unicodeEmojis, highlightEveryone) }
             }
         }
     }

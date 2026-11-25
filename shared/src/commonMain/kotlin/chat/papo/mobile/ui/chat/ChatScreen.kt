@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -117,6 +118,8 @@ import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.ChannelType
+import chat.papo.mobile.chat.EVERYONE_MENTION
+import chat.papo.mobile.chat.EVERYONE_NAME
 import chat.papo.mobile.chat.EmojiCompletion
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiRef
@@ -128,12 +131,15 @@ import chat.papo.mobile.chat.UnicodeEmoji
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.UnicodeEmojis
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.authorCanEveryone
 import chat.papo.mobile.chat.authorsByRecency
+import chat.papo.mobile.chat.completeMention
 import chat.papo.mobile.chat.continuesGroup
 import chat.papo.mobile.chat.filterPinned
-import chat.papo.mobile.chat.isAddressedTo
+import chat.papo.mobile.chat.isHighlightedFor
 import chat.papo.mobile.chat.mentionQueryAt
 import chat.papo.mobile.chat.newArrivals
+import chat.papo.mobile.chat.offersEveryone
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.suggestMentions
 import chat.papo.mobile.core.dayKey
@@ -174,6 +180,7 @@ import chat.papo.mobile.resources.chat_typing_one
 import chat.papo.mobile.resources.chat_unknown_user
 import chat.papo.mobile.resources.chat_viewing_older
 import chat.papo.mobile.resources.chat_yesterday
+import chat.papo.mobile.resources.mention_everyone_hint
 import chat.papo.mobile.resources.msg_copy
 import chat.papo.mobile.resources.msg_delete
 import chat.papo.mobile.resources.msg_delete_body
@@ -229,6 +236,9 @@ fun ChatScreen(
     val typing by chat.typing.collectAsStateWithLifecycle()
     val pinnedIds by chat.pinned.collectAsStateWithLifecycle()
     val detachedChannels by chat.detached.collectAsStateWithLifecycle()
+    // O que se sabe das permissões da conta (cargo do autor do `@everyone`) e o que a conversa permite (oferecê-lo).
+    val permissions by chat.access.collectAsStateWithLifecycle()
+    val access by viewModel.access.collectAsStateWithLifecycle()
     // O trecho à vista é antigo e não chega à mensagem mais nova (aberto a partir de uma busca).
     val detached = viewModel.channelId in detachedChannels
     val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
@@ -445,6 +455,7 @@ fun ChatScreen(
                         val older = messages.getOrNull(index + 1)
                         val newDay = older == null || older.createdAt?.dayKey() != message.createdAt?.dayKey()
                         val compact = older != null && continuesGroup(older, message)
+                        val everyoneAuthor = authorCanEveryone(permissions, message.authorId, message.webhookId)
                         Column {
                             if (newDay && (older != null || state.reachedStart)) DaySeparator(message)
                             MessageItem(
@@ -458,7 +469,8 @@ fun ChatScreen(
                                 replyMissing = message.replyTo in state.missingReplies,
                                 compact = compact,
                                 pinned = pinnedIds[viewModel.channelId]?.contains(message.id) == true,
-                                addressedToMe = isAddressedTo(session.userId, message, message.replyTo?.let { byId[it] }),
+                                addressedToMe = isHighlightedFor(session.userId, message, message.replyTo?.let { byId[it] }, everyoneAuthor),
+                                highlightEveryone = everyoneAuthor,
                                 highlighted = state.replyTo?.id == message.id || state.editing?.id == message.id ||
                                     state.focusId == message.id,
                                 onOpenReply = { viewModel.openReply(message) },
@@ -540,6 +552,7 @@ fun ChatScreen(
                 users = users,
                 presence = presence,
                 recentAuthors = recentAuthors,
+                mentionEveryone = access.mentionEveryone,
                 serverEmojis = serverEmojis,
                 emojiCatalog = drawableEmojis,
                 availableHeightPx = columnPx,
@@ -587,6 +600,7 @@ fun ChatScreen(
             users = users,
             emojiIds = serverEmojis.idByName,
             unicodeEmojis = unicodeEmojis,
+            highlightEveryone = authorCanEveryone(permissions, message.authorId, message.webhookId),
             onDismiss = { selecting = null },
         )
     }
@@ -763,6 +777,7 @@ private fun Composer(
     users: Map<String, User>,
     presence: Map<String, Presence>,
     recentAuthors: List<String>,
+    mentionEveryone: Boolean,
     serverEmojis: ServerEmojis,
     emojiCatalog: UnicodeEmojiCatalog?,
     availableHeightPx: Int,
@@ -879,6 +894,8 @@ private fun Composer(
             suggestMentions(mention.text, users.values, session.userId, recentAuthors, presence)
         }
     }
+    // `@everyone` vem na frente da lista, quando o autor pode usá-lo e o que foi digitado é o começo de `everyone`.
+    val everyoneSuggested = mention != null && offersEveryone(mention.text, mentionEveryone)
     // Com o teclado aberto sobra pouca conversa: a lista de sugestões nunca passa de 40% da altura da tela.
     val maxSuggestionsHeight = with(density) {
         minOf(SUGGESTION_ROW * MAX_SUGGESTION_ROWS, (availableHeightPx * 0.4f).toDp().coerceAtLeast(SUGGESTION_ROW * 2))
@@ -887,11 +904,22 @@ private fun Composer(
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
         Column {
         Column(Modifier.onSizeChanged { headerPx = it.height }) {
-            if (suggestions.isNotEmpty() && mention != null) {
-                MentionSuggestions(session, suggestions, queryText = mention.text, maxHeight = maxSuggestionsHeight) { user ->
-                    val text = draft.text.substring(0, mention.start) + "@${user.username} " + draft.text.substring(draft.selection.start)
+            if ((suggestions.isNotEmpty() || everyoneSuggested) && mention != null) {
+                MentionSuggestions(
+                    session,
+                    suggestions,
+                    showEveryone = everyoneSuggested,
+                    queryText = mention.text,
+                    maxHeight = maxSuggestionsHeight,
+                    // Texto comum: o servidor lê o `@everyone` literal, então não passa por `onPickMention`.
+                    onPickEveryone = {
+                        val edit = completeMention(draft.text, mention, draft.selection.start, EVERYONE_NAME)
+                        onDraftChange(TextFieldValue(edit.text, TextRange(edit.cursor)))
+                    },
+                ) { user ->
+                    val edit = completeMention(draft.text, mention, draft.selection.start, user.username)
                     onPickMention(user.username, user.id)
-                    onDraftChange(TextFieldValue(text, TextRange(mention.start + user.username.length + 2)))
+                    onDraftChange(TextFieldValue(edit.text, TextRange(edit.cursor)))
                 }
             }
 
@@ -1030,20 +1058,25 @@ private fun Composer(
 }
 
 /**
- * Quem pode ser mencionado, do melhor casamento ao pior. A lista rola quando há mais do que cabe, e volta ao
- * primeiro resultado quando a consulta ([queryText]) muda.
+ * Quem pode ser mencionado, do melhor casamento ao pior, com `@everyone` na frente quando [showEveryone]. A lista
+ * rola quando há mais do que cabe, e volta ao primeiro resultado quando a consulta ([queryText]) muda.
  */
 @Composable
 private fun MentionSuggestions(
     session: AccountSession,
     users: List<User>,
+    showEveryone: Boolean,
     queryText: String,
     maxHeight: Dp,
+    onPickEveryone: () -> Unit,
     onPick: (User) -> Unit,
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(queryText) { listState.scrollToItem(0) }
     LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxHeight), state = listState) {
+        if (showEveryone) {
+            item(key = EVERYONE_MENTION) { EveryoneSuggestion(onPickEveryone) }
+        }
         items(users, key = { it.id }) { user ->
             Row(
                 Modifier
@@ -1072,6 +1105,48 @@ private fun MentionSuggestions(
                 )
             }
         }
+    }
+}
+
+/** A sugestão `@everyone`: um ícone de grupo no lugar do avatar e a dica de quem o aviso alcança. */
+@Composable
+private fun EveryoneSuggestion(onPick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = SUGGESTION_ROW)
+            .clickable(onClick = onPick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(28.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Groups,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            EVERYONE_MENTION,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            stringResource(Res.string.mention_everyone_hint),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

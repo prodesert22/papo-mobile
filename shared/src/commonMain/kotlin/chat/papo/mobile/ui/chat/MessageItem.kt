@@ -149,6 +149,9 @@ private const val MARKER_GAP = "\u00A0"
  * Corpo da mensagem com Markdown, menções destacadas, links clicáveis e `:nome:` dos emojis
  * do servidor como imagem. [emojiIds] liga nome a id; dentro de código, de link e de menção
  * o `:nome:` continua texto. Cada item de lista é um texto com recuo pendente, e a régua separa dois textos.
+ *
+ * O `@everyone` só sai em destaque, como uma menção, com [highlightEveryone]: ele vale quando o autor pode
+ * usá-lo (`authorCanEveryone`). Sem isso é texto comum, como qualquer outro.
  */
 fun messageText(
     content: String,
@@ -158,6 +161,7 @@ fun messageText(
     muted: Color,
     emojiIds: Map<String, String> = emptyMap(),
     lists: ListMetrics = DefaultListMetrics,
+    highlightEveryone: Boolean = false,
 ): MessageText {
     val used = LinkedHashSet<String>()
 
@@ -174,12 +178,13 @@ fun messageText(
     }
 
     fun AnnotatedString.Builder.appendSpans(spans: List<TextSpan>) {
-        for (span in spans) {
+        // Sem o destaque o `@everyone` volta a ser texto comum, fundido ao vizinho: o que sobra com `everyone` é menção.
+        for (span in if (highlightEveryone) spans else Markdown.withoutEveryone(spans)) {
             val style = spanStyle(span, accent, codeBackground, muted)
             val plain = spanText(span, nameOf)
             when {
                 span.link != null -> withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(plain) }
-                span.code || span.mentionUserId != null -> withStyle(style) { append(plain) }
+                span.code || span.mentionUserId != null || span.everyone -> withStyle(style) { append(plain) }
                 else -> withStyle(style) { appendEmojis(plain) }
             }
         }
@@ -216,7 +221,7 @@ fun messageText(
 }
 
 private fun spanStyle(span: TextSpan, accent: Color, codeBackground: Color, muted: Color) = SpanStyle(
-    fontWeight = if (span.bold || span.mentionUserId != null) FontWeight.SemiBold else null,
+    fontWeight = if (span.bold || span.mentionUserId != null || span.everyone) FontWeight.SemiBold else null,
     fontStyle = if (span.italic) FontStyle.Italic else null,
     textDecoration = when {
         span.strike -> TextDecoration.LineThrough
@@ -226,15 +231,16 @@ private fun spanStyle(span: TextSpan, accent: Color, codeBackground: Color, mute
     fontFamily = if (span.code) FontFamily.Monospace else null,
     background = if (span.code) codeBackground else Color.Unspecified,
     color = when {
-        span.link != null || span.mentionUserId != null -> accent
+        span.link != null || span.mentionUserId != null || span.everyone -> accent
         span.quote -> muted
         else -> Color.Unspecified
     },
 )
 
-/** O que o trecho mostra: a menção vira `@nome`, e a citação ganha a barra. */
+/** O que o trecho mostra: a menção vira `@nome`, o `@everyone` fica como foi escrito, e a citação ganha a barra. */
 private fun spanText(span: TextSpan, nameOf: (String) -> String?): String = when {
     span.mentionUserId != null -> "@" + (nameOf(span.mentionUserId) ?: "usuário")
+    span.everyone -> span.text
     span.quote -> "▎ " + span.text
     else -> span.text
 }
@@ -289,8 +295,10 @@ fun EmojiImage(session: AccountSession, emojiId: String, modifier: Modifier = Mo
  * Gestos: deslizar para o lado do fim da linha chama [onReply], o toque duplo chama [onQuickReact]
  * e o toque longo, [onLongPress]. Os dois primeiros também são ações de acessibilidade.
  *
- * [addressedToMe] marca a mensagem que menciona ou responde a quem usa a conta: fundo dourado e uma barra
- * no começo da linha. [highlighted] é o destaque passageiro (a mensagem que se responde ou edita, ou a que se
+ * [addressedToMe] marca a mensagem dirigida a quem usa a conta, que a menciona, responde a ela ou é um `@everyone`
+ * de quem pode usá-lo (a própria também, como no web): fundo dourado e uma barra no começo da linha.
+ * [highlightEveryone] vale quando o autor pode usar `@everyone` e põe esse trecho do texto em destaque.
+ * [highlighted] é o destaque passageiro (a mensagem que se responde ou edita, ou a que se
  * acabou de abrir) e tem o fundo no lugar do dourado, que continua na barra. Toda mensagem [pinned] leva o
  * alfinete no fim da linha, também as agrupadas, que não têm cabeçalho.
  */
@@ -308,6 +316,7 @@ fun MessageItem(
     compact: Boolean,
     pinned: Boolean,
     addressedToMe: Boolean,
+    highlightEveryone: Boolean,
     highlighted: Boolean,
     onOpenReply: () -> Unit,
     onReply: () -> Unit,
@@ -371,7 +380,7 @@ fun MessageItem(
                     }
                 }
                 if (message.content.isNotEmpty()) {
-                    MessageBodyText(session, message.content, users, emojiIds, unicodeEmojis)
+                    MessageBodyText(session, message.content, users, emojiIds, unicodeEmojis, highlightEveryone)
                 }
                 if (message.edited) {
                     Text(
@@ -423,7 +432,7 @@ private fun Modifier.startBar(color: Color, width: Dp): Modifier = drawBehind {
 
 /**
  * Corpo de texto de uma mensagem: Markdown, listas, menções, links e `:nome:` dos emojis do
- * servidor como imagem. Mensagem só de emoji aparece maior.
+ * servidor como imagem. Mensagem só de emoji aparece maior. [highlightEveryone]: ver [messageText].
  */
 @Composable
 fun MessageBodyText(
@@ -432,6 +441,7 @@ fun MessageBodyText(
     users: Map<String, User>,
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
+    highlightEveryone: Boolean = false,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -441,8 +451,8 @@ fun MessageBodyText(
     // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
     // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
     val relevantIds = if (':' in content) emojiIds else emptyMap()
-    val text = remember(content, users, accent, codeBackground, muted, relevantIds, lists) {
-        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds, lists)
+    val text = remember(content, users, accent, codeBackground, muted, relevantIds, lists, highlightEveryone) {
+        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds, lists, highlightEveryone)
     }
     // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
     val jumbo = remember(content, relevantIds, unicodeEmojis) {

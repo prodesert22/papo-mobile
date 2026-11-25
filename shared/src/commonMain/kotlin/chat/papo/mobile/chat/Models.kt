@@ -137,6 +137,27 @@ fun renderMentions(content: String, nameOf: (String) -> String?): String =
 /** Ids dos usuários mencionados em [content]. */
 fun mentionedIds(content: String): List<String> = mentionPattern.findAll(content).map { it.groupValues[1] }.toList()
 
+/** Nome da menção a todos: o servidor casa o `@everyone` literal no texto, sem o formato `@mention(<@id>)`. */
+const val EVERYONE_NAME = "everyone"
+
+/** O `@everyone` como se escreve. */
+const val EVERYONE_MENTION = "@$EVERYONE_NAME"
+
+/**
+ * Há um `@everyone` em [at] de [text]? Sem diferenciar maiúsculas e sem letra, dígito ou `_` ASCII logo
+ * depois, como o `\b` do servidor e do web: `@everyones` e `@everyone_x` não valem, `@everyoneé` vale. O que
+ * vem antes não importa aqui: quem chama decide (o Markdown aceita em qualquer lugar, o destaque pede início ou espaço).
+ */
+internal fun everyoneAt(text: String, at: Int): Boolean {
+    val end = at + EVERYONE_MENTION.length
+    if (end > text.length || !text.regionMatches(at, EVERYONE_MENTION, 0, EVERYONE_MENTION.length, ignoreCase = true)) {
+        return false
+    }
+    if (end == text.length) return true
+    val next = text[end]
+    return !(next in 'a'..'z' || next in 'A'..'Z' || next in '0'..'9' || next == '_')
+}
+
 /** Bloco de código cercado por três crases, a mesma regra que o Markdown usa para mostrá-lo. */
 private val codeFence = Regex("""```[^\n`]*\n?([\s\S]*?)```""")
 
@@ -146,11 +167,15 @@ private val codeFence = Regex("""```[^\n`]*\n?([\s\S]*?)```""")
  * [users] tem aquele username (sem diferenciar maiúsculas; com dois, fica texto). O `@` tem de poder
  * abrir uma menção (ver [mentionMayStartAt]), então `a@b.com` não muda, e nada muda dentro de código
  * em linha ou em bloco. Um ponto no fim do nome é pontuação da frase: `@ana.` é a menção `@ana`.
+ *
+ * `@everyone` fica como texto: o servidor o lê literal. Só vira menção o usuário de nome `everyone` que foi
+ * escolhido na lista ([picked]); digitado à mão, o nome nunca troca o aviso a todos por um usuário.
  */
 fun encodeMentions(text: String, picked: Map<String, String>, users: Collection<User>): String {
     if ('@' !in text) return text
     val byUsername = users.groupBy { it.username.lowercase() }
-    fun idOf(name: String): String? = picked[name] ?: byUsername[name.lowercase()]?.singleOrNull()?.id
+    fun idOf(name: String): String? =
+        picked[name] ?: if (name.equals(EVERYONE_NAME, ignoreCase = true)) null else byUsername[name.lowercase()]?.singleOrNull()?.id
     val code = codeRanges(text)
     val out = StringBuilder(text.length + 40)
     var nextCode = 0
@@ -190,7 +215,7 @@ private fun mentionAt(text: String, at: Int, idOf: (String) -> String?): FoundMe
 }
 
 /** Trechos de [text] que o Markdown mostra como código, na ordem: blocos cercados e código em linha. */
-private fun codeRanges(text: String): List<IntRange> {
+internal fun codeRanges(text: String): List<IntRange> {
     val ranges = ArrayList<IntRange>()
     var from = 0
     for (fence in codeFence.findAll(text)) {
