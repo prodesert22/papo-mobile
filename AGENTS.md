@@ -10,7 +10,7 @@ The app is written in Kotlin with Kotlin Multiplatform and Compose Multiplatform
 
 There are host unit tests that run on the JVM with a mocked HTTP engine and an in-memory database, and instrumented tests that need a device or emulator. A screen that opens is not proof that an integration works: check the flow against a server.
 
-`tools/release.py` validates versions and builds release notes. `tools/dev/` holds development tools only: `fake_papo.py` is a fake backend written from the OpenAPI file, `ws_watch.py` observes WebSocket events as another user, `ui.py` drives the app through adb, `run-device-tests.sh` runs the instrumented tests on one device and `setup-release-signing.sh` prepares release signing. Distinguish what was observed on a real backend from what was only exercised against the fake one. Build output stays in `build/`; test account data, cookies, `local.properties`, `keystore.properties` and keystores must not enter commits.
+`tools/release.py` validates versions and builds release notes. `tools/dev/` holds development tools only: `fake_papo.py` is a fake backend written from the OpenAPI file, `ws_watch.py` observes WebSocket events as another user, `ui.py` drives the app through adb, `run-device-tests.sh` runs the instrumented tests on one device, `setup-release-signing.sh` prepares release signing and `emoji_catalog.py` regenerates the Unicode emoji catalog the app bundles from a pinned `emojibase-data` release (run it with `python3 -I`). Distinguish what was observed on a real backend from what was only exercised against the fake one. Build output stays in `build/`; test account data, cookies, `local.properties`, `keystore.properties` and keystores must not enter commits.
 
 ## Working rules
 

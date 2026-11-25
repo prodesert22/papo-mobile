@@ -47,6 +47,9 @@ e um [cliente de terminal](https://github.com/prodesert22/papo-tui).
   anexos e data. O resultado abre na conversa, por mais antigo que seja.
 - Formatação Markdown, prévias de links, miniaturas de imagem com visualizador
   em tela cheia, indicador de digitação e presença.
+- Emojis: seletor com busca com todos os emojis Unicode e os do servidor,
+  sugestões ao digitar `:nome`, emojis do servidor dentro das mensagens e emojis
+  maiores nas mensagens que só têm emojis.
 
 **Voz, câmera e transmissão de tela**
 
@@ -64,8 +67,8 @@ A lista completa está nas [notas da versão 0.1.0](releases/v0.1.0.md) (em ingl
   de usuários e administração do servidor.
 - Nas chamadas: sem o som da tela transmitida, sem volume por pessoa e sem
   escolha de fone Bluetooth.
-- Vídeos anexados só tocam depois de baixados, GIFs não são animados e os emojis
-  próprios do servidor não aparecem dentro do texto das mensagens.
+- Vídeos anexados só tocam depois de baixados, e GIFs e emojis animados mostram
+  só o primeiro quadro.
 - A interface está em português.
 
 ## Instalar
@@ -158,5 +161,7 @@ O Papo Mobile é licenciado sob a
 [GNU Affero General Public License v3.0](LICENSE).
 
 A fonte Bricolage Grotesque incluída é licenciada sob a
-[SIL Open Font License](licenses/BricolageGrotesque-OFL.txt). As bibliotecas de
-que o app depende mantêm as próprias licenças.
+[SIL Open Font License](licenses/BricolageGrotesque-OFL.txt). Os nomes e as
+palavras-chave dos emojis Unicode vêm do [emojibase-data](licenses/Emojibase-MIT.txt)
+(MIT), feito sobre dados do Unicode CLDR sob a [Licença Unicode v3](licenses/Unicode-3.0.txt).
+As bibliotecas de que o app depende mantêm as próprias licenças.

@@ -10,15 +10,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -30,11 +33,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tag
@@ -57,24 +63,35 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -82,13 +99,25 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.ChannelType
+import chat.papo.mobile.chat.EmojiCompletion
+import chat.papo.mobile.chat.EmojiPickerModel
+import chat.papo.mobile.chat.EmojiRef
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.ServerEmoji
+import chat.papo.mobile.chat.ServerEmojis
+import chat.papo.mobile.chat.UnicodeEmoji
+import chat.papo.mobile.chat.UnicodeEmojiCatalog
+import chat.papo.mobile.chat.UnicodeEmojis
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.filterPinned
 import chat.papo.mobile.chat.renderMentions
@@ -102,11 +131,14 @@ import chat.papo.mobile.resources.action_cancel
 import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.chat_attach
 import chat.papo.mobile.resources.chat_editing
+import chat.papo.mobile.resources.chat_emoji
+import chat.papo.mobile.resources.msg_react_more
 import chat.papo.mobile.resources.chat_empty
 import chat.papo.mobile.resources.chat_focus_missing
 import chat.papo.mobile.resources.chat_go_to_latest
 import chat.papo.mobile.resources.chat_history_start
 import chat.papo.mobile.resources.chat_locating
+import chat.papo.mobile.resources.chat_keyboard
 import chat.papo.mobile.resources.chat_pinned
 import chat.papo.mobile.resources.chat_pinned_empty
 import chat.papo.mobile.resources.chat_pinned_filter
@@ -142,6 +174,9 @@ import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.settings.ConfirmDialog
 import kotlinx.coroutines.delay
+import kotlin.math.max
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
@@ -149,8 +184,6 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
-
-private val quickReactions = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -167,6 +200,19 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     val detachedChannels by chat.detached.collectAsStateWithLifecycle()
     // O trecho à vista é antigo e não chega à mensagem mais nova (aberto a partir de uma busca).
     val detached = viewModel.channelId in detachedChannels
+    val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
+    val unicodeEmojis by produceState<UnicodeEmojiCatalog?>(null) {
+        value = try {
+            UnicodeEmojis.get()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null // sem o catálogo só não há tamanho grande para emoji Unicode
+        }
+    }
+    val drawableEmojis = rememberDrawableEmojis()
+    // Carrega os emojis do servidor uma vez por sessão (as páginas vêm espaçadas).
+    LaunchedEffect(session) { session.emojis.start() }
 
     val channel = channels.firstOrNull { it.id == viewModel.channelId }
     val dmUser = dms.firstOrNull { it.id == viewModel.channelId }?.let { users[it.userId] }
@@ -174,6 +220,8 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
 
     var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
+    var reactingTo by remember { mutableStateOf<Message?>(null) }
+    var columnPx by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
     var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
     val listState = rememberLazyListState()
@@ -285,7 +333,8 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        // O espaço de baixo (teclado, gaveta de emoji ou barra de navegação) é do compositor.
+        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).onSizeChanged { columnPx = it.height }) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (messages.isEmpty() && state.loadedOnce) {
                     Text(
@@ -310,6 +359,8 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                                 message = message,
                                 author = message.authorId?.let { users[it] },
                                 users = users,
+                                emojiIds = serverEmojis.idByName,
+                                unicodeEmojis = unicodeEmojis,
                                 repliedTo = message.replyTo?.let { byId[it] },
                                 compact = compact,
                                 pinned = pinnedIds[viewModel.channelId]?.contains(message.id) == true,
@@ -367,6 +418,9 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                 state = state,
                 draft = draft,
                 users = users,
+                serverEmojis = serverEmojis,
+                emojiCatalog = drawableEmojis,
+                availableHeightPx = columnPx,
                 placeholder = if (dmUser != null) {
                     stringResource(Res.string.chat_placeholder_dm, title)
                 } else {
@@ -398,6 +452,10 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
             pinned = isPinned,
             onDismiss = { actionsFor = null },
             onReact = { emojiId, unicode -> viewModel.react(message, emojiId, unicode) },
+            onMoreReactions = {
+                actionsFor = null
+                reactingTo = message
+            },
             onReply = { viewModel.startReply(message) },
             onEdit = {
                 viewModel.startEdit(message)
@@ -418,6 +476,19 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                 confirmDelete = null
                 viewModel.delete(message)
             },
+        )
+    }
+    reactingTo?.let { message ->
+        EmojiPickerSheet(
+            session = session,
+            onPick = { ref ->
+                when (ref) {
+                    is EmojiRef.Unicode -> viewModel.react(message, null, ref.char)
+                    is EmojiRef.Custom -> viewModel.react(message, ref.id, null)
+                }
+                reactingTo = null
+            },
+            onDismiss = { reactingTo = null },
         )
     }
     viewing?.let { ImageViewer(session, it) { viewing = null } }
@@ -532,6 +603,9 @@ private fun Composer(
     state: ChatUiState,
     draft: TextFieldValue,
     users: Map<String, User>,
+    serverEmojis: ServerEmojis,
+    emojiCatalog: UnicodeEmojiCatalog?,
+    availableHeightPx: Int,
     placeholder: String,
     onDraftChange: (TextFieldValue) -> Unit,
     onPickMention: (username: String, userId: String) -> Unit,
@@ -541,7 +615,103 @@ private fun Composer(
     onSubmit: () -> Unit,
 ) {
     val pickFiles = LocalPlatformUi.current.rememberFilePicker(onAddFiles)
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    val panelScope = rememberCoroutineScope()
+    val panel = remember { EmojiPanelState(panelScope) }
+
+    // Quanto do teclado está na tela acima da barra de navegação, e a altura em que ele parou da última vez.
+    val imeInsets = WindowInsets.ime
+    val navInsets = WindowInsets.navigationBars
+    val imePx = imeInsets.getBottom(density)
+    val navPx = navInsets.getBottom(density)
+    val keyboardAboveNav = (imePx - navPx).coerceAtLeast(0)
+    var keyboardPx by rememberSaveable { mutableIntStateOf(KeyboardMemory.lastPx) }
+    LaunchedEffect(imeInsets, navInsets, density) {
+        val minimum = with(density) { MIN_KEYBOARD.toPx() }
+        snapshotFlow { (imeInsets.getBottom(density) - navInsets.getBottom(density)).coerceAtLeast(0) }
+            .collectLatest { px ->
+                delay(250) // só vale a altura em que o teclado parou, não a da animação
+                if (px > minimum) {
+                    keyboardPx = px
+                    KeyboardMemory.lastPx = px
+                }
+            }
+    }
+    LaunchedEffect(imeInsets, density) {
+        var previous = imeInsets.getBottom(density)
+        snapshotFlow { imeInsets.getBottom(density) }.collect { now ->
+            // O teclado começou a subir (tocou no campo): ele toma o lugar da gaveta.
+            if (now > previous && panel.isOpen && !panel.searchFocused) panel.toKeyboard()
+            // O teclado da busca fechou (voltar): a gaveta volta ao tamanho dela.
+            if (now == 0 && previous > 0 && panel.searchFocused) focusManager.clearFocus()
+            previous = now
+        }
+    }
+    val collapsedPx = if (keyboardPx > 0) keyboardPx.toFloat() else with(density) { DEFAULT_PANEL.toPx() }
+    LaunchedEffect(panel.mode, keyboardAboveNav) {
+        if (panel.mode == EmojiPanelMode.ToKeyboard) {
+            // Chegou na altura de sempre, ou não veio teclado nenhum (teclado físico, por exemplo).
+            if (keyboardAboveNav >= collapsedPx - 2f) panel.keyboardArrived() else { delay(700); panel.keyboardArrived() }
+        }
+    }
+    var headerPx by remember { mutableIntStateOf(0) }
+    val maxPanelPx = (availableHeightPx - headerPx - max(imePx, navPx) - with(density) { 24.dp.toPx() })
+        .coerceAtLeast(collapsedPx)
+    val searchPanelPx = with(density) { SEARCH_PANEL.toPx() }
+    SideEffect {
+        panel.collapsed = collapsedPx
+        panel.expandedExtra = maxPanelPx - collapsedPx
+        panel.flingThreshold = with(density) { 600.dp.toPx() }
+    }
+    val panelVisiblePx = EmojiPanelMath.visible(
+        panel.mode, collapsedPx, panel.extra, keyboardAboveNav.toFloat(), panel.searchFocused, searchPanelPx, maxPanelPx,
+    )
+    // O conteúdo fica com a altura de sempre durante a troca com o teclado e só é cortado.
+    val panelContentPx = if (panel.searchFocused) panelVisiblePx else max(panelVisiblePx, collapsedPx)
+    // Voltar fecha a gaveta antes de sair da conversa.
+    NavigationBackHandler(
+        state = rememberNavigationEventState(NavigationEventInfo.None),
+        isBackEnabled = panel.mode != EmojiPanelMode.Hidden,
+        onBackCompleted = { panel.hide() },
+    )
+    val toggleEmoji: () -> Unit = {
+        if (panel.isOpen) {
+            panel.toKeyboard()
+            try {
+                focus.requestFocus()
+            } catch (e: IllegalStateException) {
+                // campo fora da tela
+            }
+            keyboard?.show()
+        } else {
+            panel.open(keyboardVisible = keyboardAboveNav > 0)
+            keyboard?.hide()
+        }
+    }
     val query = mentionQuery(draft)
+    val emojiQuery = if (draft.selection.collapsed) EmojiCompletion.queryBefore(draft.text, draft.selection.start) else null
+    val emojiSuggestions = remember(emojiQuery?.text, emojiCatalog, serverEmojis) {
+        if (emojiQuery == null) emptyList() else emojiSuggestions(emojiQuery.text, emojiCatalog, serverEmojis)
+    }
+    // `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos (nome de emoji do servidor fica como texto).
+    val onChange: (TextFieldValue) -> Unit = { value ->
+        val edit = if (emojiCatalog != null && value.composition == null && value.selection.collapsed) {
+            EmojiCompletion.closeShortcode(draft.text, value.text, value.selection.start, emojiCatalog, serverEmojis.idByName.keys)
+        } else {
+            null
+        }
+        onDraftChange(if (edit != null) TextFieldValue(edit.text, TextRange(edit.cursor)) else value)
+    }
+    fun insertEmoji(ref: EmojiRef) {
+        val text = when (ref) {
+            is EmojiRef.Unicode -> ref.char
+            is EmojiRef.Custom -> serverEmojis.byId[ref.id]?.let { ":${it.name}:" }
+        } ?: return
+        onDraftChange(insertAtCursor(draft, text))
+    }
     val suggestions = remember(query, users) {
         if (query == null) {
             emptyList()
@@ -557,7 +727,8 @@ private fun Composer(
     }
 
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.navigationBarsPadding()) {
+        Column {
+        Column(Modifier.onSizeChanged { headerPx = it.height }) {
             suggestions.forEach { user ->
                 Row(
                     Modifier
@@ -577,6 +748,33 @@ private fun Composer(
                     Text(user.displayName, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.width(8.dp))
                     Text("@${user.username}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    emojiSuggestions.forEach { suggestion ->
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .clickable {
+                                    session.recentEmojis.used(suggestion.ref)
+                                    val edit = EmojiCompletion.replace(draft.text, draft.selection.start, emojiQuery, suggestion.insert)
+                                    onDraftChange(TextFieldValue(edit.text, TextRange(edit.cursor)))
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            suggestion.unicode?.let { Text(it.char, fontSize = 22.sp) }
+                            suggestion.server?.let { EmojiImage(session, it.id, Modifier.size(24.dp)) }
+                            Spacer(Modifier.width(6.dp))
+                            Text(suggestion.label, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
                 }
             }
 
@@ -636,7 +834,7 @@ private fun Composer(
                 }
                 TextField(
                     value = draft,
-                    onValueChange = onDraftChange,
+                    onValueChange = onChange,
                     placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     enabled = !state.sending,
                     maxLines = 6,
@@ -650,8 +848,18 @@ private fun Composer(
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focus)
+                        .onFocusChanged { if (it.isFocused && panel.isOpen) panel.toKeyboard() },
                 )
+                IconButton(onClick = toggleEmoji, enabled = !state.sending) {
+                    if (panel.isOpen) {
+                        Icon(Icons.Filled.Keyboard, contentDescription = stringResource(Res.string.chat_keyboard))
+                    } else {
+                        Icon(Icons.Filled.EmojiEmotions, contentDescription = stringResource(Res.string.chat_emoji))
+                    }
+                }
                 val canSend = !state.sending && (draft.text.isNotBlank() || state.files.isNotEmpty())
                 Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                     if (state.sending) {
@@ -668,7 +876,54 @@ private fun Composer(
                 }
             }
         }
+            // A gaveta ocupa o lugar do teclado; a escolha entra no cursor e a gaveta fica aberta.
+            if (panelVisiblePx > 0.5f) {
+                EmojiPanel(session, panel, panelVisiblePx, panelContentPx, onPick = ::insertEmoji)
+            }
+            Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.ime.union(WindowInsets.navigationBars)))
+        }
     }
+}
+
+/** Última altura do teclado vista neste processo, para a gaveta já abrir certa em outra conversa. Só em memória. */
+private object KeyboardMemory {
+    var lastPx = 0
+}
+
+/** Altura da gaveta de emoji antes de o teclado ter aparecido alguma vez. */
+private val DEFAULT_PANEL = 300.dp
+
+/** Menos que isso não é teclado de verdade (barra de sugestões de um teclado físico, por exemplo). */
+private val MIN_KEYBOARD = 120.dp
+
+/** Altura da gaveta enquanto a busca dela usa o teclado: busca e duas fileiras de resultado. */
+private val SEARCH_PANEL = 190.dp
+
+/** Uma sugestão do `:atalho`: o que mostrar e o que vai para o texto. */
+private class EmojiSuggestion(
+    val label: String,
+    val insert: String,
+    val ref: EmojiRef,
+    val unicode: UnicodeEmoji? = null,
+    val server: ServerEmoji? = null,
+)
+
+/** Até 6 sugestões para `:texto`: primeiro os emojis do servidor que começam assim, depois os Unicode. */
+private fun emojiSuggestions(text: String, catalog: UnicodeEmojiCatalog?, server: ServerEmojis): List<EmojiSuggestion> {
+    val fromServer = server.list.filter { it.name.startsWith(text, ignoreCase = true) }.take(3).map {
+        EmojiSuggestion(":${it.name}:", ":${it.name}:", EmojiRef.Custom(it.id), server = it)
+    }
+    val fromUnicode = catalog?.suggest(text, 6 - fromServer.size).orEmpty().map {
+        EmojiSuggestion(":${it.shortcodes.firstOrNull() ?: it.name}:", it.char, EmojiRef.Unicode(it.char), unicode = it)
+    }
+    return fromServer + fromUnicode
+}
+
+/** Põe [text] no cursor (ou no lugar da seleção) e deixa o cursor depois dele. */
+private fun insertAtCursor(value: TextFieldValue, text: String): TextFieldValue {
+    val start = value.selection.min
+    val updated = value.text.replaceRange(start, value.selection.max, text)
+    return TextFieldValue(updated, TextRange(start + text.length))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -681,14 +936,16 @@ private fun MessageActionsSheet(
     pinned: Boolean,
     onDismiss: () -> Unit,
     onReact: (emojiId: String?, unicode: String?) -> Unit,
+    onMoreReactions: () -> Unit,
     onReply: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
-    var customEmojis by remember { mutableStateOf<List<String>>(emptyList()) }
-    LaunchedEffect(Unit) { customEmojis = runCatching { session.emojis.all().keys.take(24).toList() }.getOrDefault(emptyList()) }
+    val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
+    val recents by session.recentEmojis.items.collectAsStateWithLifecycle()
+    val quick = remember(recents, serverEmojis) { EmojiPickerModel.quickReactions(recents, serverEmojis) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 16.dp)) {
@@ -696,11 +953,25 @@ private fun MessageActionsSheet(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                quickReactions.forEach { emoji ->
-                    ReactionChoice(onClick = { onReact(null, emoji); onDismiss() }) { ReactionGlyph(session, null, emoji) }
+                quick.forEach { ref ->
+                    ReactionChoice(
+                        onClick = {
+                            session.recentEmojis.used(ref)
+                            when (ref) {
+                                is EmojiRef.Unicode -> onReact(null, ref.char)
+                                is EmojiRef.Custom -> onReact(ref.id, null)
+                            }
+                            onDismiss()
+                        },
+                    ) {
+                        when (ref) {
+                            is EmojiRef.Unicode -> ReactionGlyph(session, null, ref.char)
+                            is EmojiRef.Custom -> ReactionGlyph(session, ref.id, null)
+                        }
+                    }
                 }
-                customEmojis.forEach { id ->
-                    ReactionChoice(onClick = { onReact(id, null); onDismiss() }) { ReactionGlyph(session, id, null) }
+                ReactionChoice(onClick = onMoreReactions) {
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(Res.string.msg_react_more))
                 }
             }
             Spacer(Modifier.height(8.dp))

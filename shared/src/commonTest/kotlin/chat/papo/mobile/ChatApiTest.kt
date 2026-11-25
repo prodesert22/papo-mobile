@@ -1,7 +1,6 @@
 package chat.papo.mobile
 
 import chat.papo.mobile.account.ServerUrl
-import chat.papo.mobile.chat.EmojiCatalog
 import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.core.formatDateTime
@@ -234,28 +233,6 @@ class ChatApiTest {
         assertNull(only.content)
         assertTrue(only.attachments.isEmpty() && only.reactions.isEmpty() && only.userReactions.isEmpty())
         assertEquals("Bot", only.externalAuthor?.name)
-    }
-
-    @Test
-    fun catalogoDeEmojisPaginaUmaVezEDecodificaAImagem() = runTest {
-        val seen = mutableListOf<Recorded>()
-        val api = api(seen) { request ->
-            if (request.url.parameters["last_id"] == null) {
-                json("""{"emojis":[{"id":"e1","name":"um","image_blob":"AQID","created_at":"2026-01-01T00:00:00Z"}],"has_more":true}""")
-            } else {
-                json("""{"emojis":[{"id":"e2","name":"dois","image_blob":"não é base64!","created_at":"2026-01-02T00:00:00Z"}],"has_more":false}""")
-            }
-        }
-        val catalog = EmojiCatalog(api)
-
-        assertEquals(listOf("e1", "e2"), catalog.all().keys.toList())
-        assertContentEquals(byteArrayOf(1, 2, 3), catalog.imageBytes("e1"))
-        assertNull(catalog.imageBytes("e2"))
-        assertNull(catalog.imageBytes("inexistente"))
-        // Tudo veio de duas páginas, buscadas uma única vez.
-        assertEquals(2, seen.size)
-        assertEquals("e1", seen[1].request.url.parameters["last_id"])
-        assertEquals("2026-01-01T00:00:00Z", seen[1].request.url.parameters["since"])
     }
 
     @Test

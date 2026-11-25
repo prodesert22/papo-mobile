@@ -3,6 +3,7 @@ package chat.papo.mobile.account
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.chat.ChatStore
 import chat.papo.mobile.chat.EmojiCatalog
+import chat.papo.mobile.chat.RecentEmojis
 import chat.papo.mobile.chat.RecentSearchFilters
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AuthApi
@@ -28,16 +29,19 @@ class AccountSession(
     val scope: CoroutineScope,
     resources: AccountResources,
     io: CoroutineDispatcher,
+    background: CoroutineDispatcher = io,
 ) {
     private val driver = resources.driver
     val media: MediaCache = resources.media
     val auth = AuthApi(client)
     val api = ChatApi(client)
-    val emojis = EmojiCatalog(api)
+    private val db = AccountDb(driver)
+    val emojis = EmojiCatalog(api, media, db.metaQueries, scope, io, background)
+    val recentEmojis = RecentEmojis(db.metaQueries, scope, io)
     val recentSearches = RecentSearchFilters()
 
     val ws = WsClient(client, scope, sessionStillValid = ::sessionStillValid)
-    val chat = ChatStore(userId, AccountDb(driver), api, ws, scope, io)
+    val chat = ChatStore(userId, db, api, ws, scope, io)
 
     private var started = false
 

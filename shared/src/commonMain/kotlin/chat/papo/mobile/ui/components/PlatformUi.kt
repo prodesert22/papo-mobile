@@ -16,6 +16,13 @@ interface PlatformUi {
     @Composable
     fun VideoView(track: VideoTrackHandle, modifier: Modifier, fill: Boolean)
 
+    /**
+     * A fonte de emojis do aparelho sabe desenhar [emoji]? Versões antigas do Android
+     * não têm os emojis mais novos e mostrariam um quadrado vazio. Pode ser lento:
+     * chame fora da thread principal.
+     */
+    fun supportsEmoji(emoji: String): Boolean
+
     /** Grava um arquivo na pasta de downloads do usuário. */
     suspend fun saveToDownloads(name: String, mimeType: String, bytes: ByteArray): Boolean
 }

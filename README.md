@@ -47,6 +47,9 @@ Papo also has a [web client](https://github.com/prodesert22/papo-frontend) and a
   it is.
 - Markdown formatting, link previews, image thumbnails with a full-screen
   viewer, typing indicators and presence.
+- Emoji: a searchable picker with every Unicode emoji and the server's own,
+  suggestions as you type `:name`, the server's emoji shown inside messages,
+  and larger emoji in messages that have nothing else.
 
 **Voice, camera and screen sharing**
 
@@ -64,8 +67,8 @@ The complete list is in the [0.1.0 release notes](releases/v0.1.0.md).
   administration.
 - In calls: no sound from a shared screen, no per-person volume and no Bluetooth
   headset selection.
-- Video attachments play only after being downloaded, GIFs are not animated and
-  the server's custom emoji are not rendered inside message text.
+- Video attachments play only after being downloaded, and GIFs and animated
+  emoji show only their first frame.
 - The interface is in Portuguese.
 
 ## Install
@@ -159,5 +162,7 @@ Papo Mobile is licensed under the
 [GNU Affero General Public License v3.0](LICENSE).
 
 The bundled Bricolage Grotesque font is licensed under the
-[SIL Open Font License](licenses/BricolageGrotesque-OFL.txt). The libraries the
-app depends on keep their own licenses.
+[SIL Open Font License](licenses/BricolageGrotesque-OFL.txt). The Unicode emoji
+names and keywords come from [emojibase-data](licenses/Emojibase-MIT.txt) (MIT),
+built on Unicode CLDR data under the [Unicode License v3](licenses/Unicode-3.0.txt).
+The libraries the app depends on keep their own licenses.

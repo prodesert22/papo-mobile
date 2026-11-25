@@ -142,7 +142,7 @@ class AccountManager(
         val sessionScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext.job))
         val cookies = StoredCookie(account.id, cookie)
         val client = PapoClient(engine, account.server, cookies)
-        val session = AccountSession(account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io)
+        val session = AccountSession(account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io, dispatchers.background)
         if (foreground) session.start()
         return session
     }

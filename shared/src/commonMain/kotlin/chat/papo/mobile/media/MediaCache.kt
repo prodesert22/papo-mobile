@@ -56,6 +56,30 @@ class MediaCache(
         }
     }
 
+    /** O recurso está guardado (memória ou disco)? Não decifra nada. */
+    suspend fun has(name: String): Boolean {
+        if (mutex.withLock { name in memory }) return true
+        return withContext(io) { SystemFileSystem.exists(fileFor(name)) }
+    }
+
+    /**
+     * Lê o que já está guardado, sem buscar nada. Diferente de [get], não espera
+     * outra busca do mesmo nome: dá para chamar de dentro do `fetch` dele.
+     */
+    suspend fun peek(name: String): ByteArray? {
+        mutex.withLock { memory[name] }?.let { return it }
+        return readDisk(name)?.also { bytes -> mutex.withLock { remember(name, bytes) } }
+    }
+
+    /**
+     * Guarda [bytes] em disco, cifrados, sem passar por [get]. Com [keepInMemory]
+     * falso não ocupa a memória do cache (para pré-carregar muitos itens de uma vez).
+     */
+    suspend fun put(name: String, bytes: ByteArray, keepInMemory: Boolean = true) {
+        writeDisk(name, bytes)
+        if (keepInMemory) mutex.withLock { remember(name, bytes) }
+    }
+
     suspend fun evict(name: String) {
         mutex.withLock { memory.remove(name)?.let { memoryUsed -= it.size } }
         withContext(io) { runCatching { SystemFileSystem.delete(fileFor(name), mustExist = false) } }
@@ -68,6 +92,7 @@ class MediaCache(
 
     private fun remember(name: String, bytes: ByteArray) {
         if (bytes.size > memoryBudget / 4) return
+        memory.remove(name)?.let { memoryUsed -= it.size }
         memory[name] = bytes
         memoryUsed += bytes.size
         val iterator = memory.entries.iterator()

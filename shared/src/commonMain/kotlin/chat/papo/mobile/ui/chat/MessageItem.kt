@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
@@ -34,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,10 +45,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
@@ -57,9 +63,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.EmojiCatalog
+import chat.papo.mobile.chat.EmojiPiece
+import chat.papo.mobile.chat.EmojiText
 import chat.papo.mobile.chat.Markdown
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.core.formatTime
@@ -82,9 +94,27 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import kotlin.io.encoding.Base64
 
-/** Texto da mensagem com Markdown, menções destacadas e links clicáveis. */
-fun messageText(content: String, nameOf: (String) -> String?, accent: Color, codeBackground: Color, muted: Color): AnnotatedString =
-    buildAnnotatedString {
+/** Texto já montado de uma mensagem e os emojis do servidor que ele pede como imagem. */
+class MessageText(val text: AnnotatedString, val emojiIds: Set<String>) {
+    /** Tem emoji como imagem? Então o `Text` precisa do `inlineContent` de [emojiContent]. */
+    val hasImages: Boolean get() = emojiIds.isNotEmpty()
+}
+
+/**
+ * Texto da mensagem com Markdown, menções destacadas, links clicáveis e `:nome:` dos
+ * emojis do servidor como imagem. [emojiIds] liga nome a id; dentro de código, de link
+ * e de menção o `:nome:` continua texto.
+ */
+fun messageText(
+    content: String,
+    nameOf: (String) -> String?,
+    accent: Color,
+    codeBackground: Color,
+    muted: Color,
+    emojiIds: Map<String, String> = emptyMap(),
+): MessageText {
+    val used = LinkedHashSet<String>()
+    val text = buildAnnotatedString {
         for (span in Markdown.parse(content)) {
             val style = SpanStyle(
                 fontWeight = if (span.bold || span.mentionUserId != null) FontWeight.SemiBold else null,
@@ -102,18 +132,59 @@ fun messageText(content: String, nameOf: (String) -> String?, accent: Color, cod
                     else -> Color.Unspecified
                 },
             )
-            val text = when {
+            val plain = when {
                 span.mentionUserId != null -> "@" + (nameOf(span.mentionUserId) ?: "usuário")
                 span.quote -> "▎ " + span.text
                 else -> span.text
             }
-            if (span.link != null) {
-                withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(text) }
-            } else {
-                withStyle(style) { append(text) }
+            when {
+                span.link != null -> withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(plain) }
+                span.code || span.mentionUserId != null -> withStyle(style) { append(plain) }
+                else -> withStyle(style) {
+                    for (piece in EmojiText.split(plain, emojiIds)) {
+                        when (piece) {
+                            is EmojiPiece.Plain -> append(piece.text)
+                            is EmojiPiece.Custom -> {
+                                used += piece.id
+                                appendInlineContent(emojiContentId(piece.id), ":${piece.name}:")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+    return MessageText(text, used)
+}
+
+private fun emojiContentId(emojiId: String) = "emoji:$emojiId"
+
+/** O `inlineContent` do `Text` para os emojis de [MessageText.emojiIds]. */
+@Composable
+fun emojiContent(session: AccountSession, ids: Set<String>): Map<String, InlineTextContent> = remember(session.accountId, ids) {
+    ids.associate { id ->
+        emojiContentId(id) to InlineTextContent(
+            Placeholder(1.25.em, 1.25.em, PlaceholderVerticalAlign.TextCenter),
+        ) { EmojiImage(session, id, Modifier.fillMaxSize()) }
+    }
+}
+
+/**
+ * A imagem de um emoji do servidor, do cache cifrado. Enquanto carrega fica vazia, ou
+ * mostra um círculo que pulsa com [placeholder] (lido só no desenho, sem recompor).
+ */
+@Composable
+fun EmojiImage(session: AccountSession, emojiId: String, modifier: Modifier = Modifier, placeholder: State<Float>? = null) {
+    val image by rememberMediaImage(session, EmojiCatalog.mediaKey(emojiId)) { session.emojis.imageBytes(emojiId) }
+    val bitmap = image
+    when {
+        bitmap != null -> Image(bitmap, contentDescription = null, modifier = modifier)
+        placeholder != null -> {
+            val color = MaterialTheme.colorScheme.onSurface
+            Box(modifier.drawBehind { drawCircle(color.copy(alpha = placeholder.value)) })
+        }
+    }
+}
 
 /**
  * Uma mensagem. [compact] é a continuação de quem acabou de falar: sem avatar
@@ -126,6 +197,8 @@ fun MessageItem(
     message: Message,
     author: User?,
     users: Map<String, User>,
+    emojiIds: Map<String, String>,
+    unicodeEmojis: UnicodeEmojiCatalog?,
     repliedTo: Message?,
     compact: Boolean,
     pinned: Boolean,
@@ -180,10 +253,22 @@ fun MessageItem(
             if (message.content.isNotEmpty()) {
                 val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
                 val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                val text = remember(message.content, users, accent) {
-                    messageText(message.content, { users[it]?.displayName }, accent, codeBackground, muted)
+                // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
+                // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
+                val relevantIds = if (':' in message.content) emojiIds else emptyMap()
+                val text = remember(message.content, users, accent, relevantIds) {
+                    messageText(message.content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds)
                 }
-                Text(text, style = MaterialTheme.typography.bodyLarge)
+                // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
+                val jumbo = remember(message.content, relevantIds, unicodeEmojis) {
+                    EmojiText.isEmojiOnly(message.content, relevantIds, unicodeEmojis)
+                }
+                val style = MaterialTheme.typography.bodyLarge
+                Text(
+                    text.text,
+                    style = if (jumbo) style.copy(fontSize = 34.sp, lineHeight = 44.sp) else style,
+                    inlineContent = if (text.hasImages) emojiContent(session, text.emojiIds) else emptyMap(),
+                )
             }
             if (message.edited) {
                 Text(
@@ -401,8 +486,5 @@ fun ReactionGlyph(session: AccountSession, emojiId: String?, unicode: String?) {
         Text(unicode.orEmpty(), style = MaterialTheme.typography.bodyLarge)
         return
     }
-    val image by rememberMediaImage(session, "emoji/$emojiId") { session.emojis.imageBytes(emojiId) }
-    Box(Modifier.size(20.dp)) {
-        image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
-    }
+    Box(Modifier.size(20.dp)) { EmojiImage(session, emojiId, Modifier.fillMaxSize()) }
 }

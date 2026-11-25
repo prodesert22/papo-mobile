@@ -2,6 +2,7 @@ package chat.papo.mobile.platform
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Paint
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -24,6 +25,11 @@ import kotlinx.coroutines.withContext
 
 class AndroidPlatformUi(context: Context) : PlatformUi {
     private val app = context.applicationContext
+
+    // Paint não é seguro entre threads; as consultas são curtas, então um cadeado basta.
+    private val glyphPaint = Paint()
+
+    override fun supportsEmoji(emoji: String): Boolean = synchronized(glyphPaint) { glyphPaint.hasGlyph(emoji) }
 
     @Composable
     override fun rememberFilePicker(onPicked: (List<OutgoingFile>) -> Unit): () -> Unit {

@@ -9,10 +9,13 @@ Uso: fake_papo.py <porta> [senha_do_servidor]
 import base64
 import hashlib
 import json
+import os
+import random
 import re
 import struct
 import sys
 import threading
+import time
 import unicodedata
 import uuid
 import zlib
@@ -44,6 +47,8 @@ READS = {}       # (user_id, channel_id) -> message_id
 DMS = {}         # dm_id -> (user_a, user_b)
 PINS = {}        # channel_id -> [message_id]
 FILES = {}       # attachment_id -> (mime, bytes)
+EMOJIS = []      # emojis do servidor, na ordem de criação: {id, name, format, image_blob, created_at}
+EMOJI_BUCKETS = {}  # cookie -> [fichas, instante]: limite de taxa como o padrão do backend (10/s, rajada 20)
 SOCKETS = []     # [(user_id, wfile, lock)]
 LOCK = threading.RLock()
 SEQ = [0]
@@ -55,6 +60,16 @@ def png(r, g, b, w=96, h=64):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def noisy_png(r, g, b, size=96):
+    """PNG com ruído, que quase não comprime: pesa como um emoji de verdade (~27 KB)."""
+    rnd = random.Random(r * 65536 + g * 256 + b + size)
+    raw = b"".join(b"\x00" + bytes(min(255, max(0, c + rnd.randint(-40, 40))) for _ in range(size) for c in (r, g, b)) for _ in range(size))
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
 def stamp():
@@ -145,8 +160,9 @@ def search_messages(data, query, me):
 
 def view(m, user_id=None):
     out = {k: v for k, v in m.items() if k != "reactions"}
-    out["reactions"] = [{"emoji_id": None, "unicode": e, "count": len(us)} for e, us in m["reactions"].items() if us] or None
-    out["user_reactions"] = [{"id": str(uuid.uuid4()), "emoji_id": None, "unicode": e} for e, us in m["reactions"].items() if user_id in us]
+    # A chave de cada reação é (emoji_id, unicode); um dos dois é None.
+    out["reactions"] = [{"emoji_id": k[0], "unicode": k[1], "count": len(us)} for k, us in m["reactions"].items() if us] or None
+    out["user_reactions"] = [{"id": str(uuid.uuid4()), "emoji_id": k[0], "unicode": k[1]} for k, us in m["reactions"].items() if user_id in us]
     return out
 
 
@@ -339,7 +355,22 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/users":
             self.send(200, {"users": [summary(n) for n in USERS], "has_more": False})
         elif path == "/emojis":
-            self.send(200, {"emojis": [], "has_more": False})
+            # Como o servidor real: 25 por página, cursor since + last_id e token bucket (RATE_LIMIT=10, RATE_BURST=20).
+            tokens, at = EMOJI_BUCKETS.get(self.cookie(), [20.0, time.monotonic()])
+            now_t = time.monotonic()
+            tokens = min(20.0, tokens + (now_t - at) * 10)
+            if tokens < 1:
+                EMOJI_BUCKETS[self.cookie()] = [tokens, now_t]
+                return self.problem(429, "Limite de requisições excedido", "muitas requisições, tente novamente mais tarde") or True
+            EMOJI_BUCKETS[self.cookie()] = [tokens - 1, now_t]
+            # FAKE_EMOJI_DELAY=1.0 simula um servidor lento (segundos por página), para medir a tela durante a carga.
+            time.sleep(float(os.environ.get("FAKE_EMOJI_DELAY", "0")))
+            rest = EMOJIS
+            last_id = query.get("last_id", [None])[0]
+            if last_id:
+                ids = [e["id"] for e in EMOJIS]
+                rest = EMOJIS[ids.index(last_id) + 1:] if last_id in ids else []
+            self.send(200, {"emojis": rest[:25], "has_more": len(rest) > 25})
         elif re.fullmatch(r"/channels/[^/]+/pinned", path):
             cid = path.split("/")[2]
             byid = {x["id"]: x for x in MESSAGES.get(cid, [])}
@@ -441,10 +472,10 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/channels/([^/]+)/messages/([^/]+)/reactions", path)
         if m:
             msg = self.find(m.group(2))
-            emoji = data.get("unicode")
-            users = msg["reactions"].setdefault(emoji, set())
+            key = (data.get("emoji_id"), data.get("unicode"))
+            users = msg["reactions"].setdefault(key, set())
             users.add(me) if method == "POST" else users.discard(me)
-            emit({"type": "react_update", "message_id": msg["id"], "emoji_id": None, "unicode": emoji, "count": len(users)}, only=audience(msg["channel_id"]))
+            emit({"type": "react_update", "message_id": msg["id"], "emoji_id": key[0], "unicode": key[1], "count": len(users)}, only=audience(msg["channel_id"]))
             return self.send(201 if method == "POST" else 204, {"message_id": msg["id"]} if method == "POST" else None)
         self.problem(404, "Não encontrado", "Rota inexistente")
 
@@ -548,12 +579,31 @@ if __name__ == "__main__":
     new_message(PAPO, uid("bia"), "Vi sim, @mention(<@%s>) acompanhou comigo.\nSegue o print:" % uid("ana"), reply_to=first["id"],
                 attachments=[{"id": aid, "mime_type": "image/png", "original_file_name": "print.png", "size_bytes": len(FILES[aid][1]),
                               "thumbnail_id": aid, "thumbnail_width": 96, "thumbnail_height": 64, "moderation_status": "clean"}])
-    first["reactions"]["👍"] = {uid("bia")}
+    first["reactions"][(None, "👍")] = {uid("bia")}
     new_message(CHANNELS[2]["id"], uid("bia"), "Manutenção no sábado às 10h.")
     # Uma conversa direta já existente: a busca geral não a alcança, só a busca com channel_id.
     dm = str(uuid.uuid4())
     DMS[dm] = (uid("ana"), uid("bia"))
     new_message(dm, uid("bia"), "Ana, o deploy de ontem passou nos testes?")
     new_message(dm, uid("ana"), "Passou! Só faltou atualizar a documentação.")
+
+    # Emojis do servidor: 5 com nome de verdade e o resto para passar de duas páginas.
+    palette = [(255, 99, 71), (60, 179, 113), (65, 105, 225), (218, 165, 32), (186, 85, 211)]
+    # 200 emojis: 8 páginas, uns 8 s de carga no app (que espaça as páginas), para ver o carregamento.
+    names = ["party_parrot", "ok_hand", "blob_wave", "cat_vibe", "check_ok"] + ["emoji_%03d" % i for i in range(6, 201)]
+    for i, name in enumerate(names):
+        r, g, b = palette[i % len(palette)]
+        EMOJIS.append({"id": str(uuid.uuid4()), "name": name, "format": "PNG",
+                       # FAKE_EMOJI_SMALL=1 usa imagens minúsculas, para separar o custo dos dados do resto da carga.
+                       "image_blob": base64.b64encode(png(r, g, b, 32, 32) if os.environ.get("FAKE_EMOJI_SMALL") else noisy_png((r + i * 7) % 256, g, b)).decode(),
+                       "created_at": "2026-02-%02dT10:%02d:%02dZ" % (1 + i // 60, (i // 60) % 60, i % 60)})
+    parrot, ok = EMOJIS[0]["id"], EMOJIS[1]["id"]
+    new_message(PAPO, uid("bia"), "Chegou o emoji novo :party_parrot: e este também :ok_hand: mas :nao_existe: não")
+    new_message(PAPO, uid("caio"), ":party_parrot:")
+    new_message(PAPO, uid("bia"), "😀🎉👍")
+    new_message(PAPO, uid("caio"), "em código `:party_parrot:` não vira imagem, **negrito :ok_hand:** vira")
+    reacted = new_message(PAPO, uid("bia"), "reaja com um emoji do servidor")
+    reacted["reactions"][(parrot, None)] = {uid("bia"), uid("caio")}
+    reacted["reactions"][(None, "🔥")] = {uid("caio")}
     print(f"{NAME} em http://0.0.0.0:{PORT}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
