@@ -37,6 +37,9 @@ release notes in [releases/](../releases/) describe each version's changes.
   accents, and messages that mention you or reply to you are highlighted.
 - Tap a reply to go to the original message, swipe a message to reply to it and
   double tap it to react with 👍. Copy a message or select part of its text.
+- The app follows the server's permissions: it hides channels you cannot read and
+  offers only the actions you may take; `@everyone` is offered and highlighted for
+  those allowed to use it.
 - Message search on the server, by text and by conversation, author, mention,
   links, attachments and date. A result opens in its conversation, however old
   it is.

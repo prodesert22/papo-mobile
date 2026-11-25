@@ -121,6 +121,7 @@
     <string name="channels_in_voice">%1$d na chamada</string>
     <string name="channels_open_chat">Abrir chat</string>
     <string name="channels_join_call">Entrar na chamada</string>
+    <string name="channels_none_visible">Você não tem acesso a nenhum canal deste servidor.</string>
     <string name="dm_pick_title">Com quem você quer falar?</string>
     <string name="dm_pick_search">Buscar pessoa</string>
     <string name="dm_close">Fechar conversa</string>

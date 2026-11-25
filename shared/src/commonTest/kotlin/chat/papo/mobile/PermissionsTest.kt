@@ -11,6 +11,7 @@ import chat.papo.mobile.chat.RoleFlag
 import chat.papo.mobile.chat.RoleFlags
 import chat.papo.mobile.chat.authorCanEveryone
 import chat.papo.mobile.chat.conversationAccess
+import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.chat.visibleChannels
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -433,5 +434,63 @@ class PermissionsTest {
         val channels = listOf(channel("cat", ChannelType.Category), channel("a", parent = "cat"), channel("v", ChannelType.Voice, "cat"))
         assertEquals(channels, visibleChannels(channels, PermissionSnapshot.EMPTY, me))
         assertEquals(emptyList(), visibleChannels(emptyList(), PermissionSnapshot.EMPTY, me))
+    }
+
+    // readableChannels()
+
+    @Test
+    fun canalDeTextoComLeituraNegadaNaoELegivelMasOAbertoEODesconhecidoSao() {
+        val channels = listOf(channel("aberto"), channel("fechado"), channel("novo"), channel("meu"))
+        val snapshot = known(
+            mine = setOf("r"),
+            grants = mapOf(
+                "aberto" to emptyList(),
+                "fechado" to listOf(grant("a", read = true)),
+                "meu" to listOf(grant("r", read = true)),
+            ),
+        )
+        // "novo" não está nas entradas conhecidas: desconhecido conta como legível.
+        assertEquals(listOf("aberto", "novo", "meu"), readableChannels(channels, snapshot, me).map { it.id })
+    }
+
+    @Test
+    fun canalDeVozSoComVozApareceNaListaMasNaoELegivel() {
+        val channels = listOf(channel("so-leitura", ChannelType.Voice), channel("so-voz", ChannelType.Voice))
+        val snapshot = known(
+            mine = setOf("r"),
+            grants = mapOf(
+                "so-leitura" to listOf(grant("r", read = true)),
+                "so-voz" to listOf(grant("r", voice = true)),
+            ),
+        )
+        assertEquals(listOf("so-leitura", "so-voz"), visibleChannels(channels, snapshot, me).map { it.id })
+        assertEquals(listOf("so-leitura"), readableChannels(channels, snapshot, me).map { it.id })
+    }
+
+    @Test
+    fun categoriaNuncaELegivelEODonoLeTudo() {
+        val channels = listOf(channel("cat", ChannelType.Category), channel("fechado", parent = "cat"))
+        val grants = mapOf("fechado" to listOf(grant("a", read = true)))
+        assertEquals(emptyList(), readableChannels(channels, known(grants = grants), me).map { it.id })
+        assertEquals(listOf("fechado"), readableChannels(channels, known(grants = grants, owner = me), me).map { it.id })
+    }
+
+    @Test
+    fun semSnapshotTodosOsCanaisSaoLegiveisMenosAsCategoriasEListaVaziaFicaVazia() {
+        val channels = listOf(channel("cat", ChannelType.Category), channel("a", parent = "cat"), channel("v", ChannelType.Voice, "cat"))
+        assertEquals(listOf("a", "v"), readableChannels(channels, PermissionSnapshot.EMPTY, me).map { it.id })
+        assertEquals(emptyList(), readableChannels(emptyList(), PermissionSnapshot.EMPTY, me))
+    }
+
+    @Test
+    fun canalOcultoNaoAcendeONaoLidoEOLegivelAcende() {
+        val hidden = channel("fechado").copy(lastMessageId = "m1", lastReadMessage = "m0")
+        val open = channel("aberto").copy(lastMessageId = "m2", lastReadMessage = "m2")
+        val snapshot = known(grants = mapOf("fechado" to listOf(grant("a", read = true)), "aberto" to emptyList()))
+        assertTrue(hidden.unread)
+        assertFalse(readableChannels(listOf(hidden, open), snapshot, me).any { it.unread })
+
+        val unreadOpen = open.copy(lastReadMessage = "m1")
+        assertTrue(readableChannels(listOf(hidden, unreadOpen), snapshot, me).any { it.unread })
     }
 }

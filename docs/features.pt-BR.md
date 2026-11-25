@@ -39,6 +39,9 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Toque numa resposta para ir à mensagem original, deslize uma mensagem para
   respondê-la e toque duas vezes para reagir com 👍. Copie uma mensagem ou
   selecione parte do texto.
+- O app segue as permissões do servidor: esconde os canais que você não pode ler e
+  só oferece as ações que você pode fazer; o `@everyone` aparece e é destacado para
+  quem tem permissão.
 - Busca de mensagens no servidor, por texto e por conversa, autor, menção, link,
   anexos e data. O resultado abre na conversa, por mais antigo que seja.
 - Formatação Markdown com listas e divisórias, prévias de links, miniaturas de

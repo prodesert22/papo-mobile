@@ -264,6 +264,14 @@ fun visibleChannels(channels: List<Channel>, snapshot: PermissionSnapshot, me: S
     return kept.filter { it.type != ChannelType.Category || it.id !in parentsBefore || it.id in parentsAfter }
 }
 
+/**
+ * Os canais, de texto ou de voz, que [me] pode abrir para ler: a leitura não foi negada. Ao contrário de
+ * [visibleChannels], deixa de fora o canal de voz que só dá para entrar na chamada, porque quem o abre vê o
+ * chat dele. É o que a troca rápida, o filtro da busca e o ponto de não lida consideram. Categorias não entram.
+ */
+fun readableChannels(channels: List<Channel>, snapshot: PermissionSnapshot, me: String): List<Channel> =
+    channels.filter { it.type != ChannelType.Category && snapshot.channel(me, it.id, ChannelFlag.Read).offered }
+
 private fun PermissionSnapshot.canSee(item: Channel, me: String): Boolean {
     if (item.type == ChannelType.Voice && channel(me, item.id, ChannelFlag.Voice).offered) return true
     return channel(me, item.id, ChannelFlag.Read).offered

@@ -49,6 +49,7 @@ import chat.papo.mobile.chat.ChannelType
 import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.conversationAccess
 import chat.papo.mobile.chat.groupChannels
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.searchByName
@@ -60,6 +61,7 @@ import chat.papo.mobile.resources.channels_direct
 import chat.papo.mobile.resources.channels_in_voice
 import chat.papo.mobile.resources.channels_new_dm
 import chat.papo.mobile.resources.channels_none
+import chat.papo.mobile.resources.channels_none_visible
 import chat.papo.mobile.resources.channels_open_chat
 import chat.papo.mobile.resources.channels_reconnecting
 import chat.papo.mobile.resources.channels_sync_failed
@@ -76,7 +78,10 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit, onJoinVoice: (channelId: String) -> Unit) {
     val chat = session.chat
-    val channels by chat.channels.collectAsStateWithLifecycle()
+    // Só os canais que a conta pode ver; `allChannels` diz se o servidor tem algum, para a mensagem de lista vazia.
+    val allChannels by chat.channels.collectAsStateWithLifecycle()
+    val channels by chat.visibleChannels.collectAsStateWithLifecycle()
+    val permissions by chat.access.collectAsStateWithLifecycle()
     val dms by chat.dms.collectAsStateWithLifecycle()
     val users by chat.users.collectAsStateWithLifecycle()
     val presence by chat.presence.collectAsStateWithLifecycle()
@@ -89,7 +94,7 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
     val groups = remember(channels) { groupChannels(channels) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        if (connection != WsState.Connected && !syncing && channels.isNotEmpty()) {
+        if (connection != WsState.Connected && !syncing && allChannels.isNotEmpty()) {
             item(key = "offline") { StatusLine(stringResource(Res.string.channels_reconnecting)) }
         }
         if (syncError != null) {
@@ -118,17 +123,25 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
         }
 
         if (channels.isEmpty() && !syncing && syncError == null) {
-            item(key = "empty") { StatusLine(stringResource(Res.string.channels_none)) }
+            val message = if (allChannels.isEmpty()) Res.string.channels_none else Res.string.channels_none_visible
+            item(key = "empty") { StatusLine(stringResource(message)) }
         }
         groups.forEach { group ->
             item(key = "cat-" + (group.category?.id ?: "none")) {
                 SectionHeader(group.category?.name ?: stringResource(Res.string.channels_uncategorized))
             }
             items(group.channels, key = { "ch-" + it.id }) { channel ->
-                val isVoice = channel.type == ChannelType.Voice
-                // Tocar no canal de voz entra na chamada; o chat dele abre pelo botão no fim da linha.
-                ChannelRow(channel, voice[channel.id].orEmpty().size, onOpenChat = if (isVoice) ({ onOpen(channel.id) }) else null) {
-                    if (isVoice) onJoinVoice(channel.id) else onOpen(channel.id)
+                val access = if (channel.type == ChannelType.Voice) {
+                    conversationAccess(permissions, session.userId, channel.id, isDm = false)
+                } else {
+                    null
+                }
+                // Tocar no canal de voz entra na chamada, se a conta pode; senão abre o chat. O chat também abre pelo botão
+                // no fim da linha, que só existe quando o toque entra na chamada e a conta lê o canal.
+                val joinsCall = access?.joinVoice == true
+                val chatButton = joinsCall && access?.read == true
+                ChannelRow(channel, voice[channel.id].orEmpty().size, onOpenChat = if (chatButton) ({ onOpen(channel.id) }) else null) {
+                    if (joinsCall) onJoinVoice(channel.id) else onOpen(channel.id)
                 }
             }
         }
