@@ -1,0 +1,56 @@
+# Desenvolvimento
+
+[Read in English](development.md)
+
+## Requisitos
+
+- Um JDK, versão 17 ou mais nova, para iniciar o Gradle. O build em si usa o
+  JDK 21 e o baixa quando ele não está instalado.
+- O Android SDK. Aponte `ANDROID_HOME` para ele ou crie `local.properties` com
+  `sdk.dir=/caminho/para/Android/Sdk`. O Gradle baixa os pacotes do SDK de que
+  precisa, desde que as licenças do SDK estejam aceitas.
+
+## Compilar e instalar
+
+```sh
+git clone https://github.com/prodesert22/papo-mobile.git
+cd papo-mobile
+./gradlew :androidApp:assembleDebug
+adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
+```
+
+## Verificações
+
+```sh
+./gradlew :shared:testAndroidHostTest          # testes de unidade
+./gradlew :androidApp:lintDebug                # lint do Android
+python3 -m unittest discover -s tools/tests    # testes do tools/release.py
+tools/dev/run-device-tests.sh <serial>         # testes instrumentados em um aparelho
+```
+
+`adb devices` lista os seriais. Use o script para os testes instrumentados no
+lugar de `connectedAndroidTest`: essa tarefa roda em todos os aparelhos
+conectados e desinstala o app ao terminar.
+
+## Servidores para testar
+
+Num emulador, um servidor rodando no seu computador fica acessível em
+`http://10.0.2.2:<porta>`. Sem servidor, `python3 tools/dev/fake_papo.py 8081`
+sobe um falso que cobre login, chat de texto e busca de mensagens, com as
+usuárias `ana` (`Senha@123`) e `bia` (`Senha@456`). Ele não substitui um
+servidor de verdade e não tem chamadas de voz.
+
+## Builds de release
+
+O build de release é minificado e precisa de uma chave de assinatura; veja
+[releases/README.md](../releases/README.md).
+
+## Organização do projeto
+
+`shared/` é o módulo Kotlin Multiplatform com quase todo o código, incluindo a
+interface em Compose; `androidApp/` é o aplicativo Android. Só o alvo Android é
+compilado: os alvos iOS estão declarados e ainda não têm implementação. O
+contrato do serviço está em [openapi.yml](../openapi.yml).
+
+O [AGENTS.md](../AGENTS.md) (em inglês) descreve a organização em detalhe e as
+regras para alterar o código.
