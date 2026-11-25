@@ -346,11 +346,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, {"channel_id": cid, "pinned": [view(byid[i], me) for i in PINS.get(cid, []) if i in byid]})
         elif re.fullmatch(r"/channels/[^/]+/messages", path):
             cid = path.split("/")[2]
-            ms = list(reversed(MESSAGES.get(cid, [])))  # desc
-            last_id = query.get("last_id", [None])[0]
-            if last_id:
-                ids = [x["id"] for x in ms]
-                ms = ms[ids.index(last_id) + 1:] if last_id in ids else []
+            asc = query.get("order", ["desc"])[0] == "asc"
+            since, last_id = query.get("since", [None])[0], query.get("last_id", [None])[0]
+            ms = sorted(MESSAGES.get(cid, []), key=lambda x: (x["created_at"], x["id"]))
+            # Cursor (created_at, id), como no backend: o que vem depois dele (asc) ou antes dele (desc).
+            if since and last_id:
+                cursor = (since, last_id)
+                ms = [x for x in ms if ((x["created_at"], x["id"]) > cursor if asc else (x["created_at"], x["id"]) < cursor)]
+            if not asc:
+                ms.reverse()
             limit = int(query.get("limit", ["30"])[0])
             self.send(200, {"channel_id": cid, "messages": [view(x, me) for x in ms[:limit]], "has_more": len(ms) > limit})
         else:
