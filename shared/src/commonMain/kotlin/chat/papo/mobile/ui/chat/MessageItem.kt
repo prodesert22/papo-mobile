@@ -207,7 +207,6 @@ fun MessageItem(
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
 ) {
-    val accent = MaterialTheme.colorScheme.primary
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
         ?: author?.displayName
         ?: stringResource(Res.string.chat_unknown_user)
@@ -251,24 +250,7 @@ fun MessageItem(
                 }
             }
             if (message.content.isNotEmpty()) {
-                val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
-                val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
-                // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
-                val relevantIds = if (':' in message.content) emojiIds else emptyMap()
-                val text = remember(message.content, users, accent, relevantIds) {
-                    messageText(message.content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds)
-                }
-                // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
-                val jumbo = remember(message.content, relevantIds, unicodeEmojis) {
-                    EmojiText.isEmojiOnly(message.content, relevantIds, unicodeEmojis)
-                }
-                val style = MaterialTheme.typography.bodyLarge
-                Text(
-                    text.text,
-                    style = if (jumbo) style.copy(fontSize = 34.sp, lineHeight = 44.sp) else style,
-                    inlineContent = if (text.hasImages) emojiContent(session, text.emojiIds) else emptyMap(),
-                )
+                MessageBodyText(session, message.content, users, emojiIds, unicodeEmojis)
             }
             if (message.edited) {
                 Text(
@@ -295,6 +277,39 @@ fun MessageItem(
             }
         }
     }
+}
+
+/**
+ * Corpo de texto de uma mensagem: Markdown, menções, links e `:nome:` dos emojis do
+ * servidor como imagem. Mensagem só de emoji aparece maior.
+ */
+@Composable
+fun MessageBodyText(
+    session: AccountSession,
+    content: String,
+    users: Map<String, User>,
+    emojiIds: Map<String, String>,
+    unicodeEmojis: UnicodeEmojiCatalog?,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
+    // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
+    val relevantIds = if (':' in content) emojiIds else emptyMap()
+    val text = remember(content, users, accent, relevantIds) {
+        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds)
+    }
+    // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
+    val jumbo = remember(content, relevantIds, unicodeEmojis) {
+        EmojiText.isEmojiOnly(content, relevantIds, unicodeEmojis)
+    }
+    val style = MaterialTheme.typography.bodyLarge
+    Text(
+        text.text,
+        style = if (jumbo) style.copy(fontSize = 34.sp, lineHeight = 44.sp) else style,
+        inlineContent = if (text.hasImages) emojiContent(session, text.emojiIds) else emptyMap(),
+    )
 }
 
 @Composable
