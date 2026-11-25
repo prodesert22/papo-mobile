@@ -256,12 +256,16 @@ fun authorCanEveryone(snapshot: PermissionSnapshot, authorId: String?, webhookId
  * Os canais que [me] deve ver. Canal de texto fica se a leitura não foi negada; canal de voz, se a leitura
  * **ou** a voz não foi negada (dá para entrar na chamada sem ler o chat). Categoria some só se ficou vazia
  * por causa do filtro; a que já era vazia fica. O desconhecido aparece.
+ *
+ * Quem pertence à categoria é o que [groupChannels] decide, o mesmo agrupamento da lista: os canais com
+ * `parent_id` dela e os antigos, sem ele, que a seguem na ordem. O filtro age dentro desses grupos, como no web.
+ * A ordem da lista de entrada é mantida.
  */
 fun visibleChannels(channels: List<Channel>, snapshot: PermissionSnapshot, me: String): List<Channel> {
-    val kept = channels.filter { it.type == ChannelType.Category || snapshot.canSee(it, me) }
-    val parentsBefore = channels.mapNotNullTo(HashSet()) { it.parentId }
-    val parentsAfter = kept.mapNotNullTo(HashSet()) { it.parentId }
-    return kept.filter { it.type != ChannelType.Category || it.id !in parentsBefore || it.id in parentsAfter }
+    val emptied = groupChannels(channels).mapNotNullTo(HashSet()) { group ->
+        group.category?.id?.takeIf { group.channels.isNotEmpty() && group.channels.none { snapshot.canSee(it, me) } }
+    }
+    return channels.filter { if (it.type == ChannelType.Category) it.id !in emptied else snapshot.canSee(it, me) }
 }
 
 /**

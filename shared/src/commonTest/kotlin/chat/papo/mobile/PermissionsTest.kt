@@ -11,6 +11,7 @@ import chat.papo.mobile.chat.RoleFlag
 import chat.papo.mobile.chat.RoleFlags
 import chat.papo.mobile.chat.authorCanEveryone
 import chat.papo.mobile.chat.conversationAccess
+import chat.papo.mobile.chat.groupChannels
 import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.chat.visibleChannels
 import kotlin.test.Test
@@ -46,11 +47,11 @@ class PermissionsTest {
         grants = grants,
     )
 
-    private fun channel(id: String, type: ChannelType = ChannelType.Text, parent: String? = null) = Channel(
+    private fun channel(id: String, type: ChannelType = ChannelType.Text, parent: String? = null, position: Int = 0) = Channel(
         id = id,
         name = id,
         type = type,
-        position = 0,
+        position = position,
         topic = null,
         parentId = parent,
         lastMessageId = null,
@@ -404,29 +405,133 @@ class PermissionsTest {
         assertEquals(listOf("so-leitura", "so-voz"), visibleChannels(channels, snapshot, me).map { it.id })
     }
 
+    /** Os canais na ordem dada, com a posição de cada um igual ao índice: é a ordem que o agrupamento da lista usa. */
+    private fun ordered(vararg items: Channel) = items.mapIndexed { index, item -> item.copy(position = index) }
+
+    /** Tudo conhecido e só os canais de [ids] fechados (entrada de um cargo que [me] não tem); o resto não tem entrada. */
+    private fun hiding(vararg ids: String) = known(grants = ids.associateWith { listOf(grant("a", read = true)) })
+
+    /** Categoria (ou nulo, para os soltos) com os ids dos canais, na forma que a lista os mostra. */
+    private fun groupIds(channels: List<Channel>) =
+        groupChannels(channels).map { group -> group.category?.id to group.channels.map { it.id } }
+
     @Test
     fun categoriaEsvaziadaPeloFiltroSomeMasACategoriaVaziaDeOrigemFica() {
-        val channels = listOf(
+        val channels = ordered(
+            channel("solto"),
             channel("cat-oculta", ChannelType.Category),
             channel("secreto", parent = "cat-oculta"),
             channel("cat-mista", ChannelType.Category),
             channel("secreto2", parent = "cat-mista"),
             channel("geral", parent = "cat-mista"),
             channel("cat-vazia", ChannelType.Category),
-            channel("solto"),
         )
-        val snapshot = known(
-            grants = mapOf(
-                "secreto" to listOf(grant("a", read = true)),
-                "secreto2" to listOf(grant("a", read = true)),
-                "geral" to emptyList(),
-                "solto" to emptyList(),
-            ),
-        )
+        val snapshot = hiding("secreto", "secreto2")
         assertEquals(
-            listOf("cat-mista", "geral", "cat-vazia", "solto"),
+            listOf("solto", "cat-mista", "geral", "cat-vazia"),
             visibleChannels(channels, snapshot, me).map { it.id },
         )
+    }
+
+    @Test
+    fun categoriaFicaSeUmCanalOcultoTemOParentIdDelaMasOsOutrosVisiveisSaoDelaPelaOrdem() {
+        // `Audio` tem um canal de voz fechado por parent_id; os canais antigos, sem parent_id, vêm depois dela
+        // e a lista os põe nela pela ordem: a categoria não pode sumir e levá-los para "sem categoria".
+        val channels = ordered(
+            channel("Texto", ChannelType.Category),
+            channel("geral"),
+            channel("Audio", ChannelType.Category),
+            channel("voz1", ChannelType.Voice),
+            channel("papo-tui"),
+            channel("pm-palco", ChannelType.Voice, parent = "Audio"),
+        )
+        val visible = visibleChannels(channels, hiding("pm-palco"), me)
+        assertEquals(listOf("Texto", "geral", "Audio", "voz1", "papo-tui"), visible.map { it.id })
+        assertEquals(
+            listOf("Texto" to listOf("geral"), "Audio" to listOf("voz1", "papo-tui")),
+            groupIds(visible),
+        )
+    }
+
+    @Test
+    fun categoriaSomeSeTodosOsCanaisDelaPorParentIdEPorOrdemFicaramOcultos() {
+        val channels = ordered(
+            channel("Audio", ChannelType.Category),
+            channel("voz1", ChannelType.Voice),
+            channel("pm-palco", ChannelType.Voice, parent = "Audio"),
+            channel("Texto", ChannelType.Category),
+            channel("geral"),
+        )
+        val visible = visibleChannels(channels, hiding("voz1", "pm-palco"), me)
+        assertEquals(listOf("Texto", "geral"), visible.map { it.id })
+        assertEquals(listOf("Texto" to listOf("geral")), groupIds(visible))
+    }
+
+    @Test
+    fun categoriaComCanaisPorParentIdEPorOrdemFicaSeAlgumDosDoisTipoFicaVisivel() {
+        // A: filho por parent_id fechado e filho por ordem aberto. B: o contrário. C: os dois fechados.
+        // Os filhos por parent_id vêm no fim da ordem, onde a ordem os poria na última categoria (C).
+        val channels = ordered(
+            channel("A", ChannelType.Category),
+            channel("a-ordem-aberto"),
+            channel("B", ChannelType.Category),
+            channel("b-ordem-fechado"),
+            channel("C", ChannelType.Category),
+            channel("c-ordem-fechado"),
+            channel("a-pai-fechado", parent = "A"),
+            channel("b-pai-aberto", parent = "B"),
+            channel("c-pai-fechado", parent = "C"),
+        )
+        val visible = visibleChannels(channels, hiding("a-pai-fechado", "b-ordem-fechado", "c-ordem-fechado", "c-pai-fechado"), me)
+        assertEquals(listOf("A", "a-ordem-aberto", "B", "b-pai-aberto"), visible.map { it.id })
+        assertEquals(
+            listOf("A" to listOf("a-ordem-aberto"), "B" to listOf("b-pai-aberto")),
+            groupIds(visible),
+        )
+    }
+
+    @Test
+    fun canaisAntesDaPrimeiraCategoriaNaoDependemDeCategoriaEFicamSoltos() {
+        val channels = ordered(
+            channel("solto-aberto"),
+            channel("solto-fechado"),
+            channel("Audio", ChannelType.Category),
+            channel("voz1", ChannelType.Voice),
+        )
+        val visible = visibleChannels(channels, hiding("solto-fechado", "voz1"), me)
+        assertEquals(listOf("solto-aberto"), visible.map { it.id })
+        assertEquals(listOf(null to listOf("solto-aberto")), groupIds(visible))
+    }
+
+    @Test
+    fun parentIdDeCategoriaDesconhecidaCaiNaOrdemEContaParaACategoriaQueAAntecede() {
+        val channels = ordered(channel("Audio", ChannelType.Category), channel("orfao", parent = "fantasma"))
+        assertEquals(listOf("Audio", "orfao"), visibleChannels(channels, PermissionSnapshot.EMPTY, me).map { it.id })
+        assertEquals(emptyList(), visibleChannels(channels, hiding("orfao"), me).map { it.id })
+    }
+
+    @Test
+    fun categoriaDependeSoDosCanaisDelaENaoDaPropriaEntradaDePermissao() {
+        val channels = ordered(
+            channel("Aberta", ChannelType.Category),
+            channel("geral"),
+            channel("Vazia", ChannelType.Category),
+        )
+        // Entrada fechada para as duas categorias: não muda nada, quem decide são os canais.
+        val visible = visibleChannels(channels, hiding("Aberta", "Vazia"), me)
+        assertEquals(listOf("Aberta", "geral", "Vazia"), visible.map { it.id })
+    }
+
+    @Test
+    fun categoriaVaziaDeOrigemNoMeioDaListaFicaEACategoriaVizinhaEsvaziadaSome() {
+        val channels = ordered(
+            channel("Vazia", ChannelType.Category),
+            channel("Esvaziada", ChannelType.Category),
+            channel("secreto"),
+        )
+        val visible = visibleChannels(channels, hiding("secreto"), me)
+        assertEquals(listOf("Vazia"), visible.map { it.id })
+        assertEquals(listOf("Vazia" to emptyList()), groupIds(visible))
     }
 
     @Test
