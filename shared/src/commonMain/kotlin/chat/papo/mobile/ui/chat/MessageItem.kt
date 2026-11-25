@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,29 +49,40 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFontFamilyResolver
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.EmojiCatalog
 import chat.papo.mobile.chat.EmojiPiece
 import chat.papo.mobile.chat.EmojiText
 import chat.papo.mobile.chat.Markdown
+import chat.papo.mobile.chat.MarkdownBlock
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.TextSpan
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.renderMentions
@@ -94,16 +106,35 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import kotlin.io.encoding.Base64
 
-/** Texto já montado de uma mensagem e os emojis do servidor que ele pede como imagem. */
-class MessageText(val text: AnnotatedString, val emojiIds: Set<String>) {
+/** Um pedaço do corpo da mensagem: um texto (parágrafos ou um item de lista) ou uma régua entre textos. */
+sealed interface MessagePart {
+    class Text(val text: AnnotatedString) : MessagePart
+
+    data object Divider : MessagePart
+}
+
+/** Corpo já montado de uma mensagem e os emojis do servidor que ele pede como imagem. */
+class MessageText(val parts: List<MessagePart>, val emojiIds: Set<String>) {
     /** Tem emoji como imagem? Então o `Text` precisa do `inlineContent` de [emojiContent]. */
     val hasImages: Boolean get() = emojiIds.isNotEmpty()
 }
 
 /**
- * Texto da mensagem com Markdown, menções destacadas, links clicáveis e `:nome:` dos
- * emojis do servidor como imagem. [emojiIds] liga nome a id; dentro de código, de link
- * e de menção o `:nome:` continua texto.
+ * Medidas das listas: [step] é o recuo de cada nível e [markerWidth] a largura do marcador com o
+ * espaço que vem depois dele, onde o texto do item começa. Em `sp`, porque o recuo de um parágrafo
+ * só aceita uma unidade por vez.
+ */
+class ListMetrics(val step: TextUnit, val markerWidth: (String) -> TextUnit)
+
+private val DefaultListMetrics = ListMetrics(step = 24.sp, markerWidth = { 24.sp })
+
+/** Espaço sem quebra entre o marcador e o texto do item: o marcador nunca fica sozinho no fim da linha. */
+private const val MARKER_GAP = "\u00A0"
+
+/**
+ * Corpo da mensagem com Markdown, menções destacadas, links clicáveis e `:nome:` dos emojis
+ * do servidor como imagem. [emojiIds] liga nome a id; dentro de código, de link e de menção
+ * o `:nome:` continua texto. Cada item de lista é um texto com recuo pendente, e a régua separa dois textos.
  */
 fun messageText(
     content: String,
@@ -112,49 +143,98 @@ fun messageText(
     codeBackground: Color,
     muted: Color,
     emojiIds: Map<String, String> = emptyMap(),
+    lists: ListMetrics = DefaultListMetrics,
 ): MessageText {
     val used = LinkedHashSet<String>()
-    val text = buildAnnotatedString {
-        for (span in Markdown.parse(content)) {
-            val style = SpanStyle(
-                fontWeight = if (span.bold || span.mentionUserId != null) FontWeight.SemiBold else null,
-                fontStyle = if (span.italic) FontStyle.Italic else null,
-                textDecoration = when {
-                    span.strike -> TextDecoration.LineThrough
-                    span.link != null -> TextDecoration.Underline
-                    else -> null
-                },
-                fontFamily = if (span.code) FontFamily.Monospace else null,
-                background = if (span.code) codeBackground else Color.Unspecified,
-                color = when {
-                    span.link != null || span.mentionUserId != null -> accent
-                    span.quote -> muted
-                    else -> Color.Unspecified
-                },
-            )
-            val plain = when {
-                span.mentionUserId != null -> "@" + (nameOf(span.mentionUserId) ?: "usuário")
-                span.quote -> "▎ " + span.text
-                else -> span.text
-            }
-            when {
-                span.link != null -> withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(plain) }
-                span.code || span.mentionUserId != null -> withStyle(style) { append(plain) }
-                else -> withStyle(style) {
-                    for (piece in EmojiText.split(plain, emojiIds)) {
-                        when (piece) {
-                            is EmojiPiece.Plain -> append(piece.text)
-                            is EmojiPiece.Custom -> {
-                                used += piece.id
-                                appendInlineContent(emojiContentId(piece.id), ":${piece.name}:")
-                            }
-                        }
-                    }
+
+    fun AnnotatedString.Builder.appendEmojis(text: String) {
+        for (piece in EmojiText.split(text, emojiIds)) {
+            when (piece) {
+                is EmojiPiece.Plain -> append(piece.text)
+                is EmojiPiece.Custom -> {
+                    used += piece.id
+                    appendInlineContent(emojiContentId(piece.id), ":${piece.name}:")
                 }
             }
         }
     }
-    return MessageText(text, used)
+
+    fun AnnotatedString.Builder.appendSpans(spans: List<TextSpan>) {
+        for (span in spans) {
+            val style = spanStyle(span, accent, codeBackground, muted)
+            val plain = spanText(span, nameOf)
+            when {
+                span.link != null -> withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(plain) }
+                span.code || span.mentionUserId != null -> withStyle(style) { append(plain) }
+                else -> withStyle(style) { appendEmojis(plain) }
+            }
+        }
+    }
+
+    // Cada linha do item é um texto à parte: a tabulação de um parágrafo vale só para a primeira linha dele (a quebra `\n`
+    // abriria outra "primeira linha"), e assim o texto selecionado e lido pelo leitor de tela também traz uma quebra entre elas.
+    // As linhas de continuação já começam no recuo do texto.
+    fun listItem(item: MarkdownBlock.ListItem): List<MessagePart> {
+        val lead = lists.step * (item.level + 0.3f)
+        val rest = (lead.value + lists.markerWidth(item.marker).value).sp
+        return splitLines(item.spans).mapIndexed { index, spans ->
+            val indent = if (index == 0) TextIndent(lead, rest) else TextIndent(rest, rest)
+            MessagePart.Text(
+                buildAnnotatedString {
+                    withStyle(ParagraphStyle(textIndent = indent)) {
+                        if (index == 0) append(item.marker + MARKER_GAP)
+                        appendSpans(spans)
+                    }
+                },
+            )
+        }
+    }
+
+    val parts = Markdown.blocks(content).flatMap { block ->
+        when (block) {
+            // Uma linha em branco entre dois blocos precisa de algo para ocupar a altura dela.
+            is MarkdownBlock.Paragraph -> listOf(MessagePart.Text(buildAnnotatedString { if (block.spans.isEmpty()) append(" ") else appendSpans(block.spans) }))
+            is MarkdownBlock.ListItem -> listItem(block)
+            MarkdownBlock.Rule -> listOf(MessagePart.Divider)
+        }
+    }
+    return MessageText(parts, used)
+}
+
+private fun spanStyle(span: TextSpan, accent: Color, codeBackground: Color, muted: Color) = SpanStyle(
+    fontWeight = if (span.bold || span.mentionUserId != null) FontWeight.SemiBold else null,
+    fontStyle = if (span.italic) FontStyle.Italic else null,
+    textDecoration = when {
+        span.strike -> TextDecoration.LineThrough
+        span.link != null -> TextDecoration.Underline
+        else -> null
+    },
+    fontFamily = if (span.code) FontFamily.Monospace else null,
+    background = if (span.code) codeBackground else Color.Unspecified,
+    color = when {
+        span.link != null || span.mentionUserId != null -> accent
+        span.quote -> muted
+        else -> Color.Unspecified
+    },
+)
+
+/** O que o trecho mostra: a menção vira `@nome`, e a citação ganha a barra. */
+private fun spanText(span: TextSpan, nameOf: (String) -> String?): String = when {
+    span.mentionUserId != null -> "@" + (nameOf(span.mentionUserId) ?: "usuário")
+    span.quote -> "▎ " + span.text
+    else -> span.text
+}
+
+/** As linhas de um item de lista: o `\n` separa a linha do marcador das de continuação. */
+private fun splitLines(spans: List<TextSpan>): List<List<TextSpan>> {
+    val lines = arrayListOf(ArrayList<TextSpan>())
+    for (span in spans) {
+        span.text.split('\n').forEachIndexed { index, part ->
+            if (index > 0) lines += ArrayList<TextSpan>()
+            if (part.isNotEmpty()) lines.last() += span.copy(text = part)
+        }
+    }
+    return lines
 }
 
 private fun emojiContentId(emojiId: String) = "emoji:$emojiId"
@@ -280,7 +360,7 @@ fun MessageItem(
 }
 
 /**
- * Corpo de texto de uma mensagem: Markdown, menções, links e `:nome:` dos emojis do
+ * Corpo de texto de uma mensagem: Markdown, listas, menções, links e `:nome:` dos emojis do
  * servidor como imagem. Mensagem só de emoji aparece maior.
  */
 @Composable
@@ -294,22 +374,59 @@ fun MessageBodyText(
     val accent = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val style = MaterialTheme.typography.bodyLarge
+    val lists = rememberListMetrics(style)
     // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
     // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
     val relevantIds = if (':' in content) emojiIds else emptyMap()
-    val text = remember(content, users, accent, relevantIds) {
-        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds)
+    val text = remember(content, users, accent, codeBackground, muted, relevantIds, lists) {
+        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds, lists)
     }
     // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
     val jumbo = remember(content, relevantIds, unicodeEmojis) {
         EmojiText.isEmojiOnly(content, relevantIds, unicodeEmojis)
     }
-    val style = MaterialTheme.typography.bodyLarge
-    Text(
-        text.text,
-        style = if (jumbo) style.copy(fontSize = 34.sp, lineHeight = 44.sp) else style,
-        inlineContent = if (text.hasImages) emojiContent(session, text.emojiIds) else emptyMap(),
-    )
+    val bodyStyle = if (jumbo) style.copy(fontSize = 34.sp, lineHeight = 44.sp) else style
+    val inlineContent = if (text.hasImages) emojiContent(session, text.emojiIds) else emptyMap()
+    val single = text.parts.singleOrNull()
+    if (single is MessagePart.Text) {
+        Text(single.text, style = bodyStyle, inlineContent = inlineContent)
+        return
+    }
+    Column {
+        for (part in text.parts) {
+            when (part) {
+                is MessagePart.Text -> Text(part.text, style = bodyStyle, inlineContent = inlineContent)
+                MessagePart.Divider -> HorizontalDivider(Modifier.padding(vertical = 6.dp))
+            }
+        }
+    }
+}
+
+/**
+ * As medidas das listas para o [style] do corpo. A largura de um marcador vem do texto medido
+ * (número, bolinha e caixa de tarefa não têm a mesma largura), na primeira vez que uma lista
+ * pede, e o recuo das linhas seguintes do item fica alinhado ao texto dele.
+ */
+@Composable
+private fun rememberListMetrics(style: TextStyle): ListMetrics {
+    val resolver = LocalFontFamilyResolver.current
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    return remember(resolver, density, direction, style) {
+        val measurer by lazy(LazyThreadSafetyMode.NONE) { TextMeasurer(resolver, density, direction) }
+        val widths = HashMap<String, TextUnit>()
+        ListMetrics(
+            // O recuo acompanha o corpo do texto; a conta com `Unspecified` falharia, então há um tamanho de reserva.
+            step = (if (style.fontSize.isSpecified) style.fontSize else 16.sp) * 1.4f,
+            markerWidth = { marker ->
+                widths.getOrPut(marker) {
+                    val measured = measurer.measure(marker + MARKER_GAP, style, softWrap = false, maxLines = 1)
+                    with(density) { measured.size.width.toSp() }
+                }
+            },
+        )
+    }
 }
 
 @Composable
