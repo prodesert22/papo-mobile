@@ -55,7 +55,7 @@ fun rememberMediaImage(session: AccountSession, name: String?, fetch: suspend ()
 @Composable
 fun rememberMediaPainter(
     session: AccountSession,
-    name: String?,
+    name: String,
     maxPx: Int,
     animate: Boolean,
     fetch: suspend () -> ByteArray?,
@@ -63,7 +63,6 @@ fun rememberMediaPainter(
     val platform = LocalPlatformUi.current
     val image = produceState<PlatformImage?>(null, session.accountId, name, maxPx, animate) {
         value = null
-        if (name == null) return@produceState
         value = try {
             session.media.get(name, fetch)?.let { platform.decodeImage(it, maxPx, animate) }
         } catch (e: CancellationException) {
