@@ -8,6 +8,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.ConversationAccess
 import chat.papo.mobile.chat.Draft
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.Located
@@ -83,6 +84,9 @@ class ChatViewModel(
 
     private val _state = MutableStateFlow(ChatUiState(locating = target != null))
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
+
+    /** O que a conta pode fazer nesta conversa. Ainda não há regra aplicada: oferece tudo, como antes. */
+    val access: StateFlow<ConversationAccess> = MutableStateFlow(ConversationAccess.Unrestricted).asStateFlow()
 
     /** Nomes escolhidos no autocompletar deste rascunho, para virar menção no envio. */
     private val pickedMentions = HashMap<String, String>()

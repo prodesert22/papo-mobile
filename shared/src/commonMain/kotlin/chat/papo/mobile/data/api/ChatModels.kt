@@ -53,10 +53,57 @@ data class ChannelDto(
     @SerialName("last_message") val lastMessage: ChannelLastMessageDto? = null,
     @SerialName("last_read_message") val lastReadMessage: String? = null,
     @SerialName("notification_settings") val notificationSettings: String? = null,
+    /** Entradas por cargo (`GET /channels`); lista vazia é canal aberto, sem restrição. */
+    val permissions: List<ChannelPermissionEntryDto> = emptyList(),
 )
 
 @Serializable
 data class ChannelsResponse(val channels: List<ChannelDto> = emptyList())
+
+/**
+ * O que um cargo pode fazer em um canal (`ChannelPermissions`). Como no servidor, flag ausente vale
+ * `false`: uma entrada existente que não cita `connect_voice` não dá voz.
+ */
+@Serializable
+data class ChannelPermissionsDto(
+    @SerialName("read_channel") val readChannel: Boolean = false,
+    @SerialName("send_messages") val sendMessages: Boolean = false,
+    @SerialName("delete_messages") val deleteMessages: Boolean = false,
+    @SerialName("connect_voice") val connectVoice: Boolean = false,
+)
+
+/** Uma entrada de `ChannelDto.permissions`: o cargo e o que ele pode fazer no canal (`ChannelPermissionEntry`). */
+@Serializable
+data class ChannelPermissionEntryDto(
+    @SerialName("role_id") val roleId: String,
+    @SerialName("role_name") val roleName: String = "",
+    val permissions: ChannelPermissionsDto = ChannelPermissionsDto(),
+)
+
+/** Flags de um cargo no servidor (`RolePermissions`); flag ausente vale `false`, como no servidor. */
+@Serializable
+data class RolePermissionsDto(
+    @SerialName("manage_server") val manageServer: Boolean = false,
+    @SerialName("manage_channels") val manageChannels: Boolean = false,
+    @SerialName("manage_roles") val manageRoles: Boolean = false,
+    @SerialName("manage_webhooks") val manageWebhooks: Boolean = false,
+    @SerialName("ban_members") val banMembers: Boolean = false,
+    @SerialName("pin_message") val pinMessage: Boolean = false,
+    @SerialName("everyone_message") val everyoneMessage: Boolean = false,
+    @SerialName("send_attachment") val sendAttachment: Boolean = false,
+)
+
+/** Cargo com as flags (`Role`, de `GET /roles`); `RoleSummaryDto` é a visão reduzida dentro dos usuários. */
+@Serializable
+data class RoleDto(
+    val id: String,
+    val name: String = "",
+    val color: String? = null,
+    val permissions: RolePermissionsDto = RolePermissionsDto(),
+)
+
+@Serializable
+data class RolesResponse(val roles: List<RoleDto> = emptyList())
 
 @Serializable
 data class DirectConversationDto(

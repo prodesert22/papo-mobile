@@ -66,6 +66,12 @@ class ChatStore(
         q.selectChannels().asFlow().mapToList(io).map { rows -> rows.map { it.toModel() } }
             .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    /** O que se sabe das permissões da conta. Ainda não há fonte: fica sempre [PermissionSnapshot.EMPTY]. */
+    val access: StateFlow<PermissionSnapshot> = MutableStateFlow(PermissionSnapshot.EMPTY).asStateFlow()
+
+    /** Os canais que a conta pode ver, sem os que a leitura nega. Por enquanto são todos. */
+    val visibleChannels: StateFlow<List<Channel>> = channels
+
     val dms: StateFlow<List<Dm>> =
         q.selectDms().asFlow().mapToList(io).map { rows -> rows.map { it.toModel() } }
             .stateIn(scope, SharingStarted.Eagerly, emptyList())
