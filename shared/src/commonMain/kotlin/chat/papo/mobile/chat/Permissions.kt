@@ -71,7 +71,15 @@ data class ChannelGrant(
     val send: Boolean,
     val delete: Boolean,
     val voice: Boolean,
-)
+) {
+    /** A entrada vale para quem tem o cargo [roleId] entre os cargos [roles] e dá a flag [flag]. */
+    fun grantsTo(roles: Set<String>, flag: ChannelFlag): Boolean = roleId in roles && when (flag) {
+        ChannelFlag.Read -> read
+        ChannelFlag.Send -> send
+        ChannelFlag.Delete -> delete
+        ChannelFlag.Voice -> voice
+    }
+}
 
 /**
  * Tudo o que o app sabe, vindo de fontes diferentes, para decidir permissões de uma conta. Cada fonte pode
@@ -103,15 +111,42 @@ data class PermissionSnapshot(
      * ou cargo sem definição, [Decision.Unknown]; algum cargo com a flag, [Decision.Allowed]; senão
      * [Decision.Denied] (só com o dono conhecido).
      */
-    fun role(userId: String, flag: RoleFlag): Decision = Decision.Unknown
+    fun role(userId: String, flag: RoleFlag): Decision {
+        if (isOwner(userId)) return Decision.Allowed
+        val catalog = roles ?: return Decision.Unknown
+        val mine = rolesOf(userId) ?: return Decision.Unknown
+        var undefined = false
+        for (roleId in mine) {
+            val flags = catalog[roleId]
+            if (flags == null) undefined = true else if (flag in flags.granted) return Decision.Allowed
+        }
+        // Sem a flag em nenhum cargo definido: só se nega com certeza se nenhum cargo ficou de fora e o dono é conhecido.
+        return if (undefined || !ownerKnown) Decision.Unknown else Decision.Denied
+    }
 
     /**
      * Se [userId] tem a flag de canal [flag] no canal [channelId], que não é uma DM: canal sem entradas
      * conhecidas, [Decision.Unknown]; dono, [Decision.Allowed]; canal aberto e [flag] diferente de
      * [ChannelFlag.Delete], [Decision.Allowed]; união das entradas dos cargos do usuário com a flag,
-     * [Decision.Allowed]; senão [Decision.Denied].
+     * [Decision.Allowed] (com os cargos do usuário desconhecidos, [Decision.Unknown]); senão
+     * [Decision.Denied], só com o dono conhecido.
      */
-    fun channel(userId: String, channelId: String, flag: ChannelFlag): Decision = Decision.Unknown
+    fun channel(userId: String, channelId: String, flag: ChannelFlag): Decision {
+        val entries = grants?.get(channelId) ?: return Decision.Unknown
+        if (isOwner(userId)) return Decision.Allowed
+        if (entries.isEmpty()) return if (flag != ChannelFlag.Delete) Decision.Allowed else withoutGrant()
+        val mine = rolesOf(userId) ?: return Decision.Unknown
+        if (entries.any { it.grantsTo(mine, flag) }) return Decision.Allowed
+        return withoutGrant()
+    }
+
+    /** Nenhuma concessão: negar exige saber que o usuário não é o dono, que passaria por cima de tudo. */
+    private fun withoutGrant(): Decision = if (ownerKnown) Decision.Denied else Decision.Unknown
+
+    private fun isOwner(userId: String): Boolean = ownerKnown && ownerId == userId
+
+    /** Ids dos cargos do usuário; nulo se não se sabe (usuário fora das páginas lidas de `GET /users`). */
+    private fun rolesOf(userId: String): Set<String>? = userRoles[userId] ?: if (usersComplete) emptySet() else null
 
     companion object {
         /** Nada se sabe ainda: tudo é [Decision.Unknown]. */
@@ -121,8 +156,9 @@ data class PermissionSnapshot(
 
 /**
  * O que a pessoa pode fazer em uma conversa, já resolvido para a tela. Cada campo é um "oferecer?":
- * [Decision.Unknown] oferece (o servidor decide), exceto [mentionEveryone] (só [Decision.Allowed]) e
- * [readDenied] (só [Decision.Denied]), que só valem quando se tem certeza.
+ * [Decision.Unknown] oferece (o servidor decide), exceto três campos que só valem com certeza:
+ * [mentionEveryone] e [deleteOthers] (só [Decision.Allowed]: o app nunca ofereceu nem avisou `@everyone`
+ * ou excluir a mensagem de outra pessoa) e [readDenied] (só [Decision.Denied]).
  *
  * Em canal: [attach] = envio e `send_attachment`; [react] = envio; [removeOwnReaction] = leitura;
  * [pin] = `pin_message`; [deleteOthers] = `delete_messages` do canal; [joinVoice] = `connect_voice`.
@@ -148,7 +184,8 @@ data class ConversationAccess(
     companion object {
         /**
          * Para quem ainda não tem [PermissionSnapshot]: tudo desconhecido, ou seja, oferece tudo e não
-         * esconde nada, menos `@everyone`, que exige certeza.
+         * esconde nada, menos `@everyone` e excluir mensagem alheia, que exigem certeza. É o que
+         * [conversationAccess] devolve para um canal com [PermissionSnapshot.EMPTY].
          */
         val Unrestricted = ConversationAccess(
             read = true,
@@ -157,7 +194,7 @@ data class ConversationAccess(
             react = true,
             removeOwnReaction = true,
             pin = true,
-            deleteOthers = true,
+            deleteOthers = false,
             joinVoice = true,
             mentionEveryone = false,
             readDenied = false,
@@ -169,19 +206,65 @@ data class ConversationAccess(
  * O acesso de [me] à conversa [channelId] (uma DM se [isDm]), segundo [snapshot]. Ver [ConversationAccess]
  * para o que cada campo exige.
  */
-fun conversationAccess(snapshot: PermissionSnapshot, me: String, channelId: String, isDm: Boolean): ConversationAccess =
-    ConversationAccess.Unrestricted
+fun conversationAccess(snapshot: PermissionSnapshot, me: String, channelId: String, isDm: Boolean): ConversationAccess {
+    // Em DM a regra do servidor é ser membro e não estar bloqueado; o bloqueio não é conhecido (fica o 403).
+    if (isDm) {
+        return ConversationAccess(
+            read = true,
+            send = true,
+            attach = true,
+            react = true,
+            removeOwnReaction = true,
+            pin = true,
+            deleteOthers = false,
+            joinVoice = false,
+            mentionEveryone = false,
+            readDenied = false,
+        )
+    }
+    val read = snapshot.channel(me, channelId, ChannelFlag.Read)
+    val send = snapshot.channel(me, channelId, ChannelFlag.Send)
+    val attachment = snapshot.role(me, RoleFlag.SendAttachment)
+    return ConversationAccess(
+        read = read.offered,
+        send = send.offered,
+        attach = send.offered && attachment.offered,
+        react = send.offered,
+        removeOwnReaction = read.offered,
+        pin = snapshot.role(me, RoleFlag.PinMessage).offered,
+        deleteOthers = snapshot.channel(me, channelId, ChannelFlag.Delete) == Decision.Allowed,
+        joinVoice = snapshot.channel(me, channelId, ChannelFlag.Voice).offered,
+        mentionEveryone = snapshot.role(me, RoleFlag.EveryoneMessage) == Decision.Allowed,
+        readDenied = read == Decision.Denied,
+    )
+}
+
+/** O que só o [Decision.Denied] tira da tela: o desconhecido se oferece e o servidor decide. */
+private val Decision.offered: Boolean get() = this != Decision.Denied
 
 /**
  * Se a mensagem de [authorId] pode ser tratada como `@everyone`: o autor tem `everyone_message` (dono
  * incluso) e a mensagem não veio de webhook. Webhook ([webhookId] não nulo) ou autor nulo nunca; só
  * [Decision.Allowed] vale, nunca desconhecido.
  */
-fun authorCanEveryone(snapshot: PermissionSnapshot, authorId: String?, webhookId: String?): Boolean = false
+fun authorCanEveryone(snapshot: PermissionSnapshot, authorId: String?, webhookId: String?): Boolean {
+    if (webhookId != null || authorId.isNullOrEmpty()) return false
+    return snapshot.role(authorId, RoleFlag.EveryoneMessage) == Decision.Allowed
+}
 
 /**
  * Os canais que [me] deve ver. Canal de texto fica se a leitura não foi negada; canal de voz, se a leitura
  * **ou** a voz não foi negada (dá para entrar na chamada sem ler o chat). Categoria some só se ficou vazia
  * por causa do filtro; a que já era vazia fica. O desconhecido aparece.
  */
-fun visibleChannels(channels: List<Channel>, snapshot: PermissionSnapshot, me: String): List<Channel> = channels
+fun visibleChannels(channels: List<Channel>, snapshot: PermissionSnapshot, me: String): List<Channel> {
+    val kept = channels.filter { it.type == ChannelType.Category || snapshot.canSee(it, me) }
+    val parentsBefore = channels.mapNotNullTo(HashSet()) { it.parentId }
+    val parentsAfter = kept.mapNotNullTo(HashSet()) { it.parentId }
+    return kept.filter { it.type != ChannelType.Category || it.id !in parentsBefore || it.id in parentsAfter }
+}
+
+private fun PermissionSnapshot.canSee(item: Channel, me: String): Boolean {
+    if (item.type == ChannelType.Voice && channel(me, item.id, ChannelFlag.Voice).offered) return true
+    return channel(me, item.id, ChannelFlag.Read).offered
+}
