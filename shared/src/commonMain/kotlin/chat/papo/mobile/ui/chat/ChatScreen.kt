@@ -229,25 +229,36 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
     val listState = rememberLazyListState()
     val byId = remember(messages) { messages.associateBy { it.id } }
+    // O que ainda está saindo vai num item só no índice 0 da lista invertida (o fim da conversa): `lead` é
+    // quanto ele desloca os índices das mensagens quando a lista é lida por posição.
+    val pending by viewModel.pending.collectAsStateWithLifecycle()
+    val lead = if (pending.isEmpty()) 0 else 1
+    // Ao mandar uma mensagem, a conversa desce até ela.
+    var shownPending by remember { mutableIntStateOf(pending.size) }
+    LaunchedEffect(pending.size) {
+        if (pending.size > shownPending) listState.scrollToItem(0)
+        shownPending = pending.size
+    }
 
     // Carrega mais histórico quando a rolagem se aproxima da mensagem mais antiga.
-    LaunchedEffect(listState, messages.size) {
-        snapshotFlow { (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= messages.size - 8 }
+    LaunchedEffect(listState, messages.size, lead) {
+        snapshotFlow { (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= messages.size + lead - 8 }
             .distinctUntilChanged()
             .collect { nearStart -> if (nearStart && messages.isNotEmpty()) viewModel.loadOlder() }
     }
     // O canal conta como lido quando a mensagem mais nova está na tela.
-    val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    val atBottom by remember(lead) { derivedStateOf { listState.firstVisibleItemIndex <= lead } }
     val newest = messages.firstOrNull()
     var previousNewest by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(newest?.id) {
         // Ao inserir um item, a lista mantém o antigo ancorado e o novo fica fora da tela.
-        // Se o usuário estava no fim (ou a mensagem é dele), acompanha a conversa.
+        // Se o usuário estava no fim, acompanha a conversa. Mandar uma mensagem já desce a lista (ver `pending`):
+        // a confirmação dela, segundos depois, não pode puxar de volta quem já subiu para ler.
         val shifted = messages.indexOfFirst { it.id == previousNewest }
-        val wasAtBottom = previousNewest == null || (shifted >= 0 && listState.firstVisibleItemIndex <= shifted)
+        val wasAtBottom = previousNewest == null || (shifted >= 0 && listState.firstVisibleItemIndex <= shifted + lead)
         previousNewest = newest?.id
         // Num trecho antigo, a "mais nova" é só a última carregada: não há conversa a acompanhar.
-        if (newest != null && !detached && (wasAtBottom || newest.authorId == session.userId)) listState.scrollToItem(0)
+        if (newest != null && !detached && wasAtBottom) listState.scrollToItem(0)
     }
     LaunchedEffect(newest?.id, atBottom, detached) {
         // O fim de um trecho antigo não é o fim da conversa: marcar ali faria a leitura voltar no tempo.
@@ -255,9 +266,9 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     }
     // Lendo um trecho antigo: perto do fim dele, carrega o que vem depois.
     val canLoadNewer = detached && state.focusId == null && !state.locating
-    LaunchedEffect(listState, canLoadNewer) {
+    LaunchedEffect(listState, canLoadNewer, lead) {
         if (!canLoadNewer) return@LaunchedEffect
-        snapshotFlow { listState.firstVisibleItemIndex <= 3 }
+        snapshotFlow { listState.firstVisibleItemIndex <= 3 + lead }
             .distinctUntilChanged()
             .collect { nearEnd -> if (nearEnd) viewModel.loadNewer() }
     }
@@ -283,7 +294,7 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
         if (focusIndex < 0) return@LaunchedEffect
         try {
             // A lista é invertida: o deslocamento negativo sobe a mensagem e deixa à vista o que veio depois dela.
-            listState.scrollToItem(focusIndex, -listState.layoutInfo.viewportSize.height / 3)
+            listState.scrollToItem(focusIndex + lead, -listState.layoutInfo.viewportSize.height / 3)
             delay(4.seconds)
         } finally {
             // Também ao sair da tela antes do tempo: voltar a ela não deve rolar de novo.
@@ -339,7 +350,7 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
         // O espaço de baixo (teclado, gaveta de emoji ou barra de navegação) é do compositor.
         Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).onSizeChanged { columnPx = it.height }) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (messages.isEmpty() && state.loadedOnce) {
+                if (messages.isEmpty() && pending.isEmpty() && state.loadedOnce) {
                     Text(
                         stringResource(Res.string.chat_empty),
                         style = MaterialTheme.typography.bodyLarge,
@@ -348,6 +359,20 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                     )
                 }
                 LazyColumn(Modifier.fillMaxSize(), state = listState, reverseLayout = true) {
+                    if (pending.isNotEmpty()) {
+                        item(key = "outbox") {
+                            PendingMessages(
+                                session = session,
+                                pending = pending,
+                                users = users,
+                                emojiIds = serverEmojis.idByName,
+                                unicodeEmojis = unicodeEmojis,
+                                repliedTo = { byId[it] },
+                                onRetry = viewModel::retry,
+                                onWithdraw = viewModel::withdraw,
+                            )
+                        }
+                    }
                     items(messages.size, key = { messages[it].id }) { index ->
                         val message = messages[index]
                         val older = messages.getOrNull(index + 1)
@@ -827,7 +852,7 @@ private fun Composer(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            IconButton(onClick = { onRemoveFile(file) }, enabled = !state.sending) {
+                            IconButton(onClick = { onRemoveFile(file) }) {
                                 Icon(Icons.Filled.Close, stringResource(Res.string.chat_remove_attachment), Modifier.size(16.dp))
                             }
                         }
@@ -836,14 +861,14 @@ private fun Composer(
             }
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
-                IconButton(onClick = pickFiles, enabled = !state.sending && state.editing == null) {
+                IconButton(onClick = pickFiles, enabled = state.editing == null) {
                     Icon(Icons.Filled.AttachFile, contentDescription = stringResource(Res.string.chat_attach))
                 }
                 TextField(
                     value = draft,
                     onValueChange = onChange,
                     placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    enabled = !state.sending,
+                    enabled = !state.savingEdit,
                     maxLines = 6,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     shape = RoundedCornerShape(22.dp),
@@ -860,16 +885,16 @@ private fun Composer(
                         .focusRequester(focus)
                         .onFocusChanged { if (it.isFocused && panel.isOpen) panel.toKeyboard() },
                 )
-                IconButton(onClick = toggleEmoji, enabled = !state.sending) {
+                IconButton(onClick = toggleEmoji, enabled = !state.savingEdit) {
                     if (panel.isOpen) {
                         Icon(Icons.Filled.Keyboard, contentDescription = stringResource(Res.string.chat_keyboard))
                     } else {
                         Icon(Icons.Filled.EmojiEmotions, contentDescription = stringResource(Res.string.chat_emoji))
                     }
                 }
-                val canSend = !state.sending && (draft.text.isNotBlank() || state.files.isNotEmpty())
+                val canSend = !state.savingEdit && (draft.text.isNotBlank() || state.files.isNotEmpty())
                 Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                    if (state.sending) {
+                    if (state.savingEdit) {
                         CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                     } else {
                         IconButton(onClick = onSubmit, enabled = canSend) {

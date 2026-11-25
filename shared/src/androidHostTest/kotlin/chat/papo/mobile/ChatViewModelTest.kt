@@ -1,6 +1,9 @@
 package chat.papo.mobile
 
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.PendingStatus
+import chat.papo.mobile.chat.SendFailure
+import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.ui.chat.ChatViewModel
 import chat.papo.mobile.ui.chat.MessageTarget
 import chat.papo.mobile.ui.components.UiError
@@ -32,6 +35,9 @@ class ChatViewModelTest {
     private val bia = "0b0e7c1e-1111-2222-3333-444455556666"
     private val posted = mutableListOf<String>()
     private val edited = mutableListOf<String>()
+    private var attempts = 0
+    private var editAttempts = 0
+    private var failEdit = false
     private var failSend = false
     private var total = 3
 
@@ -65,13 +71,21 @@ class ChatViewModelTest {
                 json("""{"messages":[${ordered.take(limit).joinToString(",") { message(it) }}],"has_more":${ordered.size > limit}}""")
             }
             path == "/channels/c1/pinned" -> json("""{"channel_id":"c1","pinned":[${message(1)}]}""")
-            path == "/messages" && failSend ->
+            path == "/messages" && failSend -> {
+                attempts++
                 json("""{"type":"t","title":"Proibido","status":403,"detail":"Sem permissão para enviar neste canal"}""", HttpStatusCode.Forbidden)
+            }
             path == "/messages" -> {
+                attempts++
                 posted += body
                 json(message(50, content = "enviada", author = "u1"), HttpStatusCode.Created)
             }
+            path.startsWith("/messages/") && request.method == HttpMethod.Put && failEdit -> {
+                editAttempts++
+                json("""{"type":"t","title":"Proibido","status":403,"detail":"Só o autor edita"}""", HttpStatusCode.Forbidden)
+            }
             path.startsWith("/messages/") && request.method == HttpMethod.Put -> {
+                editAttempts++
                 edited += "$path $body"
                 json(message(2, content = "corrigida", author = "u1"))
             }
@@ -172,24 +186,28 @@ class ChatViewModelTest {
         var cleared = false
 
         vm.submit("oi @bia, viu? @biazinha não") { cleared = true }
-        vm.state.first { !it.sending && posted.isNotEmpty() }
+        // O compositor fica livre na hora e a mensagem já aparece como em saída, com a resposta que levava.
+        assertTrue(cleared)
+        assertNull(vm.state.value.replyTo)
+        val shown = vm.pending.first { it.isNotEmpty() }.single()
+        assertEquals("oi @mention(<@$bia>), viu? @biazinha não", shown.content)
+        assertEquals(target.id, shown.replyToId)
+        session.chat.outbox.first { it.isEmpty() }
 
         val body = posted.single()
         assertEquals("oi @mention(<@$bia>), viu? @biazinha não", body.field("content"))
         assertEquals(target.id, body.field("reply_to"))
         assertEquals("c1", body.field("channel_id"))
-        assertTrue(cleared)
-        assertNull(vm.state.value.replyTo)
         assertEquals("m50", vm.messages.first { list -> list.any { it.id == "m50" } }.first().id)
 
         // A menção valia só para aquele rascunho.
         vm.submit("@bia de novo") {}
-        vm.state.first { !it.sending && posted.size == 2 }
+        session.chat.outbox.first { it.isEmpty() }
         assertEquals("@bia de novo", posted[1].field("content"))
     }
 
     @Test
-    fun falhaNoEnvioMantemORascunhoEOContexto() = runTest {
+    fun falhaNoEnvioDeixaATextoERespostaNaFilaSemReenviarSozinha() = runTest {
         val vm = viewModel()
         vm.loaded()
         val target = vm.messages.first { it.isNotEmpty() }.first()
@@ -198,13 +216,24 @@ class ChatViewModelTest {
         var cleared = false
 
         vm.submit("não vai") { cleared = true }
-        val state = vm.state.first { !it.sending && it.error != null }
+        // O compositor não guarda mais o rascunho: quem o guarda é a mensagem que ficou na fila.
+        assertTrue(cleared)
+        assertNull(vm.state.value.replyTo)
+        val failed = vm.pending.first { it.singleOrNull()?.status is PendingStatus.Failed }.single()
 
-        assertEquals(UiError.Server("Sem permissão para enviar neste canal"), state.error)
-        assertFalse(cleared)
-        assertEquals(target.id, state.replyTo?.id) // a resposta em andamento não se perde
-        vm.dismissError()
+        assertEquals(PendingStatus.Failed(SendFailure.Rejected, "Sem permissão para enviar neste canal"), failed.status)
+        assertEquals("não vai", failed.content)
+        assertEquals(target.id, failed.replyToId) // a resposta em andamento não se perde
         assertNull(vm.state.value.error)
+        assertEquals(1, attempts) // um 403 não é tentado de novo
+
+        // Reenviar é uma ação do usuário e leva o mesmo texto e a mesma resposta.
+        failSend = false
+        vm.retry(failed.localId)
+        session.chat.outbox.first { it.isEmpty() }
+        assertEquals(2, attempts)
+        assertEquals("não vai", posted.single().field("content"))
+        assertEquals(target.id, posted.single().field("reply_to"))
     }
 
     @Test
@@ -218,7 +247,7 @@ class ChatViewModelTest {
         var cleared = false
 
         vm.submit("corrigida") { cleared = true }
-        vm.state.first { !it.sending && edited.isNotEmpty() }
+        vm.state.first { !it.savingEdit && edited.isNotEmpty() }
 
         assertEquals(listOf("/messages/m2 {\"content\":\"corrigida\"}"), edited)
         assertTrue(posted.isEmpty())
@@ -228,13 +257,70 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun falhaAoSalvarAEdicaoMantemAEdicaoEMostraOErroSemTravarOCompositor() = runTest {
+        val vm = viewModel()
+        vm.loaded()
+        val mine = vm.messages.first { it.size == 3 }.first { it.id == "m2" }
+        vm.startEdit(mine)
+        failEdit = true
+        var cleared = false
+
+        vm.submit("corrigida") { cleared = true }
+        assertTrue(vm.state.value.savingEdit) // editar segue síncrono: o compositor espera a resposta
+        vm.submit("outra tentativa") { cleared = true } // um segundo toque enquanto salva não faz outro pedido
+        val state = vm.state.first { !it.savingEdit && it.error != null }
+
+        assertEquals(UiError.Server("Só o autor edita"), state.error)
+        assertEquals("m2", state.editing?.id) // a edição continua aberta para tentar de novo
+        assertFalse(cleared)
+        assertEquals(1, editAttempts)
+        assertTrue(vm.pending.value.isEmpty()) // edição nunca passa pela fila de envio
+    }
+
+    @Test
+    fun descartarTiraAMensagemFalhadaEAFilaDeOutraConversaNaoApareceAqui() = runTest {
+        val vm = viewModel()
+        vm.loaded()
+        failSend = true
+        vm.submit("não vai") {}
+        session.chat.enqueue("outra", "de outra conversa", null, emptyList())
+        session.chat.outbox.first { list -> list.size == 2 && list.all { it.status is PendingStatus.Failed } }
+
+        val mine = vm.pending.first { it.size == 1 }.single()
+        assertEquals("não vai", mine.content)
+
+        vm.withdraw(mine.localId)
+        assertTrue(vm.pending.first { it.isEmpty() }.isEmpty())
+        assertEquals(listOf("outra"), session.chat.outbox.value.map { it.channelId })
+    }
+
+    @Test
+    fun soComAnexoEnfileiraSemTextoELimpaOsArquivosDoCompositor() = runTest {
+        val vm = viewModel()
+        vm.loaded()
+        vm.addFiles(listOf(OutgoingFile("a.bin", "application/octet-stream", 3) { byteArrayOf(1, 2, 3) }))
+        var cleared = false
+
+        vm.submit("   ") { cleared = true }
+
+        assertTrue(cleared)
+        assertTrue(vm.state.value.files.isEmpty())
+        val shown = vm.pending.first { it.isNotEmpty() }.single()
+        assertEquals("", shown.content)
+        assertEquals(1, shown.files.size)
+        session.chat.outbox.first { it.isEmpty() }
+        assertNull(posted.single().field("content")) // mensagem só de anexo não manda o campo de texto
+    }
+
+    @Test
     fun naoEnviaRascunhoVazio() = runTest {
         val vm = viewModel()
         vm.loaded()
         var cleared = false
         vm.submit("   ") { cleared = true }
-        assertFalse(vm.state.value.sending)
+        assertFalse(vm.state.value.savingEdit)
         assertFalse(cleared)
+        assertTrue(vm.pending.value.isEmpty())
         assertTrue(posted.isEmpty())
     }
 

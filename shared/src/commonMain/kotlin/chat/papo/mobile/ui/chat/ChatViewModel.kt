@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.Located
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.PendingMessage
 import chat.papo.mobile.chat.encodeMentions
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.ui.components.UiError
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -26,7 +28,8 @@ data class ChatUiState(
     val replyTo: Message? = null,
     val editing: Message? = null,
     val files: List<OutgoingFile> = emptyList(),
-    val sending: Boolean = false,
+    /** Salvando a edição de uma mensagem (editar segue síncrono; enviar não trava o compositor). */
+    val savingEdit: Boolean = false,
     val loadingOlder: Boolean = false,
     val reachedStart: Boolean = false,
     val loadedOnce: Boolean = false,
@@ -58,6 +61,11 @@ class ChatViewModel(
     val messages: StateFlow<List<Message>> = limit
         .flatMapLatest { chat.messages(channelId, it) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** O que o usuário mandou nesta conversa e o servidor ainda não confirmou, do mais antigo ao mais novo. */
+    val pending: StateFlow<List<PendingMessage>> = chat.outbox
+        .map { all -> all.filter { it.channelId == channelId } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, chat.outbox.value.filter { it.channelId == channelId })
 
     private val _state = MutableStateFlow(ChatUiState(locating = target != null))
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -156,25 +164,41 @@ class ChatViewModel(
 
     fun dismissError() = _state.update { it.copy(error = null) }
 
-    /** Envia (ou salva a edição). Chama [onSent] quando o rascunho pode ser limpo. */
+    /**
+     * Manda a mensagem para a fila de envio, que a mostra na hora, ou salva a edição. Chama [onSent]
+     * quando o rascunho pode ser limpo: ao enfileirar, de imediato; ao editar, depois de salvar.
+     */
     fun submit(text: String, onSent: () -> Unit) {
         val s = _state.value
-        if (s.sending || (text.isBlank() && s.files.isEmpty())) return
+        if (s.savingEdit || (text.isBlank() && s.files.isEmpty())) return
         val content = encodeMentions(text, pickedMentions)
-        _state.update { it.copy(sending = true, error = null) }
+        val editing = s.editing
+        if (editing == null) {
+            chat.enqueue(channelId, content, s.replyTo?.id, s.files)
+            pickedMentions.clear()
+            _state.update { it.copy(replyTo = null, files = emptyList(), error = null) }
+            onSent()
+            return
+        }
+        _state.update { it.copy(savingEdit = true, error = null) }
         viewModelScope.launch {
-            val ok = attempt {
-                val editing = s.editing
-                if (editing != null) chat.edit(editing.id, content) else chat.send(channelId, content, s.replyTo?.id, s.files)
-            }
+            val ok = attempt { chat.edit(editing.id, content) }
             if (ok) {
                 pickedMentions.clear()
                 _state.update { it.copy(replyTo = null, editing = null, files = emptyList()) }
                 onSent()
             }
-            _state.update { it.copy(sending = false) }
+            _state.update { it.copy(savingEdit = false) }
         }
     }
+
+    /** Manda de novo uma mensagem que falhou; a incerta só vai com [confirmedDuplicate]. */
+    fun retry(localId: String, confirmedDuplicate: Boolean = false) {
+        chat.retry(localId, confirmedDuplicate)
+    }
+
+    /** Descarta uma mensagem da fila; se estava saindo, cancela o envio. */
+    fun withdraw(localId: String) = chat.withdraw(localId)
 
     fun delete(message: Message) = launch { chat.delete(message.id) }
 

@@ -252,7 +252,8 @@ class ChatStoreTest {
         assertTrue(channel.unread)
 
         // Escrever dali leva de volta ao fim da conversa, onde a mensagem enviada entrou.
-        f.store.send("c1", "resposta", replyTo = null, files = emptyList())
+        f.store.enqueue("c1", "resposta", replyTo = null, files = emptyList())
+        f.store.outbox.first { it.isEmpty() } // saiu em segundo plano e o fim da conversa já foi relido
         assertFalse(f.store.isDetached("c1"))
         assertEquals((352 downTo 313).map { "m$it" }, f.ids())
     }

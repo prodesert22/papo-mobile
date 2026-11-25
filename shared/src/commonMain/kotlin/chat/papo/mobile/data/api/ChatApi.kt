@@ -9,6 +9,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
+import io.ktor.client.plugins.onUpload
 import io.ktor.client.plugins.timeout
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
@@ -66,7 +67,18 @@ class ChatApi(private val client: PapoClient) {
             lastId?.let { parameter("last_id", it) }
         }.bodyOrThrow()
 
-    suspend fun sendMessage(channelId: String, content: String, replyTo: String?, files: List<OutgoingFile>): MessageDto =
+    /**
+     * Envia uma mensagem. [onProgress] recebe os bytes do corpo já entregues ao motor HTTP e o
+     * total (null se o motor não o conhece); quando o total é alcançado, o servidor pode ter
+     * recebido tudo. Sai do zero de novo se o cliente repete o pedido depois de renovar a sessão.
+     */
+    suspend fun sendMessage(
+        channelId: String,
+        content: String,
+        replyTo: String?,
+        files: List<OutgoingFile>,
+        onProgress: ((sent: Long, total: Long?) -> Unit)? = null,
+    ): MessageDto =
         http.submitFormWithBinaryData(
             url = path("/messages"),
             formData = formData {
@@ -87,6 +99,7 @@ class ChatApi(private val client: PapoClient) {
         ) {
             // Envio de anexos pode demorar bem mais que uma requisição comum.
             timeout { requestTimeoutMillis = 10 * 60_000; socketTimeoutMillis = 120_000 }
+            if (onProgress != null) onUpload { sent, total -> onProgress(sent, total) }
         }.bodyOrThrow()
 
     suspend fun editMessage(messageId: String, content: String): MessageDto =
