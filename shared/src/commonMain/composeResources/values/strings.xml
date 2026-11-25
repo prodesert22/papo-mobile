@@ -209,6 +209,15 @@
     <string name="msg_delete_title">Apagar esta mensagem?</string>
     <string name="msg_delete_body">Ela some para todo mundo e não dá para desfazer.</string>
     <string name="msg_download">Baixar</string>
+    <string name="video_play">Reproduzir vídeo</string>
+    <string name="video_failed_unauthorized">Você não tem acesso a este vídeo.</string>
+    <string name="video_failed_not_found">Este vídeo não está mais disponível.</string>
+    <string name="video_failed_gone">Este vídeo foi removido ou mudou.</string>
+    <string name="video_failed_rate_limited">O servidor pediu um tempo. Espere um pouco e tente de novo.</string>
+    <string name="video_failed_unavailable">O servidor não conseguiu enviar o vídeo agora.</string>
+    <string name="video_failed_unsupported">Formato de vídeo não suportado neste aparelho.</string>
+    <string name="video_failed_network">Não foi possível carregar o vídeo. Confira a sua conexão.</string>
+    <string name="video_download_failed">Não foi possível baixar o arquivo.</string>
     <string name="msg_select">Selecionar texto</string>
     <string name="mention_everyone_hint">Avisa todos que leem o canal</string>
     <string name="chat_empty_read_only">Nenhuma mensagem por aqui ainda.</string>

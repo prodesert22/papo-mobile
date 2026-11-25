@@ -41,7 +41,6 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,6 +100,8 @@ import chat.papo.mobile.core.formatTime
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.ReactionSummaryDto
+import chat.papo.mobile.media.PlayableMedia
+import chat.papo.mobile.media.playableAttachment
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_edited
 import chat.papo.mobile.resources.chat_reply_missing
@@ -113,15 +114,14 @@ import chat.papo.mobile.resources.msg_pinned
 import chat.papo.mobile.resources.msg_quick_react
 import chat.papo.mobile.resources.msg_reactors_label
 import chat.papo.mobile.resources.msg_reply
-import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.parseHexColor
 import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.components.rememberMediaPainter
 import chat.papo.mobile.ui.components.rememberedPainter
+import chat.papo.mobile.ui.media.rememberAttachmentDownload
 import chat.papo.mobile.ui.theme.LocalPapoColors
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import kotlin.io.encoding.Base64
 
@@ -350,6 +350,7 @@ fun MessageItem(
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
     onShowReactors: (ReactionSummaryDto) -> Unit,
+    onPlay: (PlayableMedia) -> Unit,
 ) {
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
         ?: author?.displayName
@@ -417,10 +418,13 @@ fun MessageItem(
                 }
                 message.attachments.forEach { attachment ->
                     Spacer(Modifier.height(6.dp))
-                    if (attachment.isImage && attachment.thumbnailId != null) {
-                        ImageAttachment(session, attachment, onOpen = { onOpenImage(attachment) })
-                    } else {
-                        FileAttachment(session, attachment)
+                    // Vídeo que o player abre vira cartão com ▶; os que ele recusa (bloqueado) ficam no cartão de arquivo.
+                    val video = playableAttachment(session.client.server, attachment)
+                    when {
+                        attachment.isImage && attachment.thumbnailId != null ->
+                            ImageAttachment(session, attachment, onOpen = { onOpenImage(attachment) })
+                        video != null -> VideoAttachment(session, attachment, video, onPlay)
+                        else -> FileAttachment(session, attachment)
                     }
                 }
                 message.embeds.forEach { embed ->
@@ -628,26 +632,13 @@ private fun ImageAttachment(session: AccountSession, attachment: AttachmentDto, 
 
 @Composable
 private fun FileAttachment(session: AccountSession, attachment: AttachmentDto) {
-    val platform = LocalPlatformUi.current
-    val scope = rememberCoroutineScope()
-    var downloading by remember(attachment.id) { mutableStateOf(false) }
-    var failed by remember(attachment.id) { mutableStateOf(false) }
+    val download = rememberAttachmentDownload(session, attachment)
     Row(
         Modifier
             .widthIn(max = 320.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(enabled = !downloading, onClickLabel = stringResource(Res.string.msg_download)) {
-                downloading = true
-                failed = false
-                scope.launch {
-                    val ok = runCatching {
-                        platform.saveToDownloads(attachment.fileName, attachment.mimeType, session.api.attachment(attachment.id))
-                    }.getOrDefault(false)
-                    failed = !ok
-                    downloading = false
-                }
-            }
+            .clickable(enabled = !download.downloading, onClickLabel = stringResource(Res.string.msg_download), onClick = download::start)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -658,11 +649,11 @@ private fun FileAttachment(session: AccountSession, attachment: AttachmentDto) {
             Text(
                 formatBytes(attachment.sizeBytes),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (download.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Spacer(Modifier.width(12.dp))
-        if (downloading) {
+        if (download.downloading) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         } else {
             Icon(Icons.Filled.Download, contentDescription = stringResource(Res.string.msg_download), modifier = Modifier.size(20.dp))
