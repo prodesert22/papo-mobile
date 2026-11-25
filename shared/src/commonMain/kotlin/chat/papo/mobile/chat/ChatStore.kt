@@ -70,6 +70,13 @@ class ChatStore(
     private val meta = db.metaQueries
     private val syncMutex = Mutex()
 
+    /**
+     * A resposta do POST/DELETE de uma reação e o evento `react_update` chegam por caminhos que não têm ordem
+     * entre si e gravam a mesma linha. Quem lê e grava sem esta trava pode escrever de volta o que leu antes da
+     * gravação do outro e apagá-la: a contagem velha volta, ou o "eu reagi" some.
+     */
+    private val reactionLock = Mutex()
+
     val channels: StateFlow<List<Channel>> =
         q.selectChannels().asFlow().mapToList(io).map { rows -> rows.map { it.toModel() } }
             .stateIn(scope, SharingStarted.Eagerly, emptyList())
@@ -544,15 +551,14 @@ class ChatStore(
             if (mine) api.unreact(message.channelId, message.id, request) else api.react(message.channelId, message.id, request)
         }
         withContext(io) {
-            val row = q.selectMessage(message.id).executeAsOneOrNull() ?: return@withContext
-            val own = decodeList(UserReactionDto.serializer(), row.user_reactions)
-            val updated = if (mine) {
-                own.filterNot { it.emojiId == emojiId && it.unicode == unicode }
-            } else {
-                own + UserReactionDto(emojiId = emojiId, unicode = unicode)
+            reactionLock.withLock {
+                // A linha é lida aqui, já com a trava: o evento pode ter chegado antes ou chegar depois desta resposta.
+                val row = q.selectMessage(message.id).executeAsOneOrNull() ?: return@withContext
+                val own = decodeList(UserReactionDto.serializer(), row.user_reactions).filterNot { it.emojiId == emojiId && it.unicode == unicode }
+                val updated = if (mine) own else own + UserReactionDto(emojiId = emojiId, unicode = unicode)
+                // A contagem chega só pelo evento react_update; aqui muda apenas o "eu reagi".
+                q.setMessageReactions(row.reactions, encodeList(UserReactionDto.serializer(), updated), message.id)
             }
-            // A contagem chega pelo evento react_update; aqui só muda o "eu reagi".
-            q.setMessageReactions(row.reactions, encodeList(UserReactionDto.serializer(), updated), message.id)
         }
     }
 
@@ -669,18 +675,20 @@ class ChatStore(
             is WsEvent.MessageEdited -> withContext(io) { q.editMessage(event.content, event.editedAt, event.id) }
             is WsEvent.MessageDeleted -> withContext(io) { q.deleteMessage(event.id) }
             is WsEvent.ReactionUpdated -> withContext(io) {
-                val row = q.selectMessage(event.messageId).executeAsOneOrNull() ?: return@withContext
-                val others = decodeList(ReactionSummaryDto.serializer(), row.reactions)
-                    .filterNot { it.emojiId == event.emojiId && it.unicode == event.unicode }
-                val updated = if (event.count > 0) others + ReactionSummaryDto(event.emojiId, event.unicode, event.count) else others
-                var own = row.user_reactions
-                if (event.count == 0) {
-                    own = encodeList(
-                        UserReactionDto.serializer(),
-                        decodeList(UserReactionDto.serializer(), own).filterNot { it.emojiId == event.emojiId && it.unicode == event.unicode },
-                    )
+                reactionLock.withLock {
+                    val row = q.selectMessage(event.messageId).executeAsOneOrNull() ?: return@withContext
+                    val others = decodeList(ReactionSummaryDto.serializer(), row.reactions)
+                        .filterNot { it.emojiId == event.emojiId && it.unicode == event.unicode }
+                    val updated = if (event.count > 0) others + ReactionSummaryDto(event.emojiId, event.unicode, event.count) else others
+                    var own = row.user_reactions
+                    if (event.count == 0) {
+                        own = encodeList(
+                            UserReactionDto.serializer(),
+                            decodeList(UserReactionDto.serializer(), own).filterNot { it.emojiId == event.emojiId && it.unicode == event.unicode },
+                        )
+                    }
+                    q.setMessageReactions(encodeList(ReactionSummaryDto.serializer(), updated), own, event.messageId)
                 }
-                q.setMessageReactions(encodeList(ReactionSummaryDto.serializer(), updated), own, event.messageId)
             }
             is WsEvent.EmbedsUpdated -> withContext(io) {
                 q.setMessageEmbeds(encodeList(EmbedDto.serializer(), event.embeds), event.messageId)

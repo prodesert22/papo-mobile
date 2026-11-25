@@ -8,3 +8,5 @@
   reacting, replying or joining a call, are no longer offered instead of failing
   with an error. Moderators and the owner can delete other people's messages
   from a message's actions, and your own reactions can always be taken back.
+- Fixed: taking back your own reaction could leave the old count on the
+  message until it was opened again.
