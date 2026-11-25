@@ -10,7 +10,6 @@ import android.view.Gravity
 import android.widget.FrameLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
@@ -76,7 +75,6 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
         }
     }
 
-    // Vazio até a trilha do player (ExoPlayer) entrar; quem chama já pode compor a área do vídeo.
     @Composable
     override fun VideoPlayer(
         client: PapoClient,
@@ -85,9 +83,7 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
         modifier: Modifier,
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
-    ) {
-        Box(modifier)
-    }
+    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure)
 
     private fun describe(uri: Uri): OutgoingFile {
         var name = uri.lastPathSegment ?: "arquivo"
