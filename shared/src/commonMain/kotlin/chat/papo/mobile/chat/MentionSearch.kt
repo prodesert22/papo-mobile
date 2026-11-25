@@ -37,7 +37,8 @@ fun mentionQueryAt(text: String, cursor: Int): MentionQuery? {
 
 /**
  * Quem pode ser mencionado com [query]: todos menos [me] e os banidos, do melhor casamento (nome igual,
- * começa com, começo de palavra, contém; ver [searchByName]) ao pior, no username ou no nome de exibição.
+ * começa com, começo de palavra, contém, contém atravessando espaço, `_`, `.` ou `-`, como `lum` em
+ * "Lu Moraes"; ver [searchByName]) ao pior, no username ou no nome de exibição.
  * Entre casamentos iguais vêm primeiro quem falou há pouco no canal ([recentAuthors], do mais recente ao
  * mais antigo), depois quem está online, depois a ordem alfabética sem acento. Consulta vazia lista todos.
  */

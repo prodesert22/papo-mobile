@@ -138,6 +138,46 @@ class MentionSearchTest {
     }
 
     @Test
+    fun consultaAtravessaOEspacoDoNomeDeExibicao() {
+        val users = listOf(user("a", "mestre7", nickname = "Lu Moraes"), user("b", "bia"))
+        assertEquals(listOf("a"), suggest("lum", users))
+        assertEquals(listOf("a"), suggest("LUMOR", users))
+        assertEquals(listOf("a"), suggest("lu m", users)) // com o espaço, o mesmo resultado
+        assertEquals(emptyList(), suggest("lmo", users)) // as letras têm de ficar juntas
+    }
+
+    @Test
+    fun consultaAtravessaSeparadoresDoUsername() {
+        val users = listOf(user("a", "lu_moraes"), user("b", "lu.moraes"), user("c", "lu-moraes"), user("d", "bia"))
+        // Todos casam do mesmo jeito: vale o alfabeto, em que "-" vem antes de "." e este antes de "_".
+        assertEquals(listOf("c", "b", "a"), suggest("lum", users))
+    }
+
+    @Test
+    fun pedacoDoMeioDoUsernameAcha() {
+        val users = listOf(user("a", "cantorvivo"), user("b", "bia"), user("c", "cantor_vivo", nickname = "Zé"))
+        assertEquals(listOf("a", "c"), suggest("torvi", users))
+    }
+
+    @Test
+    fun fluxoDoCampoAteAsSugestoesAchaOPedacoDoMeioEOQueAtravessaOEspaco() {
+        val users = listOf(user("a", "cantorvivo"), user("b", "mestre7", nickname = "Lu Moraes"), user("c", "bia"))
+        fun suggestionsFor(typed: String) = query(typed)?.let { suggest(it.text, users) }
+        assertEquals(listOf("a"), suggestionsFor("oi @torvi"))
+        assertEquals(listOf("a"), suggestionsFor("oi @torvi ")) // espaço que o teclado põe depois da palavra
+        assertEquals(listOf("b"), suggestionsFor("oi @lum"))
+        assertEquals(listOf("b"), suggestionsFor("oi @lu m"))
+    }
+
+    @Test
+    fun casamentoAtravessandoQuebraNaoPassaNaFrenteDeQuemFalouHaPoucoMasPerdeParaContem() {
+        val users = listOf(user("a", "x1", nickname = "Lu Moraes"), user("b", "alumno"), user("c", "x2", nickname = "Lu Moura"))
+        // b contém "lum"; a e c só o têm atravessando o espaço. A relevância vem antes de quem falou há pouco.
+        assertEquals(listOf("b", "a", "c"), suggest("lum", users, recent = listOf("a")))
+        assertEquals(listOf("b", "c", "a"), suggest("lum", users, recent = listOf("c", "a")))
+    }
+
+    @Test
     fun melhorCasamentoVemPrimeiroIgualComecaComPalavraContem() {
         val users = listOf(
             user("contem", "banana"),
