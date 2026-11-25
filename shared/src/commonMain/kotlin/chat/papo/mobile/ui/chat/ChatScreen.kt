@@ -104,7 +104,7 @@ import chat.papo.mobile.resources.chat_attach
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_empty
 import chat.papo.mobile.resources.chat_focus_missing
-import chat.papo.mobile.resources.chat_focus_too_old
+import chat.papo.mobile.resources.chat_go_to_latest
 import chat.papo.mobile.resources.chat_history_start
 import chat.papo.mobile.resources.chat_locating
 import chat.papo.mobile.resources.chat_pinned
@@ -121,6 +121,7 @@ import chat.papo.mobile.resources.chat_today
 import chat.papo.mobile.resources.chat_typing_many
 import chat.papo.mobile.resources.chat_typing_one
 import chat.papo.mobile.resources.chat_unknown_user
+import chat.papo.mobile.resources.chat_viewing_older
 import chat.papo.mobile.resources.chat_yesterday
 import chat.papo.mobile.resources.msg_copy
 import chat.papo.mobile.resources.msg_delete
@@ -142,6 +143,7 @@ import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.settings.ConfirmDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
@@ -162,6 +164,9 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     val presence by chat.presence.collectAsStateWithLifecycle()
     val typing by chat.typing.collectAsStateWithLifecycle()
     val pinnedIds by chat.pinned.collectAsStateWithLifecycle()
+    val detachedChannels by chat.detached.collectAsStateWithLifecycle()
+    // O trecho à vista é antigo e não chega à mensagem mais nova (aberto a partir de uma busca).
+    val detached = viewModel.channelId in detachedChannels
 
     val channel = channels.firstOrNull { it.id == viewModel.channelId }
     val dmUser = dms.firstOrNull { it.id == viewModel.channelId }?.let { users[it.userId] }
@@ -190,10 +195,31 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
         val shifted = messages.indexOfFirst { it.id == previousNewest }
         val wasAtBottom = previousNewest == null || (shifted >= 0 && listState.firstVisibleItemIndex <= shifted)
         previousNewest = newest?.id
-        if (newest != null && (wasAtBottom || newest.authorId == session.userId)) listState.scrollToItem(0)
+        // Num trecho antigo, a "mais nova" é só a última carregada: não há conversa a acompanhar.
+        if (newest != null && !detached && (wasAtBottom || newest.authorId == session.userId)) listState.scrollToItem(0)
     }
-    LaunchedEffect(newest?.id, atBottom) {
-        if (newest != null && atBottom) viewModel.markRead(newest)
+    LaunchedEffect(newest?.id, atBottom, detached) {
+        // O fim de um trecho antigo não é o fim da conversa: marcar ali faria a leitura voltar no tempo.
+        if (newest != null && atBottom && !detached) viewModel.markRead(newest)
+    }
+    // Lendo um trecho antigo: perto do fim dele, carrega o que vem depois.
+    val canLoadNewer = detached && state.focusId == null && !state.locating
+    LaunchedEffect(listState, canLoadNewer) {
+        if (!canLoadNewer) return@LaunchedEffect
+        snapshotFlow { listState.firstVisibleItemIndex <= 3 }
+            .distinctUntilChanged()
+            .collect { nearEnd -> if (nearEnd) viewModel.loadNewer() }
+    }
+    // Voltou para as mensagens recentes: a lista troca de conteúdo logo depois do aviso,
+    // então o fim da conversa fica fixado por um instante.
+    var shownLatestTick by rememberSaveable { mutableStateOf(0) }
+    LaunchedEffect(state.latestTick) {
+        if (state.latestTick == shownLatestTick) return@LaunchedEffect
+        shownLatestTick = state.latestTick
+        withTimeoutOrNull(1500) {
+            snapshotFlow { (viewModel.channelId in detachedChannels) to messages.firstOrNull()?.id }
+                .collect { listState.scrollToItem(0) }
+        }
     }
     // Outra conversa pode ter sido aberta por cima desta (busca → mensagem): ao voltar, é esta que está na tela.
     LifecycleResumeEffect(viewModel) {
@@ -327,17 +353,14 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                     }
                 }
                 Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.focusProblem?.let { problem ->
-                        val text = when (problem) {
-                            FocusProblem.Missing -> Res.string.chat_focus_missing
-                            FocusProblem.TooOld -> Res.string.chat_focus_too_old
-                        }
-                        NoticeBar(stringResource(text), viewModel::dismissFocusProblem)
+                    if (state.targetMissing) {
+                        NoticeBar(stringResource(Res.string.chat_focus_missing), viewModel::dismissTargetMissing)
                     }
                     state.error?.let { error -> NoticeBar(error.text(), viewModel::dismissError) }
                 }
             }
 
+            if (detached) OlderHistoryBar(busy = state.loadingNewer || state.returning, onLatest = viewModel::goToLatest)
             TypingLine(typing[viewModel.channelId].orEmpty().mapNotNull { users[it] })
             Composer(
                 session = session,
@@ -399,6 +422,25 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
     }
     viewing?.let { ImageViewer(session, it) { viewing = null } }
     state.pinnedList?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
+}
+
+/** Aviso de que a lista mostra um trecho antigo, com o caminho de volta para o fim da conversa. */
+@Composable
+private fun OlderHistoryBar(busy: Boolean, onLatest: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(Res.string.chat_viewing_older),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            TextButton(onClick = onLatest, enabled = !busy) { Text(stringResource(Res.string.chat_go_to_latest)) }
+        }
+    }
 }
 
 @Composable

@@ -43,7 +43,8 @@ Papo also has a [web client](https://github.com/prodesert22/papo-frontend) and a
 - Attachments, replies, editing and deleting, reactions, pinned messages and
   mentions.
 - Message search on the server, by text and by conversation, author, mention,
-  links, attachments and date. A result opens in its conversation.
+  links, attachments and date. A result opens in its conversation, however old
+  it is.
 - Markdown formatting, link previews, image thumbnails with a full-screen
   viewer, typing indicators and presence.
 
@@ -61,9 +62,6 @@ The complete list is in the [0.1.0 release notes](releases/v0.1.0.md).
 - No push notifications: messages arrive only while the app is open.
 - No notification inbox, profile editing, user preferences, blocking or server
   administration.
-- A search result opens in its conversation only when it is among the latest
-  messages there, about a thousand; older ones are listed but cannot be opened
-  in context.
 - In calls: no sound from a shared screen, no per-person volume and no Bluetooth
   headset selection.
 - Video attachments play only after being downloaded, GIFs are not animated and

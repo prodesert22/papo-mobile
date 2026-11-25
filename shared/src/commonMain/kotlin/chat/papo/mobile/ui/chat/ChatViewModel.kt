@@ -19,11 +19,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Mensagem que a conversa deve mostrar ao abrir, como um resultado de busca. */
-data class MessageTarget(val id: String, val createdAtIso: String? = null)
-
-/** Por que a mensagem pedida ao abrir não pôde ser mostrada. */
-enum class FocusProblem { Missing, TooOld }
+/** Mensagem que a conversa deve mostrar ao abrir, como um resultado de busca, com o instante dela dado pelo servidor. */
+data class MessageTarget(val id: String, val createdAtIso: String)
 
 data class ChatUiState(
     val replyTo: Message? = null,
@@ -39,7 +36,14 @@ data class ChatUiState(
     val locating: Boolean = false,
     /** Mensagem pedida ao abrir, já ao alcance da lista: a tela rola até ela e a destaca. */
     val focusId: String? = null,
-    val focusProblem: FocusProblem? = null,
+    /** A mensagem pedida ao abrir não existe mais na conversa. */
+    val targetMissing: Boolean = false,
+    /** Lendo um trecho antigo: carregando o que vem depois dele. */
+    val loadingNewer: Boolean = false,
+    /** Voltando do trecho antigo para as mensagens recentes. */
+    val returning: Boolean = false,
+    /** Muda a cada volta às mensagens recentes, para a tela rolar até o fim. */
+    val latestTick: Int = 0,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -80,9 +84,35 @@ class ChatViewModel(
                 limit.update { maxOf(it, result.position + PAGE) }
                 _state.update { it.copy(locating = false, focusId = target.id) }
             }
-            Located.Missing -> _state.update { it.copy(locating = false, focusProblem = FocusProblem.Missing) }
-            Located.TooOld -> _state.update { it.copy(locating = false, focusProblem = FocusProblem.TooOld) }
+            Located.Missing -> _state.update { it.copy(locating = false, targetMissing = true) }
             null -> _state.update { it.copy(locating = false) }
+        }
+    }
+
+    /** Lendo um trecho antigo, a rolagem chegou perto do fim dele: carrega o que vem depois. */
+    fun loadNewer() {
+        val s = _state.value
+        if (s.loadingNewer || s.returning || s.locating || s.focusId != null || channelId !in chat.detached.value) return
+        _state.update { it.copy(loadingNewer = true) }
+        viewModelScope.launch {
+            var added = 0
+            attempt { added = chat.loadNewer(channelId) }
+            // A janela da tela conta a partir da mais nova: cresce junto, para o que estava à vista não sair dela.
+            limit.update { it + added }
+            _state.update { it.copy(loadingNewer = false) }
+        }
+    }
+
+    /** Deixa o trecho antigo e volta para as mensagens recentes. */
+    fun goToLatest() {
+        if (_state.value.returning) return
+        _state.update { it.copy(returning = true, focusId = null) }
+        viewModelScope.launch {
+            if (attempt { chat.refreshLatest(channelId) }) {
+                limit.value = PAGE
+                _state.update { it.copy(reachedStart = !chat.hasOlder(channelId), latestTick = it.latestTick + 1) }
+            }
+            _state.update { it.copy(returning = false) }
         }
     }
 
@@ -91,7 +121,7 @@ class ChatViewModel(
 
     fun clearFocus() = _state.update { it.copy(focusId = null) }
 
-    fun dismissFocusProblem() = _state.update { it.copy(focusProblem = null) }
+    fun dismissTargetMissing() = _state.update { it.copy(targetMissing = false) }
 
     fun loadOlder() {
         val s = _state.value

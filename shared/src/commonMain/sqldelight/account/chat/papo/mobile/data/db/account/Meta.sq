@@ -12,3 +12,7 @@ INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?);
 
 remove:
 DELETE FROM meta WHERE key = ?;
+
+-- Chaves de uma família, como as marcações por canal.
+keysWithPrefix:
+SELECT key FROM meta WHERE key LIKE (:prefix || '%');

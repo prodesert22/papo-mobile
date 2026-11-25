@@ -151,7 +151,8 @@
     <string name="chat_search">Buscar nesta conversa</string>
     <string name="chat_locating">Localizando mensagem…</string>
     <string name="chat_focus_missing">Essa mensagem não está mais na conversa. Ela pode ter sido apagada.</string>
-    <string name="chat_focus_too_old">Essa mensagem é antiga demais para abrir na conversa.</string>
+    <string name="chat_viewing_older">Você está vendo mensagens antigas</string>
+    <string name="chat_go_to_latest">Ir para as recentes</string>
     <string name="chat_unknown_user">Usuário removido</string>
     <string name="chat_file_saved">Arquivo salvo em Downloads.</string>
     <string name="chat_file_failed">Não foi possível baixar o arquivo.</string>

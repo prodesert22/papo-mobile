@@ -7,8 +7,9 @@
 - The server-wide search does not reach direct messages. To search one, pick it
   in **Conversa** or start the search from inside it.
 - Tap a search result to open its conversation at that message, highlighted,
-  with the history around it. Messages further back than about a thousand in
-  a conversation are listed but cannot be opened this way yet.
+  with the history around it, however old it is. While you read an old stretch
+  of a conversation, scrolling loads more in both directions and **Ir para as
+  recentes** takes you back to the latest messages.
 - **Filtros recentes** offers the filters of your last five searches again. They
   are kept only in memory and are gone when the app locks or closes.
 - **Mensagens fixadas** has a field that filters the list by text or author as

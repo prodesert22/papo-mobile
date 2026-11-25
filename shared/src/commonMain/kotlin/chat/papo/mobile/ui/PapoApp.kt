@@ -182,7 +182,8 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                 LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
             } else {
                 val vm = viewModel(key = "${route.accountId}/${route.channelId}/${route.messageId}/${accountSession.hashCode()}") {
-                    ChatViewModel(accountSession, route.channelId, route.messageId?.let { MessageTarget(it, route.messageAt) })
+                    val target = if (route.messageId != null && route.messageAt != null) MessageTarget(route.messageId, route.messageAt) else null
+                    ChatViewModel(accountSession, route.channelId, target)
                 }
                 ChatScreen(
                     session = accountSession,

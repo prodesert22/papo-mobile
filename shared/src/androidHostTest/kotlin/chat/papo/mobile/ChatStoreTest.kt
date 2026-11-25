@@ -29,6 +29,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatStoreTest {
@@ -36,9 +37,15 @@ class ChatStoreTest {
     private fun msg(n: Int, channel: String = "c1", author: String = "u2", extra: String = "") =
         """{"id":"m$n","channel_id":"$channel","author_id":"$author","content":"msg $n","created_at":"${ts(n)}"$extra}"""
 
-    /** Servidor com [total] mensagens em c1, paginadas como o backend (desc, cursor since+last_id). */
+    /** Servidor com [total] mensagens em c1, paginadas como o backend: cursor since+last_id nas duas direções. */
     private class Backend(var total: Int, private val render: (Int) -> String) {
         val requests = mutableListOf<String>()
+
+        /** A mensagem `n` foi criada `n` segundos depois da meia-noite. */
+        private fun seconds(iso: String): Double {
+            val instant = Instant.parse(iso)
+            return (instant.epochSeconds - Instant.parse("2026-01-01T00:00:00Z").epochSeconds) + instant.nanosecondsOfSecond / 1e9
+        }
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             requests += request.method.value + " " + path + (request.url.encodedQuery.takeIf { it.isNotEmpty() }?.let { "?$it" } ?: "")
@@ -61,9 +68,23 @@ class ChatStoreTest {
                 )
                 path == "/channels/c1/messages" -> {
                     val limit = request.url.parameters["limit"]!!.toInt()
-                    val before = request.url.parameters["last_id"]?.removePrefix("m")?.toInt() ?: (total + 1)
-                    val ids = (before - 1 downTo maxOf(1, before - limit)).toList()
-                    json("""{"messages":[${ids.joinToString(",") { render(it) }}],"has_more":${(ids.lastOrNull() ?: 1) > 1}}""")
+                    val asc = request.url.parameters["order"] == "asc"
+                    val lastId = request.url.parameters["last_id"]
+                    val since = request.url.parameters["since"]?.let { seconds(it) }
+                    val matching = (1..total).filter { n ->
+                        when {
+                            since == null -> true
+                            asc -> n > since || (n.toDouble() == since && "m$n" > lastId!!)
+                            else -> n < since || (n.toDouble() == since && "m$n" < lastId!!)
+                        }
+                    }
+                    val ordered = if (asc) matching else matching.reversed()
+                    json("""{"messages":[${ordered.take(limit).joinToString(",") { render(it) }}],"has_more":${ordered.size > limit}}""")
+                }
+                path == "/channels/d1/messages" -> json("""{"messages":[],"has_more":false}""")
+                path == "/messages" -> {
+                    total += 1
+                    json(render(total))
                 }
                 path == "/channels/c1/read" || path == "/channels/d1/read" -> respond("", HttpStatusCode.NoContent)
                 path.endsWith("/reactions") -> json("{}")
@@ -125,57 +146,115 @@ class ChatStoreTest {
 
         // m100 é a mais nova: m90 tem dez mensagens mais novas antes dela.
         assertEquals(Located.Found(10), f.store.locate("c1", "m90", ts(90)))
-        assertEquals(Located.Found(0), f.store.locate("c1", "m100"))
+        assertEquals(Located.Found(0), f.store.locate("c1", "m100", ts(100)))
         assertEquals(before, f.backend.requests.size)
+        assertFalse(f.store.isDetached("c1"))
     }
 
     @Test
-    fun localizaMensagemAntigaPaginandoParaTras() = runTest {
+    fun mensagemMuitoAntigaAbreComDuasLeiturasPeloCursor() = runTest {
+        val f = Fixture(this, Backend(2000) { msg(it) })
+        f.store.refreshLatest("c1") // m2000..m1961
+
+        // Por mais longe que esteja, são duas leituras: o que veio depois dela e a página que termina nela.
+        assertEquals(Located.Found(100), f.store.locate("c1", "m5", ts(5)))
+        val (after, before) = f.backend.requests.drop(1)
+        assertTrue("order=asc" in after && "last_id=m5" in after && "limit=100" in after && "since=" in after)
+        assertTrue("order=desc" in before && "last_id=m6" in before && "limit=40" in before)
+        assertEquals(3, f.backend.requests.size)
+
+        // O trecho guardado passa a ser a vizinhança dela, sem buraco, e o canal fica marcado como longe do fim.
+        assertEquals((105 downTo 1).map { "m$it" }, f.ids())
+        assertTrue(f.store.isDetached("c1"))
+        assertFalse(f.store.hasOlder("c1")) // a página que termina nela chegou ao começo do canal
+
+        // Voltar ao fim do histórico troca o trecho de novo, e o que valia para o antigo não vale mais.
+        f.store.refreshLatest("c1")
+        assertEquals((2000 downTo 1961).map { "m$it" }, f.ids())
+        assertFalse(f.store.isDetached("c1"))
+        assertTrue(f.store.loadOlder("c1"))
+        assertEquals((2000 downTo 1921).map { "m$it" }, f.ids())
+    }
+
+    @Test
+    fun trechoAntigoCarregaParaOsDoisLadosAteAlcancarOFim() = runTest {
+        val f = Fixture(this, Backend(350) { msg(it) })
+        f.store.refreshLatest("c1")
+        assertEquals(Located.Found(100), f.store.locate("c1", "m60", ts(60)))
+        assertEquals((160 downTo 21).map { "m$it" }, f.ids())
+        assertTrue(f.store.hasOlder("c1"))
+
+        // Para trás, como em qualquer conversa.
+        assertFalse(f.store.loadOlder("c1")) // m20..m1: acabou o histórico
+        assertEquals((160 downTo 1).map { "m$it" }, f.ids())
+
+        // Para frente, página a página, a partir da mais nova guardada.
+        assertEquals(40, f.store.loadNewer("c1"))
+        assertTrue("order=asc" in f.backend.requests.last() && "last_id=m160" in f.backend.requests.last())
+        assertEquals((200 downTo 1).map { "m$it" }, f.ids())
+        assertTrue(f.store.isDetached("c1"))
+
+        var rounds = 0
+        while (f.store.isDetached("c1") && rounds++ < 10) f.store.loadNewer("c1")
+        // Chegou à mensagem mais nova: o trecho é um só e o canal volta a acompanhar a conversa.
+        assertFalse(f.store.isDetached("c1"))
+        assertEquals((350 downTo 1).map { "m$it" }, f.ids())
+        assertEquals(0, f.store.loadNewer("c1"))
+    }
+
+    @Test
+    fun mensagemPertoDoTrechoGuardadoNaoSeparaOHistorico() = runTest {
         val f = Fixture(this, Backend(350) { msg(it) })
         f.store.refreshLatest("c1") // m350..m311
 
-        assertEquals(Located.Found(290), f.store.locate("c1", "m60", ts(60)))
-
-        // Três páginas de 100 (o limite do servidor), cada uma continuando da mensagem mais antiga guardada.
-        val pages = f.backend.requests.drop(1)
-        assertEquals(listOf("m311", "m211", "m111"), pages.map { Regex("last_id=(m\\d+)").find(it)!!.groupValues[1] })
-        assertTrue(pages.all { "limit=100" in it })
-        // O trecho guardado continua sem buracos, da mais nova até a página da mensagem.
-        assertEquals((350 downTo 11).map { "m$it" }, f.ids())
+        // O que veio depois de m240 (m241..m340) encosta no que já está guardado: vira um trecho só.
+        assertEquals(Located.Found(110), f.store.locate("c1", "m240", ts(240)))
+        assertEquals((350 downTo 201).map { "m$it" }, f.ids())
+        assertFalse(f.store.isDetached("c1"))
+        assertTrue(f.store.loadOlder("c1"))
+        assertEquals((350 downTo 161).map { "m$it" }, f.ids())
     }
 
     @Test
-    fun mensagemApagadaNaoPaginaAlemDoInstanteDela() = runTest {
+    fun mensagemApagadaNaoMexeNoTrechoGuardado() = runTest {
         val f = Fixture(this, Backend(350) { msg(it) })
         f.store.refreshLatest("c1")
 
-        // O instante dela fica entre m300 e m301: uma página basta para saber que não existe mais.
+        // O instante dela fica entre m300 e m301, mas o servidor não a tem mais.
         assertEquals(Located.Missing, f.store.locate("c1", "apagada", "2026-01-01T00:05:00.5Z"))
-        assertEquals(2, f.backend.requests.size)
+        assertEquals(3, f.backend.requests.size)
+        // Nada depois do instante dela: nem a segunda leitura acontece.
+        assertEquals(Located.Missing, f.store.locate("c1", "apagada", ts(999)))
+        assertEquals(4, f.backend.requests.size)
+        // Mensagem guardada de outro canal não conta como achada neste.
+        assertEquals(Located.Missing, f.store.locate("d1", "m340", ts(340)))
 
-        // Sem o instante, só o fim do histórico encerra a procura.
-        val short = Fixture(this, Backend(30) { msg(it) })
-        short.store.refreshLatest("c1")
-        assertEquals(Located.Missing, short.store.locate("c1", "apagada"))
-        assertEquals(1, short.backend.requests.size)
+        assertEquals((350 downTo 311).map { "m$it" }, f.ids())
+        assertFalse(f.store.isDetached("c1"))
     }
 
     @Test
-    fun mensagemDeOutroCanalNaoContaComoAchada() = runTest {
-        val f = Fixture(this, Backend(30) { msg(it) })
+    fun mensagemNovaNaoEntraNoTrechoAntigo() = runTest {
+        val backend = Backend(350) { msg(it) }
+        val f = Fixture(this, backend)
+        f.store.sync()
         f.store.refreshLatest("c1")
-        assertEquals(Located.Missing, f.store.locate("d1", "m5"))
-    }
+        f.store.locate("c1", "m60", ts(60))
+        assertTrue(f.store.isDetached("c1"))
 
-    @Test
-    fun procuraParaNoLimiteDePaginas() = runTest {
-        val f = Fixture(this, Backend(2000) { msg(it) })
-        f.store.refreshLatest("c1")
+        // Entre o trecho antigo e ela há um buraco: fica de fora, mas o canal continua sabendo que há novidade.
+        backend.total = 351
+        f.store.handle(WsEvent.MessageCreated("m351", "c1", "u2", content = "nova", createdAt = ts(351)))
+        runCurrent()
+        assertEquals((160 downTo 21).map { "m$it" }, f.ids())
+        val channel = f.store.channels.value.first { it.id == "c1" }
+        assertEquals("m351", channel.lastMessageId)
+        assertTrue(channel.unread)
 
-        assertEquals(Located.TooOld, f.store.locate("c1", "m5", ts(5)))
-        assertEquals(1 + 10, f.backend.requests.size)
-        // O que foi lido fica guardado e continua contínuo.
-        assertEquals((2000 downTo 961).map { "m$it" }, f.ids(limit = 5000))
+        // Escrever dali leva de volta ao fim da conversa, onde a mensagem enviada entrou.
+        f.store.send("c1", "resposta", replyTo = null, files = emptyList())
+        assertFalse(f.store.isDetached("c1"))
+        assertEquals((352 downTo 313).map { "m$it" }, f.ids())
     }
 
     @Test

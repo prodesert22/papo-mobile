@@ -1,7 +1,7 @@
 package chat.papo.mobile
 
+import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.ui.chat.ChatViewModel
-import chat.papo.mobile.ui.chat.FocusProblem
 import chat.papo.mobile.ui.chat.MessageTarget
 import chat.papo.mobile.ui.components.UiError
 import io.ktor.client.engine.mock.MockEngine
@@ -25,6 +25,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelTest {
@@ -33,6 +34,12 @@ class ChatViewModelTest {
     private val edited = mutableListOf<String>()
     private var failSend = false
     private var total = 3
+
+    /** A mensagem `n` foi criada `n` segundos depois da meia-noite. */
+    private fun seconds(iso: String): Double {
+        val instant = Instant.parse(iso)
+        return (instant.epochSeconds - Instant.parse("2026-01-01T00:00:00Z").epochSeconds) + instant.nanosecondsOfSecond / 1e9
+    }
 
     private val engine = MockEngine { request ->
         val path = request.url.encodedPath
@@ -43,10 +50,19 @@ class ChatViewModelTest {
             """{"id":"m$n","channel_id":"c1","author_id":"$author","content":"$content","created_at":"2026-01-01T00:%02d:%02dZ"}""".format(n / 60, n % 60)
         when {
             path == "/channels/c1/messages" -> {
-                val before = request.url.parameters["last_id"]?.removePrefix("m")?.toInt() ?: (total + 1)
                 val limit = request.url.parameters["limit"]!!.toInt()
-                val ids = (before - 1 downTo maxOf(1, before - limit)).toList()
-                json("""{"messages":[${ids.joinToString(",") { message(it) }}],"has_more":${(ids.lastOrNull() ?: 1) > 1}}""")
+                val asc = request.url.parameters["order"] == "asc"
+                val lastId = request.url.parameters["last_id"]
+                val since = request.url.parameters["since"]?.let { seconds(it) }
+                val matching = (1..total).filter { n ->
+                    when {
+                        since == null -> true
+                        asc -> n > since || (n.toDouble() == since && "m$n" > lastId!!)
+                        else -> n < since || (n.toDouble() == since && "m$n" < lastId!!)
+                    }
+                }
+                val ordered = if (asc) matching else matching.reversed()
+                json("""{"messages":[${ordered.take(limit).joinToString(",") { message(it) }}],"has_more":${ordered.size > limit}}""")
             }
             path == "/channels/c1/pinned" -> json("""{"channel_id":"c1","pinned":[${message(1)}]}""")
             path == "/messages" && failSend ->
@@ -63,9 +79,12 @@ class ChatViewModelTest {
         }
     }
 
+    private lateinit var session: AccountSession
+
     private fun TestScope.viewModel(target: MessageTarget? = null): ChatViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        return ChatViewModel(TestResources.session(engine, this), "c1", target)
+        session = TestResources.session(engine, this)
+        return ChatViewModel(session, "c1", target)
     }
 
     /** O motor HTTP falso responde em outra thread: espera o estado chegar onde o teste precisa. */
@@ -93,7 +112,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun abrirNumaMensagemAntigaCarregaAteElaEADestaca() = runTest {
+    fun abrirNumaMensagemAntigaMostraAVizinhancaDelaEADestaca() = runTest {
         total = 300
         val vm = viewModel(MessageTarget("m20", "2026-01-01T00:00:20Z"))
         assertTrue(vm.state.value.locating)
@@ -103,15 +122,29 @@ class ChatViewModelTest {
         val state = vm.state.first { it.focusId != null }
         assertEquals("m20", state.focusId)
         assertFalse(state.locating)
-        assertNull(state.focusProblem)
-        // A janela da tela alcança a mensagem e mostra o que vem antes dela.
+        assertFalse(state.targetMissing)
+        // A lista passa a ser a vizinhança dela: as cem seguintes e o que veio antes, até o começo do canal.
         val shown = vm.messages.first { list -> list.any { it.id == "m20" } }.map { it.id }
-        assertEquals("m300", shown.first())
-        assertEquals(280, shown.indexOf("m20"))
-        assertTrue(shown.size > 281)
+        assertEquals((120 downTo 1).map { "m$it" }, shown)
+        assertEquals(100, shown.indexOf("m20"))
+        session.chat.detached.first { "c1" in it }
 
+        // Perto do fim do trecho, a tela pede o que vem depois; o destaque ainda na tela segura o pedido.
+        vm.loadNewer()
+        assertFalse(vm.state.value.loadingNewer)
         vm.clearFocus()
-        assertNull(vm.state.value.focusId)
+        vm.loadNewer()
+        assertTrue(vm.state.value.loadingNewer)
+        assertEquals("m160", vm.messages.first { it.first().id == "m160" }.first().id)
+        vm.state.first { !it.loadingNewer }
+        assertEquals(160, vm.messages.first { it.size == 160 }.size) // nada do que estava à vista saiu da lista
+
+        // Voltar às recentes troca o trecho pelo fim da conversa.
+        vm.goToLatest()
+        val back = vm.state.first { it.latestTick == 1 && !it.returning }
+        assertNull(back.error)
+        assertEquals("m300", vm.messages.first { it.firstOrNull()?.id == "m300" }.first().id)
+        assertFalse(session.chat.isDetached("c1"))
     }
 
     @Test
@@ -121,11 +154,12 @@ class ChatViewModelTest {
         val vm = viewModel(MessageTarget("apagada", "2026-01-01T00:01:40.5Z"))
 
         val state = vm.state.first { !it.locating }
-        assertEquals(FocusProblem.Missing, state.focusProblem)
+        assertTrue(state.targetMissing)
         assertNull(state.focusId)
         assertNull(state.error)
-        vm.dismissFocusProblem()
-        assertNull(vm.state.value.focusProblem)
+        assertEquals("m120", vm.messages.first { it.isNotEmpty() }.first().id) // a conversa fica no fim, como sempre
+        vm.dismissTargetMissing()
+        assertFalse(vm.state.value.targetMissing)
     }
 
     @Test

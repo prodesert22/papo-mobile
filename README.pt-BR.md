@@ -44,7 +44,7 @@ e um [cliente de terminal](https://github.com/prodesert22/papo-tui).
   com marcação de não lidas.
 - Anexos, respostas, edição e exclusão, reações, mensagens fixadas e menções.
 - Busca de mensagens no servidor, por texto e por conversa, autor, menção, link,
-  anexos e data. O resultado abre na conversa.
+  anexos e data. O resultado abre na conversa, por mais antigo que seja.
 - Formatação Markdown, prévias de links, miniaturas de imagem com visualizador
   em tela cheia, indicador de digitação e presença.
 
@@ -62,9 +62,6 @@ A lista completa está nas [notas da versão 0.1.0](releases/v0.1.0.md) (em ingl
 - Sem notificações push: as mensagens só chegam com o app aberto.
 - Sem caixa de notificações, edição de perfil, preferências do usuário, bloqueio
   de usuários e administração do servidor.
-- Um resultado da busca só abre na conversa quando está entre as últimas
-  mensagens dela, cerca de mil; os mais antigos aparecem na lista, mas não abrem
-  no contexto.
 - Nas chamadas: sem o som da tela transmitida, sem volume por pessoa e sem
   escolha de fone Bluetooth.
 - Vídeos anexados só tocam depois de baixados, GIFs não são animados e os emojis

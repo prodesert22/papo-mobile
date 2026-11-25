@@ -59,6 +59,7 @@ class ChatStore(
     private val io: CoroutineDispatcher,
 ) {
     private val q = db.chatQueries
+    private val meta = db.metaQueries
     private val syncMutex = Mutex()
 
     val channels: StateFlow<List<Channel>> =
@@ -72,6 +73,15 @@ class ChatStore(
     val users: StateFlow<Map<String, User>> =
         q.selectUsers().asFlow().mapToList(io).map { rows -> rows.associate { it.id to it.toModel() } }
             .stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
+    /**
+     * Canais cujo trecho guardado não chega à mensagem mais nova: o usuário abriu
+     * uma mensagem antiga e está lendo em volta dela. A marca fica no banco, junto
+     * das mensagens que descreve, e some quando o trecho volta a alcançar o fim.
+     */
+    val detached: StateFlow<Set<String>> =
+        meta.keysWithPrefix(DETACHED).asFlow().mapToList(io).map { keys -> keys.mapTo(HashSet()) { it.removePrefix(DETACHED) } }
+            .stateIn(scope, SharingStarted.Eagerly, emptySet())
 
     private val _presence = MutableStateFlow<Map<String, Presence>>(emptyMap())
     val presence: StateFlow<Map<String, Presence>> = _presence.asStateFlow()
@@ -110,7 +120,8 @@ class ChatStore(
                 if (state == WsState.Connected) {
                     notifyActivity(force = true)
                     runSync()
-                    viewing?.let { runCatching { refreshLatest(it) } }
+                    // Quem lê um trecho antigo fica onde está; o fim do histórico vem quando voltar para ele.
+                    viewing?.let { if (!isDetached(it)) runCatching { refreshLatest(it) } }
                 }
             }
         }
@@ -182,10 +193,12 @@ class ChatStore(
     /**
      * Busca a página mais recente do canal. Se ela não encosta no que já está
      * guardado, o que é mais antigo é descartado: assim nunca fica um buraco
-     * invisível no meio do histórico.
+     * invisível no meio do histórico. Depois dela o trecho guardado volta a
+     * terminar na mensagem mais nova, mesmo que antes estivesse longe do fim.
      */
     suspend fun refreshLatest(channelId: String) {
         val page = api.messages(channelId, limit = PAGE_SIZE)
+        var discarded = false
         withContext(io) {
             q.transaction {
                 val fetched = page.messages
@@ -194,13 +207,17 @@ class ChatStore(
                     val stored = q.newestMessage(channelId).executeAsOneOrNull()
                     if (stored != null && overlap == 0L && page.hasMore) {
                         q.deleteMessagesOlderThan(channelId, fetched.minOf { it.createdUs() })
+                        discarded = true
                     }
                 } else if (!page.hasMore) {
                     q.deleteChannelMessages(channelId)
                 }
                 fetched.forEach(::upsert)
+                meta.remove(DETACHED + channelId)
             }
         }
+        // O que valia para o trecho descartado não vale para o novo: há histórico antes desta página.
+        if (discarded) hasOlder.remove(channelId)
         if (!page.hasMore && (hasOlder[channelId] != false)) {
             val stored = withContext(io) { q.selectMessages(channelId, PAGE_SIZE + 1L).executeAsList().size }
             if (stored <= page.messages.size) hasOlder[channelId] = false
@@ -208,46 +225,102 @@ class ChatStore(
     }
 
     /** Carrega a página anterior à mensagem mais antiga guardada. Devolve false quando o histórico acabou. */
-    suspend fun loadOlder(channelId: String, pageSize: Int = PAGE_SIZE): Boolean {
+    suspend fun loadOlder(channelId: String): Boolean {
         if (hasOlder[channelId] == false) return false
         val oldest = withContext(io) { q.oldestMessage(channelId).executeAsOneOrNull() } ?: return false
-        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = pageSize)
+        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = PAGE_SIZE)
         withContext(io) { q.transaction { page.messages.forEach(::upsert) } }
         hasOlder[channelId] = page.hasMore && page.messages.isNotEmpty()
         return hasOlder[channelId] == true
     }
 
     /**
-     * Procura uma mensagem no histórico do canal para a tela poder rolar até ela.
-     * O trecho guardado é sempre contínuo a partir da mensagem mais nova, então
-     * uma mensagem antiga só entra nele junto com tudo o que veio depois dela:
-     * as páginas anteriores são buscadas uma a uma, até [MAX_LOCATE_PAGES].
-     * [createdAtIso], quando conhecido, encerra a procura assim que o trecho
-     * passa do instante da mensagem sem ela aparecer.
+     * Traz uma mensagem para o trecho guardado, para a tela poder rolar até ela.
+     * [createdAtIso] é o instante dela como o servidor informou: com ele o cursor
+     * `since` + `last_id` vai direto à vizinhança, sem percorrer o histórico. Uma
+     * leitura traz o que veio depois dela e outra, a partir da mensagem seguinte,
+     * a página que termina nela.
+     *
+     * Se a vizinhança encosta no trecho guardado, os dois viram um só. Senão há
+     * um buraco entre eles, e o trecho guardado dá lugar à vizinhança: o canal
+     * fica marcado em [detached] até [loadNewer] ou [refreshLatest] o levarem de
+     * volta ao fim do histórico.
      */
-    suspend fun locate(channelId: String, messageId: String, createdAtIso: String? = null): Located {
-        val target = createdAtIso?.let(::microsOf)?.takeIf { it > 0 }
-        repeat(MAX_LOCATE_PAGES + 1) { page ->
-            val (position, oldest) = withContext(io) {
-                val row = q.selectMessage(messageId).executeAsOneOrNull()?.takeIf { it.channel_id == channelId }
-                val position = row?.let { q.countMessagesNewerThan(channelId, it.created_us, it.id).executeAsOne() }
-                position to q.oldestMessage(channelId).executeAsOneOrNull()
+    suspend fun locate(channelId: String, messageId: String, createdAtIso: String): Located {
+        position(channelId, messageId)?.let { return Located.Found(it) }
+        val after = api.messages(channelId, since = createdAtIso, lastId = messageId, order = "asc", limit = AROUND_NEWER)
+        // Nada depois dela: seria a mais nova do canal, e a página mais recente já foi lida.
+        val next = after.messages.firstOrNull() ?: return Located.Missing
+        val before = api.messages(channelId, since = next.createdAt, lastId = next.id, limit = PAGE_SIZE)
+        if (before.messages.none { it.id == messageId }) return Located.Missing
+        val around = before.messages + after.messages
+        withContext(io) {
+            q.transaction {
+                val overlaps = q.countMessagesIn(around.map { it.id }).executeAsOne() > 0
+                if (!overlaps) q.deleteChannelMessages(channelId)
+                around.forEach(::upsert)
+                when {
+                    !after.hasMore -> meta.remove(DETACHED + channelId) // a vizinhança chega à mensagem mais nova
+                    !overlaps -> meta.put(DETACHED + channelId, "1")
+                }
             }
-            if (position != null) return Located.Found(position.toInt())
-            if (oldest == null || hasOlder[channelId] == false) return Located.Missing
-            if (target != null && oldest.created_us < target) return Located.Missing
-            if (page == MAX_LOCATE_PAGES) return Located.TooOld
-            loadOlder(channelId, LOCATE_PAGE_SIZE)
+            q.oldestMessage(channelId).executeAsOneOrNull()?.id
+        }.let { oldest ->
+            // Se a página anterior passou a ser o começo do trecho, é ela que diz se há mais para trás.
+            if (oldest == before.messages.last().id) hasOlder[channelId] = before.hasMore
         }
-        return Located.TooOld
+        return position(channelId, messageId)?.let { Located.Found(it) } ?: Located.Missing
+    }
+
+    /** Quantas mensagens guardadas do canal são mais novas que esta; null se ela não está guardada nele. */
+    private suspend fun position(channelId: String, messageId: String): Int? = withContext(io) {
+        val row = q.selectMessage(messageId).executeAsOneOrNull()?.takeIf { it.channel_id == channelId }
+        row?.let { q.countMessagesNewerThan(channelId, it.created_us, it.id).executeAsOne().toInt() }
+    }
+
+    suspend fun isDetached(channelId: String): Boolean = withContext(io) { detachedNow(channelId) }
+
+    /** Só dentro de [io]: lê a marca direto do banco, na mesma transação de quem pergunta. */
+    private fun detachedNow(channelId: String): Boolean = meta.get(DETACHED + channelId).executeAsOneOrNull() != null
+
+    /**
+     * Com o trecho guardado longe do fim do histórico, carrega a página que vem
+     * depois da mensagem mais nova dele. Devolve quantas mensagens entraram. Ao
+     * alcançar o fim, o canal volta a receber as mensagens novas.
+     */
+    suspend fun loadNewer(channelId: String): Int {
+        val newest = withContext(io) { q.newestMessage(channelId).executeAsOneOrNull()?.takeIf { detachedNow(channelId) } } ?: return 0
+        val page = api.messages(channelId, since = newest.created_at, lastId = newest.id, order = "asc", limit = PAGE_SIZE)
+        withContext(io) {
+            q.transaction {
+                page.messages.forEach(::upsert)
+                if (!page.hasMore) meta.remove(DETACHED + channelId)
+            }
+        }
+        // O que foi enviado enquanto a última página vinha entra pela leitura do fim do histórico.
+        if (!page.hasMore) refreshLatest(channelId)
+        return page.messages.size
     }
 
     suspend fun send(channelId: String, content: String, replyTo: String?, files: List<OutgoingFile>) {
         val sent = api.sendMessage(channelId, content.trim(), replyTo, files)
-        withContext(io) {
-            q.transaction {
-                upsert(sent)
+        val away = withContext(io) {
+            q.transactionWithResult {
+                val away = detachedNow(sent.channelId)
+                if (!away) upsert(sent)
                 noteLastMessage(sent.channelId, sent.id, sent.createdAt, preview(sent.content, sent.attachments), sent.authorId)
+                away
+            }
+        }
+        if (away) {
+            // Quem escreve lendo um trecho antigo volta para o fim da conversa, onde a mensagem entrou.
+            // Se essa leitura falhar, a mensagem já foi enviada: não é uma falha de envio, e a tela
+            // segue no trecho antigo, de onde o usuário pode pedir de novo as mensagens recentes.
+            try {
+                refreshLatest(sent.channelId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
             }
         }
     }
@@ -359,18 +432,21 @@ class ChatStore(
         when (event) {
             is WsEvent.MessageCreated -> withContext(io) {
                 q.transaction {
-                    q.insertMessageIfAbsent(
-                        id = event.id,
-                        channel_id = event.channelId,
-                        author_id = event.authorId,
-                        content = event.content,
-                        created_at = event.createdAt,
-                        created_us = microsOf(event.createdAt),
-                        reply_to = event.replyTo,
-                        webhook_id = event.webhookId,
-                        external_author = event.externalAuthor?.let { PapoJson.encodeToString(ExternalAuthorDto.serializer(), it) },
-                        attachments = encodeList(AttachmentDto.serializer(), event.attachments),
-                    )
+                    // Num trecho antigo a mensagem nova não entra: ficaria um buraco entre ela e o que está guardado.
+                    if (!detachedNow(event.channelId)) {
+                        q.insertMessageIfAbsent(
+                            id = event.id,
+                            channel_id = event.channelId,
+                            author_id = event.authorId,
+                            content = event.content,
+                            created_at = event.createdAt,
+                            created_us = microsOf(event.createdAt),
+                            reply_to = event.replyTo,
+                            webhook_id = event.webhookId,
+                            external_author = event.externalAuthor?.let { PapoJson.encodeToString(ExternalAuthorDto.serializer(), it) },
+                            attachments = encodeList(AttachmentDto.serializer(), event.attachments),
+                        )
+                    }
                     noteLastMessage(event.channelId, event.id, event.createdAt, preview(event.content, event.attachments), event.authorId)
                 }
                 event.authorId?.let { typingMarks.remove(event.channelId to it) }
@@ -419,6 +495,7 @@ class ChatStore(
                 q.transaction {
                     q.deleteChannel(event.channelId)
                     q.deleteChannelMessages(event.channelId)
+                    meta.remove(DETACHED + event.channelId)
                 }
             }
             is WsEvent.Typing -> {
@@ -595,9 +672,10 @@ class ChatStore(
 
     private companion object {
         const val PAGE_SIZE = 40
-        // Limite de página do servidor e teto de páginas ao procurar uma mensagem antiga.
-        const val LOCATE_PAGE_SIZE = 100
-        const val MAX_LOCATE_PAGES = 10
+        // Ao abrir uma mensagem antiga: o máximo que o servidor entrega do que veio depois dela.
+        // Quanto mais longe essa página chega, maior a chance de encostar no trecho já guardado.
+        const val AROUND_NEWER = 100
+        const val DETACHED = "detached:"
         const val MAX_USER_PAGES = 50
         // O servidor nunca avisa que alguém parou de digitar: o indicador expira aqui.
         val TYPING_THROTTLE = 2.seconds

@@ -78,14 +78,11 @@ data class Message(
 
 /** Resultado de procurar uma mensagem no histórico de um canal. */
 sealed interface Located {
-    /** Está guardada; [position] é quantas mensagens mais novas o canal tem antes dela. */
+    /** Está guardada; [position] é quantas mensagens mais novas o trecho guardado tem antes dela. */
     data class Found(val position: Int) : Located
 
-    /** O histórico foi lido até antes dela e ela não apareceu: foi apagada ou não é deste canal. */
+    /** O servidor não a tem mais neste canal: foi apagada ou nunca foi dele. */
     data object Missing : Located
-
-    /** Fica mais para trás do que o limite de páginas da busca. */
-    data object TooOld : Located
 }
 
 /** online, offline, away ou busy. */
