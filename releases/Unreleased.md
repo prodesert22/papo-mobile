@@ -47,3 +47,6 @@
   Type part of a name, or of an account's label, to narrow the list, without
   caring about accents, and tap one to open it in its account. It uses only
   what the app already has, without asking the servers.
+- While you read further up in a conversation, a **↓ N novas mensagens** button
+  counts what others sent meanwhile without moving what you are reading; tap it
+  to go to the newest. Far from the end, a **↓** button takes you there.

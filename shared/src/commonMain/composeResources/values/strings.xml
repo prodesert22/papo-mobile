@@ -175,6 +175,10 @@
     <string name="outbox_discard">Descartar</string>
     <string name="outbox_cancel_send">Cancelar envio</string>
     <string name="outbox_copy">Copiar</string>
+    <plurals name="chat_new_messages">
+        <item quantity="one">%1$d nova mensagem</item>
+        <item quantity="other">%1$d novas mensagens</item>
+    </plurals>
     <string name="msg_react_more">Mais reações</string>
     <string name="emoji_search">Buscar emoji</string>
     <string name="emoji_search_clear">Limpar busca</string>

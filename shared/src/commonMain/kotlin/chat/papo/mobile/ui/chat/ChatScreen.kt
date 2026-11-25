@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
@@ -103,6 +105,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -129,6 +132,7 @@ import chat.papo.mobile.chat.authorsByRecency
 import chat.papo.mobile.chat.continuesGroup
 import chat.papo.mobile.chat.filterPinned
 import chat.papo.mobile.chat.mentionQueryAt
+import chat.papo.mobile.chat.newArrivals
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.suggestMentions
 import chat.papo.mobile.core.dayKey
@@ -150,6 +154,7 @@ import chat.papo.mobile.resources.chat_go_to_latest
 import chat.papo.mobile.resources.chat_history_start
 import chat.papo.mobile.resources.chat_locating
 import chat.papo.mobile.resources.chat_keyboard
+import chat.papo.mobile.resources.chat_new_messages
 import chat.papo.mobile.resources.chat_pinned
 import chat.papo.mobile.resources.chat_pinned_empty
 import chat.papo.mobile.resources.chat_pinned_filter
@@ -193,7 +198,9 @@ import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
@@ -278,12 +285,19 @@ fun ChatScreen(
     val atBottom by remember(lead) { derivedStateOf { listState.firstVisibleItemIndex <= lead } }
     val newest = messages.firstOrNull()
     var previousNewest by remember { mutableStateOf<String?>(null) }
+    // Mensagens de outras pessoas que chegaram enquanto a lista estava rolada para cima, sem acompanhar o fim.
+    var unseen by remember { mutableIntStateOf(0) }
+    // A lista acompanha a conversa ao vivo. Ao sair de um trecho antigo deixa de acompanhar até o usuário chegar
+    // ao fim: as páginas que `loadNewer` traz até lá estão no histórico, não são mensagens que chegaram.
+    var live by remember { mutableStateOf(true) }
     LaunchedEffect(newest?.id) {
         // Ao inserir um item, a lista mantém o antigo ancorado e o novo fica fora da tela.
         // Se o usuário estava no fim, acompanha a conversa. Mandar uma mensagem já desce a lista (ver `pending`):
         // a confirmação dela, segundos depois, não pode puxar de volta quem já subiu para ler.
         val shifted = messages.indexOfFirst { it.id == previousNewest }
         val wasAtBottom = previousNewest == null || (shifted >= 0 && listState.firstVisibleItemIndex <= shifted + lead)
+        // Quem não acompanhou o fim fica sabendo do que chegou; num trecho antigo não há "novas" a contar.
+        if (!wasAtBottom && !detached && live) unseen += newArrivals(previousNewest, messages, session.userId)
         previousNewest = newest?.id
         // Num trecho antigo, a "mais nova" é só a última carregada: não há conversa a acompanhar.
         if (newest != null && !detached && wasAtBottom) listState.scrollToItem(0)
@@ -292,6 +306,16 @@ fun ChatScreen(
         // O fim de um trecho antigo não é o fim da conversa: marcar ali faria a leitura voltar no tempo.
         if (newest != null && atBottom && !detached) viewModel.markRead(newest)
     }
+    // Chegou ao fim (ou foi para um trecho antigo, que tem aviso próprio): não há mais o que anunciar.
+    LaunchedEffect(atBottom, detached) {
+        if (detached) live = false else if (atBottom) live = true
+        if (atBottom || detached) unseen = 0
+    }
+    // Longe do fim sem nada novo, ainda vale um atalho para voltar.
+    val farFromBottom by remember(lead) { derivedStateOf { listState.firstVisibleItemIndex > lead + FAR_FROM_BOTTOM_ITEMS } }
+    val jumpScope = rememberCoroutineScope()
+    // Altura dos avisos no canto de baixo: o atalho sobe para não cobrir o botão deles.
+    var noticesPx by remember { mutableIntStateOf(0) }
     // Lendo um trecho antigo: perto do fim dele, carrega o que vem depois.
     val canLoadNewer = detached && state.focusId == null && !state.locating
     LaunchedEffect(listState, canLoadNewer, lead) {
@@ -475,7 +499,10 @@ fun ChatScreen(
                         }
                     }
                 }
-                Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    Modifier.align(Alignment.BottomCenter).padding(12.dp).onSizeChanged { noticesPx = it.height },
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     if (state.targetMissing) {
                         NoticeBar(stringResource(Res.string.chat_focus_missing), viewModel::dismissTargetMissing)
                     }
@@ -488,6 +515,17 @@ fun ChatScreen(
                         )
                     }
                     state.error?.let { error -> NoticeBar(error.text(), viewModel::dismissError) }
+                }
+                // Num trecho antigo quem leva de volta ao fim é a `OlderHistoryBar`.
+                if (!detached && (unseen > 0 || farFromBottom)) {
+                    JumpToLatest(
+                        unseen = unseen,
+                        onClick = { jumpScope.launch { listState.animateScrollToItem(0) } },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(12.dp)
+                            .offset { IntOffset(0, if (noticesPx > 0) -(noticesPx + 8.dp.roundToPx()) else 0) },
+                    )
                 }
             }
 
@@ -577,6 +615,41 @@ fun ChatScreen(
     }
     viewing?.let { ImageViewer(session, it) { viewing = null } }
     state.pinnedList?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
+}
+
+/** Quantos itens acima do fim a lista precisa estar para oferecer o atalho sem contagem. */
+private const val FAR_FROM_BOTTOM_ITEMS = 10
+
+/** Atalho para o fim da conversa: com [unseen] a pílula conta o que chegou; sem nada novo, é só a seta. */
+@Composable
+private fun JumpToLatest(unseen: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val hasNew = unseen > 0
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (hasNew) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+        shadowElevation = 4.dp,
+        modifier = modifier,
+    ) {
+        Row(
+            Modifier.heightIn(min = 44.dp).padding(horizontal = if (hasNew) 16.dp else 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.ArrowDownward,
+                // Com a contagem, o texto já diz o que o botão faz.
+                contentDescription = if (hasNew) null else stringResource(Res.string.chat_go_to_latest),
+                modifier = Modifier.size(20.dp),
+            )
+            if (hasNew) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    pluralStringResource(Res.plurals.chat_new_messages, unseen, unseen),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
 }
 
 /** Aviso de que a lista mostra um trecho antigo, com o caminho de volta para o fim da conversa. */
