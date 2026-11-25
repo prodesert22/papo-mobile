@@ -66,6 +66,8 @@ data class Message(
     val createdAtIso: String,
     val edited: Boolean,
     val replyTo: String?,
+    /** Webhook que enviou a mensagem; nulo nas mensagens de gente. */
+    val webhookId: String?,
     val externalAuthor: ExternalAuthorDto?,
     val attachments: List<AttachmentDto>,
     val embeds: List<EmbedDto>,

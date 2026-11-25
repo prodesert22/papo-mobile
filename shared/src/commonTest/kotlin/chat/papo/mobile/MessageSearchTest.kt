@@ -32,6 +32,7 @@ class MessageSearchTest {
         createdAtIso = "",
         edited = false,
         replyTo = null,
+        webhookId = webhook?.let { "wh-$it" },
         externalAuthor = webhook?.let { ExternalAuthorDto(it) },
         attachments = emptyList(),
         embeds = emptyList(),

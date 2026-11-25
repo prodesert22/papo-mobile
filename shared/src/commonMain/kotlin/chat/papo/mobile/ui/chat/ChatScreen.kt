@@ -119,6 +119,7 @@ import chat.papo.mobile.chat.UnicodeEmoji
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.UnicodeEmojis
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.continuesGroup
 import chat.papo.mobile.chat.filterPinned
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.core.dayKey
@@ -182,7 +183,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -349,9 +349,7 @@ fun ChatScreen(session: AccountSession, viewModel: ChatViewModel, onBack: () -> 
                         val message = messages[index]
                         val older = messages.getOrNull(index + 1)
                         val newDay = older == null || older.createdAt?.dayKey() != message.createdAt?.dayKey()
-                        val compact = !newDay && older != null && older.authorId == message.authorId &&
-                            message.replyTo == null && older.externalAuthor?.name == message.externalAuthor?.name &&
-                            closeInTime(older, message)
+                        val compact = older != null && continuesGroup(older, message)
                         Column {
                             if (newDay && (older != null || state.reachedStart)) DaySeparator(message)
                             MessageItem(
@@ -530,12 +528,6 @@ private fun NoticeBar(text: String, onClose: () -> Unit) {
 /** Ao editar, as menções voltam a aparecer como `@nome`; o envio as recodifica se o nome for escolhido de novo. */
 private fun renderForEditing(content: String, users: Map<String, User>): String =
     renderMentions(content) { users[it]?.username }
-
-private fun closeInTime(older: Message, newer: Message): Boolean {
-    val a = older.createdAt ?: return false
-    val b = newer.createdAt ?: return false
-    return b - a < 5.minutes
-}
 
 @Composable
 private fun presenceLabel(status: String?): String = stringResource(
