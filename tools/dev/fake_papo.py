@@ -1119,10 +1119,15 @@ if __name__ == "__main__":
     # 200 emojis: 8 páginas, uns 8 s de carga no app (que espaça as páginas), para ver o carregamento.
     # Os dois animados (GIF e WebP) ocupam as vagas 6 e 7 e não mudam o total de 200.
     names = ["party_parrot", "ok_hand", "blob_wave", "cat_vibe", "check_ok", *ANIMATED_EMOJIS] + ["emoji_%03d" % i for i in range(8, 201)]
+    # FAKE_ANIMATED_EMOJIS=N faz dos N primeiros `emoji_NNN` animados (GIF e WebP em alternância), para medir o seletor com
+    # uma grade cheia de animações.
+    many_animated = int(os.environ.get("FAKE_ANIMATED_EMOJIS", "0"))
     for i, name in enumerate(names):
         r, g, b = palette[i % len(palette)]
         if name in ANIMATED_EMOJIS:
             image_format, image_blob = ANIMATED_EMOJIS[name]
+        elif 7 <= i < 7 + many_animated:
+            image_format, image_blob = list(ANIMATED_EMOJIS.values())[i % 2]
         else:
             image_format = "PNG"
             # FAKE_EMOJI_SMALL=1 usa imagens minúsculas, para separar o custo dos dados do resto da carga.
