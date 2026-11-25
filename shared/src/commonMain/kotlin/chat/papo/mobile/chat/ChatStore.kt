@@ -199,9 +199,11 @@ class ChatStore(
     suspend fun refreshLatest(channelId: String) {
         val page = api.messages(channelId, limit = PAGE_SIZE)
         var discarded = false
+        var arrived = emptyList<MessageDto>()
         withContext(io) {
             q.transaction {
                 val fetched = page.messages
+                arrived = newlyMine(fetched)
                 if (fetched.isNotEmpty()) {
                     val overlap = q.countMessagesIn(fetched.map { it.id }).executeAsOne()
                     val stored = q.newestMessage(channelId).executeAsOneOrNull()
@@ -216,6 +218,7 @@ class ChatStore(
                 meta.remove(DETACHED + channelId)
             }
         }
+        confirmArrived(arrived)
         // O que valia para o trecho descartado não vale para o novo: há histórico antes desta página.
         if (discarded) hasOlder.remove(channelId)
         if (!page.hasMore && (hasOlder[channelId] != false)) {
@@ -224,11 +227,14 @@ class ChatStore(
         }
     }
 
-    /** Carrega a página anterior à mensagem mais antiga guardada. Devolve false quando o histórico acabou. */
-    suspend fun loadOlder(channelId: String): Boolean {
+    /**
+     * Carrega a página anterior à mensagem mais antiga guardada, de até [limit] mensagens (o servidor
+     * entrega no máximo 100). Devolve false quando o histórico acabou.
+     */
+    suspend fun loadOlder(channelId: String, limit: Int = PAGE_SIZE): Boolean {
         if (hasOlder[channelId] == false) return false
         val oldest = withContext(io) { q.oldestMessage(channelId).executeAsOneOrNull() } ?: return false
-        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = PAGE_SIZE)
+        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = limit)
         withContext(io) { q.transaction { page.messages.forEach(::upsert) } }
         hasOlder[channelId] = page.hasMore && page.messages.isNotEmpty()
         return hasOlder[channelId] == true
@@ -272,10 +278,43 @@ class ChatStore(
         return position(channelId, messageId)?.let { Located.Found(it) } ?: Located.Missing
     }
 
+    /**
+     * Procura uma mensagem que está antes do trecho guardado, sem saber o instante dela: é o caso da
+     * mensagem respondida, porque `reply_to` traz só o id e o servidor não lê uma mensagem avulsa.
+     * Sem instante não há cursor que leve até ela, então a única saída é paginar para trás a partir
+     * da mais antiga guardada, conferindo cada página. A resposta sempre aponta para uma mensagem do
+     * mesmo canal e mais antiga, e o trecho guardado não tem buracos: se ela existe, está atrás dele.
+     *
+     * Chegar ao começo do canal sem achá-la é [Located.Missing] (foi apagada). Cada página traz
+     * [ORIGINAL_PAGE_SIZE] mensagens e a procura desiste depois de [maxPages] delas com
+     * [Located.NotReached]: o que foi lido continua guardado, e chamar de novo segue dali.
+     */
+    suspend fun locateOlder(channelId: String, messageId: String, maxPages: Int = ORIGINAL_MAX_PAGES): Located {
+        require(maxPages > 0) { "maxPages precisa ser positivo: $maxPages" }
+        position(channelId, messageId)?.let { return Located.Found(it) }
+        repeat(maxPages) {
+            val more = loadOlder(channelId, ORIGINAL_PAGE_SIZE)
+            position(channelId, messageId)?.let { return Located.Found(it) }
+            if (!more) return Located.Missing
+        }
+        return Located.NotReached
+    }
+
     /** Quantas mensagens guardadas do canal são mais novas que esta; null se ela não está guardada nele. */
     private suspend fun position(channelId: String, messageId: String): Int? = withContext(io) {
         val row = q.selectMessage(messageId).executeAsOneOrNull()?.takeIf { it.channel_id == channelId }
         row?.let { q.countMessagesNewerThan(channelId, it.created_us, it.id).executeAsOne().toInt() }
+    }
+
+    /** Das mensagens de uma página, as minhas que o banco ainda não tinha. Só dentro de [io], antes de gravar a página. */
+    private fun newlyMine(page: List<MessageDto>): List<MessageDto> =
+        page.filter { it.authorId == myUserId && q.selectMessage(it.id).executeAsOneOrNull() == null }
+
+    /** Uma mensagem minha que veio numa página é a que ficou incerta na fila de envio, se for igual a ela e tão nova quanto. */
+    private fun confirmArrived(arrived: List<MessageDto>) {
+        arrived.sortedBy { it.createdUs() }.forEach {
+            queue.confirm(it.channelId, it.content, it.replyTo, it.attachments.size, parseInstant(it.createdAt))
+        }
     }
 
     suspend fun isDetached(channelId: String): Boolean = withContext(io) { detachedNow(channelId) }
@@ -291,19 +330,39 @@ class ChatStore(
     suspend fun loadNewer(channelId: String): Int {
         val newest = withContext(io) { q.newestMessage(channelId).executeAsOneOrNull()?.takeIf { detachedNow(channelId) } } ?: return 0
         val page = api.messages(channelId, since = newest.created_at, lastId = newest.id, order = "asc", limit = PAGE_SIZE)
+        var arrived = emptyList<MessageDto>()
         withContext(io) {
             q.transaction {
+                arrived = newlyMine(page.messages)
                 page.messages.forEach(::upsert)
                 if (!page.hasMore) meta.remove(DETACHED + channelId)
             }
         }
+        confirmArrived(arrived)
         // O que foi enviado enquanto a última página vinha entra pela leitura do fim do histórico.
         if (!page.hasMore) refreshLatest(channelId)
         return page.messages.size
     }
 
-    suspend fun send(channelId: String, content: String, replyTo: String?, files: List<OutgoingFile>) {
-        val sent = api.sendMessage(channelId, content.trim(), replyTo, files)
+    // Fila de envio
+
+    private val queue = Outbox(scope) { message, onProgress -> deliver(message, onProgress) }
+
+    /** O que o usuário mandou e o servidor ainda não confirmou, de todos os canais, na ordem do envio. */
+    val outbox: StateFlow<List<PendingMessage>> get() = queue.pending
+
+    /** Põe a mensagem na fila de envio do canal, que segue mesmo se a tela sair. Devolve o id local dela. */
+    fun enqueue(channelId: String, content: String, replyTo: String?, files: List<OutgoingFile>): String =
+        queue.enqueue(channelId, content, replyTo, files)
+
+    /** Manda de novo o que falhou. Uma mensagem incerta só vai com [confirmedDuplicate]: ela pode sair duplicada. */
+    fun retry(localId: String, confirmedDuplicate: Boolean = false): Boolean = queue.retry(localId, confirmedDuplicate)
+
+    /** Tira da fila; se estava saindo, cancela o envio. */
+    fun withdraw(localId: String) = queue.withdraw(localId)
+
+    private suspend fun deliver(message: PendingMessage, onProgress: (sent: Long, total: Long?) -> Unit) {
+        val sent = api.sendMessage(message.channelId, message.content, message.replyToId, message.files, onProgress)
         val away = withContext(io) {
             q.transactionWithResult {
                 val away = detachedNow(sent.channelId)
@@ -323,6 +382,11 @@ class ChatStore(
             } catch (_: Exception) {
             }
         }
+    }
+
+    /** A mensagem como está guardada, sem ir ao servidor; null se não está no banco ou é de outro canal. */
+    suspend fun storedMessage(channelId: String, id: String): Message? = withContext(io) {
+        q.selectMessage(id).executeAsOneOrNull()?.takeIf { it.channel_id == channelId }?.toModel()
     }
 
     suspend fun edit(messageId: String, content: String) {
@@ -430,27 +494,37 @@ class ChatStore(
 
     internal suspend fun handle(event: WsEvent) {
         when (event) {
-            is WsEvent.MessageCreated -> withContext(io) {
-                q.transaction {
-                    // Num trecho antigo a mensagem nova não entra: ficaria um buraco entre ela e o que está guardado.
-                    if (!detachedNow(event.channelId)) {
-                        q.insertMessageIfAbsent(
-                            id = event.id,
-                            channel_id = event.channelId,
-                            author_id = event.authorId,
-                            content = event.content,
-                            created_at = event.createdAt,
-                            created_us = microsOf(event.createdAt),
-                            reply_to = event.replyTo,
-                            webhook_id = event.webhookId,
-                            external_author = event.externalAuthor?.let { PapoJson.encodeToString(ExternalAuthorDto.serializer(), it) },
-                            attachments = encodeList(AttachmentDto.serializer(), event.attachments),
-                        )
+            is WsEvent.MessageCreated -> {
+                val fresh = withContext(io) {
+                    val fresh = q.transactionWithResult {
+                        // Num trecho antigo a mensagem nova não entra: ficaria um buraco entre ela e o que está guardado.
+                        val insert = !detachedNow(event.channelId)
+                        val fresh = insert && q.selectMessage(event.id).executeAsOneOrNull() == null
+                        if (insert) {
+                            q.insertMessageIfAbsent(
+                                id = event.id,
+                                channel_id = event.channelId,
+                                author_id = event.authorId,
+                                content = event.content,
+                                created_at = event.createdAt,
+                                created_us = microsOf(event.createdAt),
+                                reply_to = event.replyTo,
+                                webhook_id = event.webhookId,
+                                external_author = event.externalAuthor?.let { PapoJson.encodeToString(ExternalAuthorDto.serializer(), it) },
+                                attachments = encodeList(AttachmentDto.serializer(), event.attachments),
+                            )
+                        }
+                        noteLastMessage(event.channelId, event.id, event.createdAt, preview(event.content, event.attachments), event.authorId)
+                        fresh
                     }
-                    noteLastMessage(event.channelId, event.id, event.createdAt, preview(event.content, event.attachments), event.authorId)
+                    event.authorId?.let { typingMarks.remove(event.channelId to it) }
+                    publishTyping()
+                    fresh
                 }
-                event.authorId?.let { typingMarks.remove(event.channelId to it) }
-                publishTyping()
+                // Mensagem minha que chegou antes da resposta do POST: sai da fila de envio, senão apareceria duas vezes.
+                // Se ela já estava guardada (a resposta chegou antes), a entrada não existe mais, e uma igual que
+                // ainda esteja saindo é outra mensagem: não se mexe nela.
+                if (fresh && event.authorId == myUserId) queue.confirm(event.channelId, event.content, event.replyTo, event.attachments.size)
             }
             is WsEvent.MessageEdited -> withContext(io) { q.editMessage(event.content, event.editedAt, event.id) }
             is WsEvent.MessageDeleted -> withContext(io) { q.deleteMessage(event.id) }
@@ -613,6 +687,7 @@ class ChatStore(
         createdAtIso = createdAt,
         edited = editedAt != null,
         replyTo = replyTo,
+        webhookId = webhookId,
         externalAuthor = externalAuthor,
         attachments = attachments,
         embeds = embeds,
@@ -629,6 +704,7 @@ class ChatStore(
         createdAtIso = created_at,
         edited = edited_at != null,
         replyTo = reply_to,
+        webhookId = webhook_id,
         externalAuthor = external_author?.let { runCatching { PapoJson.decodeFromString(ExternalAuthorDto.serializer(), it) }.getOrNull() },
         attachments = decodeList(AttachmentDto.serializer(), attachments),
         embeds = decodeList(EmbedDto.serializer(), embeds),
@@ -644,6 +720,7 @@ class ChatStore(
         topic = topic,
         parentId = parent_id,
         lastMessageId = last_message_id,
+        lastMessageAt = last_message_at,
         lastMessageText = last_message_text,
         lastMessageAuthor = last_message_author,
         lastReadMessage = last_read_message,
@@ -675,6 +752,9 @@ class ChatStore(
         // Ao abrir uma mensagem antiga: o máximo que o servidor entrega do que veio depois dela.
         // Quanto mais longe essa página chega, maior a chance de encostar no trecho já guardado.
         const val AROUND_NEWER = 100
+        // Procura da mensagem respondida: páginas do tamanho máximo do servidor, e quantas ler antes de desistir.
+        const val ORIGINAL_PAGE_SIZE = 100
+        const val ORIGINAL_MAX_PAGES = 5
         const val DETACHED = "detached:"
         const val MAX_USER_PAGES = 50
         // O servidor nunca avisa que alguém parou de digitar: o indicador expira aqui.

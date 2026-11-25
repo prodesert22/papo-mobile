@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Tag
@@ -59,6 +60,7 @@ import chat.papo.mobile.resources.channels_direct
 import chat.papo.mobile.resources.channels_in_voice
 import chat.papo.mobile.resources.channels_new_dm
 import chat.papo.mobile.resources.channels_none
+import chat.papo.mobile.resources.channels_open_chat
 import chat.papo.mobile.resources.channels_reconnecting
 import chat.papo.mobile.resources.channels_sync_failed
 import chat.papo.mobile.resources.channels_uncategorized
@@ -123,8 +125,10 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
                 SectionHeader(group.category?.name ?: stringResource(Res.string.channels_uncategorized))
             }
             items(group.channels, key = { "ch-" + it.id }) { channel ->
-                ChannelRow(channel, voice[channel.id].orEmpty().size) {
-                    if (channel.type == ChannelType.Voice) onJoinVoice(channel.id) else onOpen(channel.id)
+                val isVoice = channel.type == ChannelType.Voice
+                // Tocar no canal de voz entra na chamada; o chat dele abre pelo botão no fim da linha.
+                ChannelRow(channel, voice[channel.id].orEmpty().size, onOpenChat = if (isVoice) ({ onOpen(channel.id) }) else null) {
+                    if (isVoice) onJoinVoice(channel.id) else onOpen(channel.id)
                 }
             }
         }
@@ -173,11 +177,17 @@ private fun SectionHeader(title: String, action: @Composable () -> Unit = {}) {
 }
 
 @Composable
-private fun ChannelRow(channel: Channel, inVoice: Int, onClick: () -> Unit) {
+private fun ChannelRow(channel: Channel, inVoice: Int, onOpenChat: (() -> Unit)?, onClick: () -> Unit) {
     val accent = LocalPapoColors.current.accent
     val emphasis = if (channel.unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    // Com o botão de chat no fim a linha ganha a altura dele, então o recuo de cima e de baixo sai.
+    val hasChatButton = onOpenChat != null
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp),
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = if (hasChatButton) 4.dp else 16.dp)
+            .padding(vertical = if (hasChatButton) 0.dp else 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -205,6 +215,11 @@ private fun ChannelRow(channel: Channel, inVoice: Int, onClick: () -> Unit) {
             }
         }
         if (channel.unread) Box(Modifier.size(9.dp).background(accent, CircleShape))
+        if (onOpenChat != null) {
+            IconButton(onClick = onOpenChat) {
+                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = stringResource(Res.string.channels_open_chat))
+            }
+        }
     }
 }
 

@@ -1,20 +1,32 @@
 package chat.papo.mobile.ui.chat
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.Draft
+import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.Located
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.PendingMessage
 import chat.papo.mobile.chat.encodeMentions
+import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.data.api.OutgoingFile
+import chat.papo.mobile.data.ws.WsEvent
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.toUiError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -26,7 +38,8 @@ data class ChatUiState(
     val replyTo: Message? = null,
     val editing: Message? = null,
     val files: List<OutgoingFile> = emptyList(),
-    val sending: Boolean = false,
+    /** Salvando a edição de uma mensagem (editar segue síncrono; enviar não trava o compositor). */
+    val savingEdit: Boolean = false,
     val loadingOlder: Boolean = false,
     val reachedStart: Boolean = false,
     val loadedOnce: Boolean = false,
@@ -36,7 +49,7 @@ data class ChatUiState(
     val locating: Boolean = false,
     /** Mensagem pedida ao abrir, já ao alcance da lista: a tela rola até ela e a destaca. */
     val focusId: String? = null,
-    /** A mensagem pedida ao abrir não existe mais na conversa. */
+    /** A mensagem procurada (pedida ao abrir ou original de uma resposta) não existe mais na conversa. */
     val targetMissing: Boolean = false,
     /** Lendo um trecho antigo: carregando o que vem depois dele. */
     val loadingNewer: Boolean = false,
@@ -44,6 +57,10 @@ data class ChatUiState(
     val returning: Boolean = false,
     /** Muda a cada volta às mensagens recentes, para a tela rolar até o fim. */
     val latestTick: Int = 0,
+    /** Ids de mensagens que o servidor não tem mais: a prévia de quem as respondeu avisa e deixa de ser tocável. */
+    val missingReplies: Set<String> = emptySet(),
+    /** Id da original que a procura não alcançou no limite de páginas: a tela oferece continuar de onde parou. */
+    val replyNotReached: String? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -58,6 +75,11 @@ class ChatViewModel(
     val messages: StateFlow<List<Message>> = limit
         .flatMapLatest { chat.messages(channelId, it) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** O que o usuário mandou nesta conversa e o servidor ainda não confirmou, do mais antigo ao mais novo. */
+    val pending: StateFlow<List<PendingMessage>> = chat.outbox
+        .map { all -> all.filter { it.channelId == channelId } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, chat.outbox.value.filter { it.channelId == channelId })
 
     private val _state = MutableStateFlow(ChatUiState(locating = target != null))
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -75,17 +97,79 @@ class ChatViewModel(
         viewModelScope.launch { runCatching { chat.loadPinned(channelId) } }
     }
 
+    /** Mensagens com uma reação em voo; só a thread principal mexe nele. */
+    private val reacting = HashSet<String>()
+
+    init {
+        // O servidor avisa quando uma mensagem é apagada: quem a respondeu passa a mostrar isso sem percorrer o histórico.
+        viewModelScope.launch {
+            session.ws.events.collect { if (it is WsEvent.MessageDeleted) onMessageDeleted(it) }
+        }
+    }
+
     private suspend fun locate(target: MessageTarget) {
         var located: Located? = null
         attempt { located = chat.locate(channelId, target.id, target.createdAtIso) }
-        when (val result = located) {
+        settle(target.id, located)
+    }
+
+    /** Aplica o resultado de uma procura: rola até a mensagem, avisa que sumiu ou que a procura parou. [located] nulo é falha (já no erro). */
+    private fun settle(id: String, located: Located?) {
+        when (located) {
             is Located.Found -> {
                 // A janela da tela precisa alcançar a mensagem e sobrar contexto antes dela.
-                limit.update { maxOf(it, result.position + PAGE) }
-                _state.update { it.copy(locating = false, focusId = target.id) }
+                limit.update { maxOf(it, located.position + PAGE) }
+                _state.update { it.copy(locating = false, focusId = id) }
             }
-            Located.Missing -> _state.update { it.copy(locating = false, targetMissing = true) }
+            Located.Missing -> _state.update {
+                it.copy(locating = false, targetMissing = true, missingReplies = it.missingReplies.plusBounded(id))
+            }
+            Located.NotReached -> _state.update { it.copy(locating = false, replyNotReached = id) }
             null -> _state.update { it.copy(locating = false) }
+        }
+    }
+
+    /** Leva a tela à mensagem que [message] responde, procurando para trás no histórico se ela não está carregada. */
+    fun openReply(message: Message) {
+        searchOriginal(message.replyTo ?: return)
+    }
+
+    /** Segue a procura que parou no limite de páginas, a partir da mensagem mais antiga já carregada. */
+    fun continueReplySearch() {
+        searchOriginal(_state.value.replyNotReached ?: return)
+    }
+
+    fun dismissReplyNotReached() = _state.update { it.copy(replyNotReached = null) }
+
+    private fun searchOriginal(id: String) {
+        val s = _state.value
+        // Uma procura por vez, e a original já dada como apagada não se procura de novo.
+        if (s.locating || s.returning || id in s.missingReplies) return
+        _state.update { it.copy(locating = true, replyNotReached = null, focusId = null) }
+        viewModelScope.launch {
+            var located: Located? = null
+            attempt { located = chat.locateOlder(channelId, id) }
+            settle(id, located)
+        }
+    }
+
+    internal fun onMessageDeleted(event: WsEvent.MessageDeleted) {
+        if (event.channelId == channelId) noteMissing(event.id)
+    }
+
+    private fun noteMissing(id: String) = _state.update { it.copy(missingReplies = it.missingReplies.plusBounded(id)) }
+
+    /** Duplo toque: alterna o 👍 padrão na mensagem. Ignorado enquanto a reação anterior dela ainda está em voo. */
+    fun quickReact(message: Message) {
+        if (!reacting.add(message.id)) return
+        viewModelScope.launch {
+            try {
+                // A linha da tela pode estar um passo atrás do banco: decide o "já reagi" pelo que está guardado.
+                val current = messages.value.firstOrNull { it.id == message.id } ?: message
+                attempt { chat.toggleReaction(current, null, EmojiPickerModel.DEFAULT_REACTIONS.first()) }
+            } finally {
+                reacting.remove(message.id)
+            }
         }
     }
 
@@ -119,7 +203,11 @@ class ChatViewModel(
     /** A tela desta conversa voltou a ser a visível. */
     fun onVisible() = chat.setViewing(channelId)
 
-    fun clearFocus() = _state.update { it.copy(focusId = null) }
+    /**
+     * Termina o destaque. Com [id], só vale se o destaque ainda é dessa mensagem: a tela chama isto ao cancelar o efeito
+     * do destaque anterior, e sem a conferência esse aviso atrasado apagaria o destaque que acabou de começar.
+     */
+    fun clearFocus(id: String? = null) = _state.update { if (id == null || it.focusId == id) it.copy(focusId = null) else it }
 
     fun dismissTargetMissing() = _state.update { it.copy(targetMissing = false) }
 
@@ -148,35 +236,132 @@ class ChatViewModel(
 
     fun removeFile(file: OutgoingFile) = _state.update { it.copy(files = it.files - file) }
 
-    fun startReply(message: Message) = _state.update { it.copy(replyTo = message, editing = null) }
+    fun startReply(message: Message) {
+        if (_state.value.editing != null) finishEdit()
+        _state.update { it.copy(replyTo = message) }
+        saveDraft()
+    }
 
-    fun startEdit(message: Message) = _state.update { it.copy(editing = message, replyTo = null, files = emptyList()) }
+    fun startEdit(message: Message) {
+        // Editar uma segunda mensagem em seguida volta ao mesmo rascunho de antes, não ao texto da primeira.
+        if (stashed == null) stashed = StashedDraft(draft.text, _state.value.replyTo)
+        val shown = renderMentions(message.content) { chat.users.value[it]?.username }
+        draft = TextFieldValue(shown, TextRange(shown.length))
+        _state.update { it.copy(editing = message, replyTo = null, files = emptyList()) }
+    }
 
-    fun cancelContext() = _state.update { it.copy(replyTo = null, editing = null) }
-
-    fun dismissError() = _state.update { it.copy(error = null) }
-
-    /** Envia (ou salva a edição). Chama [onSent] quando o rascunho pode ser limpo. */
-    fun submit(text: String, onSent: () -> Unit) {
-        val s = _state.value
-        if (s.sending || (text.isBlank() && s.files.isEmpty())) return
-        val content = encodeMentions(text, pickedMentions)
-        _state.update { it.copy(sending = true, error = null) }
-        viewModelScope.launch {
-            val ok = attempt {
-                val editing = s.editing
-                if (editing != null) chat.edit(editing.id, content) else chat.send(channelId, content, s.replyTo?.id, s.files)
-            }
-            if (ok) {
-                pickedMentions.clear()
-                _state.update { it.copy(replyTo = null, editing = null, files = emptyList()) }
-                onSent()
-            }
-            _state.update { it.copy(sending = false) }
+    fun cancelContext() {
+        if (_state.value.editing != null) {
+            finishEdit()
+        } else {
+            _state.update { it.copy(replyTo = null) }
+            saveDraft()
         }
     }
 
-    fun delete(message: Message) = launch { chat.delete(message.id) }
+    fun dismissError() = _state.update { it.copy(error = null) }
+
+    // Rascunho
+
+    /** O que está escrito no compositor. Mora aqui, e não na tela, para sobreviver a sair da conversa e voltar. */
+    var draft by mutableStateOf(TextFieldValue(""))
+        private set
+
+    /** Texto e resposta de antes de uma edição, para voltar a eles quando ela acabar. Enquanto existe, nada é guardado. */
+    private var stashed: StashedDraft? = null
+
+    /** O usuário já mexeu no texto: o que o banco devolver não pode sobrescrevê-lo. */
+    private var textChanged = false
+
+    private class StashedDraft(val text: String, val replyTo: Message?)
+
+    init {
+        viewModelScope.launch { restoreDraft() }
+    }
+
+    /** O compositor mudou (digitação, emoji, menção escolhida): guarda o rascunho e avisa que está digitando. */
+    fun onDraftChange(value: TextFieldValue) {
+        val changed = value.text != draft.text
+        draft = value
+        if (!changed) return
+        textChanged = true
+        if (value.text.isNotEmpty()) onTyping()
+        saveDraft()
+    }
+
+    /** Guarda o compositor como rascunho da conversa; durante uma edição o que vale é o de antes dela. */
+    private fun saveDraft() {
+        if (stashed != null) return
+        session.drafts.save(channelId, Draft(draft.text, _state.value.replyTo?.id))
+    }
+
+    /** Lê o rascunho guardado e o põe no compositor, sem pisar no que o usuário já escreveu enquanto o banco respondia. */
+    private suspend fun restoreDraft() {
+        val (saved, reply) = try {
+            val saved = session.drafts.load(channelId) ?: return
+            saved to saved.replyTo?.let { chat.storedMessage(channelId, it) } // null se a mensagem sumiu
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return // sem ler o banco a conversa abre vazia, como se não houvesse rascunho
+        }
+        if (stashed != null) return
+        if (!textChanged) draft = TextFieldValue(saved.text, TextRange(saved.text.length))
+        if (_state.value.replyTo == null) _state.update { it.copy(replyTo = reply) }
+    }
+
+    /** A edição acabou, salva ou cancelada: o compositor volta ao que havia antes dela. */
+    private fun finishEdit() {
+        val before = stashed
+        stashed = null
+        val text = before?.text.orEmpty()
+        draft = TextFieldValue(text, TextRange(text.length))
+        _state.update { it.copy(editing = null, replyTo = before?.replyTo) }
+    }
+
+    /**
+     * Manda o texto do compositor para a fila de envio, que o mostra na hora, ou salva a edição. Ao
+     * enfileirar o compositor e o rascunho guardado são limpos de imediato (se o app fechasse antes de
+     * gravar, o texto já enviado voltaria como rascunho); ao editar, só depois de salvar.
+     */
+    fun submit() {
+        val s = _state.value
+        val text = draft.text
+        if (s.savingEdit || (text.isBlank() && s.files.isEmpty())) return
+        val content = encodeMentions(text, pickedMentions, chat.users.value.values)
+        val editing = s.editing
+        if (editing == null) {
+            chat.enqueue(channelId, content, s.replyTo?.id, s.files)
+            pickedMentions.clear()
+            _state.update { it.copy(replyTo = null, files = emptyList(), error = null) }
+            draft = TextFieldValue("")
+            session.drafts.save(channelId, null)
+            session.drafts.flush()
+            return
+        }
+        _state.update { it.copy(savingEdit = true, error = null) }
+        viewModelScope.launch {
+            val ok = attempt { chat.edit(editing.id, content) }
+            if (ok) {
+                pickedMentions.clear()
+                finishEdit()
+            }
+            _state.update { it.copy(savingEdit = false) }
+        }
+    }
+
+    /** Manda de novo uma mensagem que falhou; a incerta só vai com [confirmedDuplicate]. */
+    fun retry(localId: String, confirmedDuplicate: Boolean = false) {
+        chat.retry(localId, confirmedDuplicate)
+    }
+
+    /** Descarta uma mensagem da fila; se estava saindo, cancela o envio. */
+    fun withdraw(localId: String) = chat.withdraw(localId)
+
+    fun delete(message: Message) = launch {
+        chat.delete(message.id)
+        noteMissing(message.id)
+    }
 
     fun react(message: Message, emojiId: String?, unicode: String?) = launch { chat.toggleReaction(message, emojiId, unicode) }
 
@@ -210,4 +395,12 @@ class ChatViewModel(
         const val PAGE = 60L
         const val MAX_FILES = 10
     }
+}
+
+private const val MAX_MISSING_REPLIES = 200
+
+/** Acrescenta [id] sem passar de [max]: o que foi dado como apagado há mais tempo é esquecido, e uma nova procura confirma de novo. */
+internal fun Set<String>.plusBounded(id: String, max: Int = MAX_MISSING_REPLIES): Set<String> {
+    val all = this - id + id
+    return if (all.size > max) all.drop(all.size - max).toSet() else all
 }

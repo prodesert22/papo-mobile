@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -46,31 +47,51 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFontFamilyResolver
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.EmojiCatalog
+import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiPiece
 import chat.papo.mobile.chat.EmojiText
 import chat.papo.mobile.chat.Markdown
+import chat.papo.mobile.chat.MarkdownBlock
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.TextSpan
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.renderMentions
@@ -81,9 +102,14 @@ import chat.papo.mobile.data.api.ReactionSummaryDto
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_edited
 import chat.papo.mobile.resources.chat_reply_missing
+import chat.papo.mobile.resources.chat_reply_open
+import chat.papo.mobile.resources.chat_reply_unloaded
 import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.chat_unknown_user
 import chat.papo.mobile.resources.msg_download
+import chat.papo.mobile.resources.msg_pinned
+import chat.papo.mobile.resources.msg_quick_react
+import chat.papo.mobile.resources.msg_reply
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.formatBytes
@@ -94,16 +120,35 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import kotlin.io.encoding.Base64
 
-/** Texto já montado de uma mensagem e os emojis do servidor que ele pede como imagem. */
-class MessageText(val text: AnnotatedString, val emojiIds: Set<String>) {
+/** Um pedaço do corpo da mensagem: um texto (parágrafos ou um item de lista) ou uma régua entre textos. */
+sealed interface MessagePart {
+    class Text(val text: AnnotatedString) : MessagePart
+
+    data object Divider : MessagePart
+}
+
+/** Corpo já montado de uma mensagem e os emojis do servidor que ele pede como imagem. */
+class MessageText(val parts: List<MessagePart>, val emojiIds: Set<String>) {
     /** Tem emoji como imagem? Então o `Text` precisa do `inlineContent` de [emojiContent]. */
     val hasImages: Boolean get() = emojiIds.isNotEmpty()
 }
 
 /**
- * Texto da mensagem com Markdown, menções destacadas, links clicáveis e `:nome:` dos
- * emojis do servidor como imagem. [emojiIds] liga nome a id; dentro de código, de link
- * e de menção o `:nome:` continua texto.
+ * Medidas das listas: [step] é o recuo de cada nível e [markerWidth] a largura do marcador com o
+ * espaço que vem depois dele, onde o texto do item começa. Em `sp`, porque o recuo de um parágrafo
+ * só aceita uma unidade por vez.
+ */
+class ListMetrics(val step: TextUnit, val markerWidth: (String) -> TextUnit)
+
+private val DefaultListMetrics = ListMetrics(step = 24.sp, markerWidth = { 24.sp })
+
+/** Espaço sem quebra entre o marcador e o texto do item: o marcador nunca fica sozinho no fim da linha. */
+private const val MARKER_GAP = "\u00A0"
+
+/**
+ * Corpo da mensagem com Markdown, menções destacadas, links clicáveis e `:nome:` dos emojis
+ * do servidor como imagem. [emojiIds] liga nome a id; dentro de código, de link e de menção
+ * o `:nome:` continua texto. Cada item de lista é um texto com recuo pendente, e a régua separa dois textos.
  */
 fun messageText(
     content: String,
@@ -112,49 +157,98 @@ fun messageText(
     codeBackground: Color,
     muted: Color,
     emojiIds: Map<String, String> = emptyMap(),
+    lists: ListMetrics = DefaultListMetrics,
 ): MessageText {
     val used = LinkedHashSet<String>()
-    val text = buildAnnotatedString {
-        for (span in Markdown.parse(content)) {
-            val style = SpanStyle(
-                fontWeight = if (span.bold || span.mentionUserId != null) FontWeight.SemiBold else null,
-                fontStyle = if (span.italic) FontStyle.Italic else null,
-                textDecoration = when {
-                    span.strike -> TextDecoration.LineThrough
-                    span.link != null -> TextDecoration.Underline
-                    else -> null
-                },
-                fontFamily = if (span.code) FontFamily.Monospace else null,
-                background = if (span.code) codeBackground else Color.Unspecified,
-                color = when {
-                    span.link != null || span.mentionUserId != null -> accent
-                    span.quote -> muted
-                    else -> Color.Unspecified
-                },
-            )
-            val plain = when {
-                span.mentionUserId != null -> "@" + (nameOf(span.mentionUserId) ?: "usuário")
-                span.quote -> "▎ " + span.text
-                else -> span.text
-            }
-            when {
-                span.link != null -> withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(plain) }
-                span.code || span.mentionUserId != null -> withStyle(style) { append(plain) }
-                else -> withStyle(style) {
-                    for (piece in EmojiText.split(plain, emojiIds)) {
-                        when (piece) {
-                            is EmojiPiece.Plain -> append(piece.text)
-                            is EmojiPiece.Custom -> {
-                                used += piece.id
-                                appendInlineContent(emojiContentId(piece.id), ":${piece.name}:")
-                            }
-                        }
-                    }
+
+    fun AnnotatedString.Builder.appendEmojis(text: String) {
+        for (piece in EmojiText.split(text, emojiIds)) {
+            when (piece) {
+                is EmojiPiece.Plain -> append(piece.text)
+                is EmojiPiece.Custom -> {
+                    used += piece.id
+                    appendInlineContent(emojiContentId(piece.id), ":${piece.name}:")
                 }
             }
         }
     }
-    return MessageText(text, used)
+
+    fun AnnotatedString.Builder.appendSpans(spans: List<TextSpan>) {
+        for (span in spans) {
+            val style = spanStyle(span, accent, codeBackground, muted)
+            val plain = spanText(span, nameOf)
+            when {
+                span.link != null -> withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(plain) }
+                span.code || span.mentionUserId != null -> withStyle(style) { append(plain) }
+                else -> withStyle(style) { appendEmojis(plain) }
+            }
+        }
+    }
+
+    // Cada linha do item é um texto à parte: a tabulação de um parágrafo vale só para a primeira linha dele (a quebra `\n`
+    // abriria outra "primeira linha"), e assim o texto selecionado e lido pelo leitor de tela também traz uma quebra entre elas.
+    // As linhas de continuação já começam no recuo do texto.
+    fun listItem(item: MarkdownBlock.ListItem): List<MessagePart> {
+        val lead = lists.step * (item.level + 0.3f)
+        val rest = (lead.value + lists.markerWidth(item.marker).value).sp
+        return splitLines(item.spans).mapIndexed { index, spans ->
+            val indent = if (index == 0) TextIndent(lead, rest) else TextIndent(rest, rest)
+            MessagePart.Text(
+                buildAnnotatedString {
+                    withStyle(ParagraphStyle(textIndent = indent)) {
+                        if (index == 0) append(item.marker + MARKER_GAP)
+                        appendSpans(spans)
+                    }
+                },
+            )
+        }
+    }
+
+    val parts = Markdown.blocks(content).flatMap { block ->
+        when (block) {
+            // Uma linha em branco entre dois blocos precisa de algo para ocupar a altura dela.
+            is MarkdownBlock.Paragraph -> listOf(MessagePart.Text(buildAnnotatedString { if (block.spans.isEmpty()) append(" ") else appendSpans(block.spans) }))
+            is MarkdownBlock.ListItem -> listItem(block)
+            MarkdownBlock.Rule -> listOf(MessagePart.Divider)
+        }
+    }
+    return MessageText(parts, used)
+}
+
+private fun spanStyle(span: TextSpan, accent: Color, codeBackground: Color, muted: Color) = SpanStyle(
+    fontWeight = if (span.bold || span.mentionUserId != null) FontWeight.SemiBold else null,
+    fontStyle = if (span.italic) FontStyle.Italic else null,
+    textDecoration = when {
+        span.strike -> TextDecoration.LineThrough
+        span.link != null -> TextDecoration.Underline
+        else -> null
+    },
+    fontFamily = if (span.code) FontFamily.Monospace else null,
+    background = if (span.code) codeBackground else Color.Unspecified,
+    color = when {
+        span.link != null || span.mentionUserId != null -> accent
+        span.quote -> muted
+        else -> Color.Unspecified
+    },
+)
+
+/** O que o trecho mostra: a menção vira `@nome`, e a citação ganha a barra. */
+private fun spanText(span: TextSpan, nameOf: (String) -> String?): String = when {
+    span.mentionUserId != null -> "@" + (nameOf(span.mentionUserId) ?: "usuário")
+    span.quote -> "▎ " + span.text
+    else -> span.text
+}
+
+/** As linhas de um item de lista: o `\n` separa a linha do marcador das de continuação. */
+private fun splitLines(spans: List<TextSpan>): List<List<TextSpan>> {
+    val lines = arrayListOf(ArrayList<TextSpan>())
+    for (span in spans) {
+        span.text.split('\n').forEachIndexed { index, part ->
+            if (index > 0) lines += ArrayList<TextSpan>()
+            if (part.isNotEmpty()) lines.last() += span.copy(text = part)
+        }
+    }
+    return lines
 }
 
 private fun emojiContentId(emojiId: String) = "emoji:$emojiId"
@@ -188,7 +282,17 @@ fun EmojiImage(session: AccountSession, emojiId: String, modifier: Modifier = Mo
 
 /**
  * Uma mensagem. [compact] é a continuação de quem acabou de falar: sem avatar
- * nem nome, só o texto alinhado.
+ * nem nome, só o texto alinhado. Se ela responde a outra, a prévia mostra [repliedTo]
+ * quando está carregada; senão avisa que [replyMissing] (o servidor não a tem mais) ou convida a
+ * procurá-la com [onOpenReply].
+ *
+ * Gestos: deslizar para o lado do fim da linha chama [onReply], o toque duplo chama [onQuickReact]
+ * e o toque longo, [onLongPress]. Os dois primeiros também são ações de acessibilidade.
+ *
+ * [addressedToMe] marca a mensagem que menciona ou responde a quem usa a conta: fundo dourado e uma barra
+ * no começo da linha. [highlighted] é o destaque passageiro (a mensagem que se responde ou edita, ou a que se
+ * acabou de abrir) e tem o fundo no lugar do dourado, que continua na barra. Toda mensagem [pinned] leva o
+ * alfinete no fim da linha, também as agrupadas, que não têm cabeçalho.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -200,106 +304,227 @@ fun MessageItem(
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
     repliedTo: Message?,
+    replyMissing: Boolean,
     compact: Boolean,
     pinned: Boolean,
+    addressedToMe: Boolean,
     highlighted: Boolean,
+    onOpenReply: () -> Unit,
+    onReply: () -> Unit,
+    onQuickReact: () -> Unit,
     onLongPress: () -> Unit,
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
 ) {
-    val accent = MaterialTheme.colorScheme.primary
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
         ?: author?.displayName
         ?: stringResource(Res.string.chat_unknown_user)
+    val replyLabel = stringResource(Res.string.msg_reply)
+    val reactLabel = stringResource(Res.string.msg_quick_react, EmojiPickerModel.DEFAULT_REACTIONS.first())
+    val papoColors = LocalPapoColors.current
+    val background = when {
+        highlighted -> MaterialTheme.colorScheme.surfaceContainerHigh
+        addressedToMe -> papoColors.highlight
+        else -> Color.Transparent
+    }
 
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(if (highlighted) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
-            .combinedClickable(onClick = {}, onLongClick = onLongPress)
-            .padding(start = 12.dp, end = 12.dp, top = if (compact) 1.dp else 8.dp, bottom = 1.dp),
-    ) {
-        Box(Modifier.width(40.dp)) {
-            if (!compact) UserAvatar(session, author, size = 40.dp, fallbackName = authorName)
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            if (message.replyTo != null) {
-                ReplyPreview(repliedTo, repliedTo?.authorId?.let { users[it] }, users)
-            }
-            if (!compact) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        authorName,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = parseHexColor(author?.roleColor) ?: MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+    SwipeToReply(onReply, Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(background)
+                .then(if (addressedToMe) Modifier.startBar(papoColors.highlightBar, HighlightBarWidth) else Modifier)
+                .combinedClickable(onClick = {}, onLongClick = onLongPress, onDoubleClick = onQuickReact)
+                .semantics {
+                    customActions = listOf(
+                        CustomAccessibilityAction(replyLabel) { onReply(); true },
+                        CustomAccessibilityAction(reactLabel) { onQuickReact(); true },
                     )
-                    Spacer(Modifier.width(8.dp))
+                }
+                .padding(start = 12.dp, end = 12.dp, top = if (compact) 1.dp else 8.dp, bottom = 1.dp),
+        ) {
+            Box(Modifier.width(40.dp)) {
+                if (!compact) UserAvatar(session, author, size = 40.dp, fallbackName = authorName)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                if (message.replyTo != null) {
+                    ReplyPreview(repliedTo, replyMissing, repliedTo?.authorId?.let { users[it] }, users, onOpenReply, onLongPress)
+                }
+                if (!compact) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            authorName,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = parseHexColor(author?.roleColor) ?: MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            message.createdAt?.formatTime().orEmpty(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (message.content.isNotEmpty()) {
+                    MessageBodyText(session, message.content, users, emojiIds, unicodeEmojis)
+                }
+                if (message.edited) {
                     Text(
-                        message.createdAt?.formatTime().orEmpty(),
+                        stringResource(Res.string.chat_edited),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (pinned) {
-                        Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(13.dp), tint = LocalPapoColors.current.accent)
+                }
+                message.attachments.forEach { attachment ->
+                    Spacer(Modifier.height(6.dp))
+                    if (attachment.isImage && attachment.thumbnailId != null) {
+                        ImageAttachment(session, attachment, onOpen = { onOpenImage(attachment) })
+                    } else {
+                        FileAttachment(session, attachment)
                     }
                 }
+                message.embeds.forEach { embed ->
+                    Spacer(Modifier.height(6.dp))
+                    EmbedCard(session, embed)
+                }
+                if (message.reactions.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    ReactionRow(session, message, onReact)
+                }
             }
-            if (message.content.isNotEmpty()) {
-                val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
-                val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
-                // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
-                val relevantIds = if (':' in message.content) emojiIds else emptyMap()
-                val text = remember(message.content, users, accent, relevantIds) {
-                    messageText(message.content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds)
-                }
-                // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
-                val jumbo = remember(message.content, relevantIds, unicodeEmojis) {
-                    EmojiText.isEmojiOnly(message.content, relevantIds, unicodeEmojis)
-                }
-                val style = MaterialTheme.typography.bodyLarge
-                Text(
-                    text.text,
-                    style = if (jumbo) style.copy(fontSize = 34.sp, lineHeight = 44.sp) else style,
-                    inlineContent = if (text.hasImages) emojiContent(session, text.emojiIds) else emptyMap(),
+            if (pinned) {
+                Spacer(Modifier.width(8.dp))
+                // Alinhado à primeira linha: a do nome (20 dp) nas mensagens com cabeçalho, a do texto (24 dp) nas agrupadas.
+                Icon(
+                    Icons.Filled.PushPin,
+                    contentDescription = stringResource(Res.string.msg_pinned),
+                    modifier = Modifier.padding(top = if (compact) 5.dp else 3.dp).size(14.dp),
+                    tint = papoColors.accent,
                 )
-            }
-            if (message.edited) {
-                Text(
-                    stringResource(Res.string.chat_edited),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            message.attachments.forEach { attachment ->
-                Spacer(Modifier.height(6.dp))
-                if (attachment.isImage && attachment.thumbnailId != null) {
-                    ImageAttachment(session, attachment, onOpen = { onOpenImage(attachment) })
-                } else {
-                    FileAttachment(session, attachment)
-                }
-            }
-            message.embeds.forEach { embed ->
-                Spacer(Modifier.height(6.dp))
-                EmbedCard(session, embed)
-            }
-            if (message.reactions.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                ReactionRow(session, message, onReact)
             }
         }
     }
 }
 
+/** Largura da barra de destaque no começo da linha. */
+private val HighlightBarWidth = 3.dp
+
+/** Uma barra de [width] no começo da linha, na altura toda: à esquerda, ou à direita em idiomas da direita para a esquerda. */
+private fun Modifier.startBar(color: Color, width: Dp): Modifier = drawBehind {
+    val barWidth = width.toPx()
+    val x = if (layoutDirection == LayoutDirection.Rtl) size.width - barWidth else 0f
+    drawRect(color, Offset(x, 0f), Size(barWidth, size.height))
+}
+
+/**
+ * Corpo de texto de uma mensagem: Markdown, listas, menções, links e `:nome:` dos emojis do
+ * servidor como imagem. Mensagem só de emoji aparece maior.
+ */
 @Composable
-private fun ReplyPreview(replied: Message?, author: User?, users: Map<String, User>) {
-    Row(Modifier.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+fun MessageBodyText(
+    session: AccountSession,
+    content: String,
+    users: Map<String, User>,
+    emojiIds: Map<String, String>,
+    unicodeEmojis: UnicodeEmojiCatalog?,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val style = MaterialTheme.typography.bodyLarge
+    val lists = rememberListMetrics(style)
+    // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
+    // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
+    val relevantIds = if (':' in content) emojiIds else emptyMap()
+    val text = remember(content, users, accent, codeBackground, muted, relevantIds, lists) {
+        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds, lists)
+    }
+    // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
+    val jumbo = remember(content, relevantIds, unicodeEmojis) {
+        EmojiText.isEmojiOnly(content, relevantIds, unicodeEmojis)
+    }
+    val bodyStyle = if (jumbo) style.copy(fontSize = 34.sp, lineHeight = 44.sp) else style
+    val inlineContent = if (text.hasImages) emojiContent(session, text.emojiIds) else emptyMap()
+    val single = text.parts.singleOrNull()
+    if (single is MessagePart.Text) {
+        Text(single.text, style = bodyStyle, inlineContent = inlineContent)
+        return
+    }
+    Column {
+        for (part in text.parts) {
+            when (part) {
+                is MessagePart.Text -> Text(part.text, style = bodyStyle, inlineContent = inlineContent)
+                MessagePart.Divider -> HorizontalDivider(Modifier.padding(vertical = 6.dp))
+            }
+        }
+    }
+}
+
+/**
+ * As medidas das listas para o [style] do corpo. A largura de um marcador vem do texto medido
+ * (número, bolinha e caixa de tarefa não têm a mesma largura), na primeira vez que uma lista
+ * pede, e o recuo das linhas seguintes do item fica alinhado ao texto dele.
+ */
+@Composable
+private fun rememberListMetrics(style: TextStyle): ListMetrics {
+    val resolver = LocalFontFamilyResolver.current
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    return remember(resolver, density, direction, style) {
+        val measurer by lazy(LazyThreadSafetyMode.NONE) { TextMeasurer(resolver, density, direction) }
+        val widths = HashMap<String, TextUnit>()
+        ListMetrics(
+            // O recuo acompanha o corpo do texto; a conta com `Unspecified` falharia, então há um tamanho de reserva.
+            step = (if (style.fontSize.isSpecified) style.fontSize else 16.sp) * 1.4f,
+            markerWidth = { marker ->
+                widths.getOrPut(marker) {
+                    val measured = measurer.measure(marker + MARKER_GAP, style, softWrap = false, maxLines = 1)
+                    with(density) { measured.size.width.toSp() }
+                }
+            },
+        )
+    }
+}
+
+/**
+ * Prévia da mensagem respondida, em três estados: carregada (o conteúdo, e tocar vai até ela), ainda
+ * não carregada (convida a procurá-la; tocar procura) e sabidamente apagada ([missing]; sem toque).
+ * O toque longo continua abrindo as ações da mensagem, como no resto da linha.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ReplyPreview(
+    replied: Message?,
+    missing: Boolean,
+    author: User?,
+    users: Map<String, User>,
+    onOpen: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val gone = replied == null && missing
+    // Ainda não carregada: o texto tem cor de ação, porque tocar nele procura a mensagem.
+    val unloaded = replied == null && !missing
+    val color = if (unloaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val openLabel = stringResource(Res.string.chat_reply_open)
+    Row(
+        Modifier
+            .padding(bottom = 2.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .then(
+                if (gone) {
+                    Modifier
+                } else {
+                    Modifier.combinedClickable(onClickLabel = openLabel, role = Role.Button, onClick = onOpen, onLongClick = onLongPress)
+                },
+            )
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Icon(
             Icons.AutoMirrored.Filled.Reply,
             contentDescription = null,
@@ -307,17 +532,20 @@ private fun ReplyPreview(replied: Message?, author: User?, users: Map<String, Us
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.width(4.dp))
-        val text = if (replied == null) {
-            stringResource(Res.string.chat_reply_missing)
-        } else {
-            val name = replied.externalAuthor?.name ?: author?.displayName ?: stringResource(Res.string.chat_unknown_user)
-            val body = renderMentions(replied.content) { users[it]?.displayName }.ifBlank { replied.attachments.firstOrNull()?.fileName.orEmpty() }
-            "$name: $body"
+        val text = when {
+            replied != null -> {
+                val name = replied.externalAuthor?.name ?: author?.displayName ?: stringResource(Res.string.chat_unknown_user)
+                val body = renderMentions(replied.content) { users[it]?.displayName }.ifBlank { replied.attachments.firstOrNull()?.fileName.orEmpty() }
+                "$name: $body"
+            }
+            gone -> stringResource(Res.string.chat_reply_missing)
+            else -> stringResource(Res.string.chat_reply_unloaded)
         }
         Text(
             text,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = color,
+            fontStyle = if (gone) FontStyle.Italic else null,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

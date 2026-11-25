@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -66,6 +67,7 @@ import chat.papo.mobile.resources.security_alert_title
 import chat.papo.mobile.resources.session_expired_action
 import chat.papo.mobile.resources.session_expired_body
 import chat.papo.mobile.resources.session_expired_title
+import chat.papo.mobile.resources.switcher_title
 import chat.papo.mobile.ui.components.AccountAvatar
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import org.jetbrains.compose.resources.stringResource
@@ -78,6 +80,8 @@ fun HomeScreen(
     onReauthenticate: (Account) -> Unit,
     onAccountSettings: (Account) -> Unit,
     onSearch: (Account) -> Unit,
+    /** Troca rápida de conversa; vale para todas as contas, não só a ativa. */
+    onSwitch: () -> Unit,
     onAppSettings: () -> Unit,
     content: @Composable (Account) -> Unit,
 ) {
@@ -106,6 +110,7 @@ fun HomeScreen(
                     account = active,
                     // Sem sessão não há o que buscar: a conta precisa entrar de novo antes.
                     onSearch = if (active.sessionExpired) null else ({ onSearch(active) }),
+                    onSwitch = onSwitch,
                     onSettings = { onAccountSettings(active) },
                 )
                 if (active.sessionExpired) {
@@ -226,7 +231,7 @@ private fun RailAction(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AccountHeader(account: Account, onSearch: (() -> Unit)?, onSettings: () -> Unit) {
+private fun AccountHeader(account: Account, onSearch: (() -> Unit)?, onSwitch: () -> Unit, onSettings: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(account.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -237,6 +242,9 @@ private fun AccountHeader(account: Account, onSearch: (() -> Unit)?, onSettings:
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        IconButton(onClick = onSwitch) {
+            Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(Res.string.switcher_title))
         }
         if (onSearch != null) {
             IconButton(onClick = onSearch) {

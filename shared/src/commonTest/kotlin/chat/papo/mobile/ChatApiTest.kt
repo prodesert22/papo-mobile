@@ -90,6 +90,25 @@ class ChatApiTest {
     }
 
     @Test
+    fun enviarMensagemRelataOProgressoDoCorpoAteOTotal() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) { json(message, HttpStatusCode.Created) }
+        val reported = mutableListOf<Pair<Long, Long?>>()
+
+        api.sendMessage(
+            "c1", "oi", replyTo = null,
+            files = listOf(OutgoingFile("a.bin", "application/octet-stream", 50_000) { ByteArray(50_000) }),
+            onProgress = { sent, total -> reported += sent to total },
+        )
+
+        assertTrue(reported.isNotEmpty())
+        val total = reported.last().second
+        assertTrue(total != null && total > 50_000) // o corpo leva o arquivo e os campos do multipart
+        assertEquals(total to total, reported.last().first to reported.last().second) // o último aviso é o corpo inteiro
+        assertEquals(reported.map { it.first }.sorted(), reported.map { it.first }) // só cresce
+    }
+
+    @Test
     fun paginacaoDeMensagensMandaOCursorCompleto() = runTest {
         val seen = mutableListOf<Recorded>()
         val api = api(seen) { json("""{"messages":[$message],"has_more":true}""") }

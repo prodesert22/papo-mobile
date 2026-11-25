@@ -119,6 +119,8 @@
     <string name="channels_reconnecting">Sem conexão em tempo real. Tentando reconectar…</string>
     <string name="channels_sync_failed">Não foi possível atualizar a lista.</string>
     <string name="channels_in_voice">%1$d na chamada</string>
+    <string name="channels_open_chat">Abrir chat</string>
+    <string name="channels_join_call">Entrar na chamada</string>
     <string name="dm_pick_title">Com quem você quer falar?</string>
     <string name="dm_pick_search">Buscar pessoa</string>
     <string name="dm_close">Fechar conversa</string>
@@ -158,6 +160,25 @@
     <string name="chat_file_failed">Não foi possível baixar o arquivo.</string>
     <string name="chat_emoji">Escolher emoji</string>
     <string name="chat_keyboard">Mostrar teclado</string>
+    <string name="outbox_queued">Na fila de envio</string>
+    <string name="outbox_sending">Enviando…</string>
+    <string name="outbox_sending_progress">Enviando… %1$s</string>
+    <string name="outbox_failed_rate_limited">Não enviada: muitas mensagens em pouco tempo. Espere um pouco e reenvie.</string>
+    <string name="outbox_failed_rejected">Não enviada: o servidor recusou.</string>
+    <string name="outbox_failed_rejected_detail">Não enviada: o servidor recusou. %1$s</string>
+    <string name="outbox_failed_not_sent">Não enviada: sem conexão com o servidor.</string>
+    <string name="outbox_failed_unauthorized">Não enviada: a sessão expirou. Entre de novo e reenvie.</string>
+    <string name="outbox_uncertain">Sem confirmação: a mensagem pode já ter sido enviada.</string>
+    <string name="outbox_resend">Reenviar</string>
+    <string name="outbox_resend_title">Reenviar mesmo assim?</string>
+    <string name="outbox_resend_body">O servidor não confirmou esta mensagem. Se ela já tiver chegado, vai aparecer duas vezes.</string>
+    <string name="outbox_discard">Descartar</string>
+    <string name="outbox_cancel_send">Cancelar envio</string>
+    <string name="outbox_copy">Copiar</string>
+    <plurals name="chat_new_messages">
+        <item quantity="one">%1$d nova mensagem</item>
+        <item quantity="other">%1$d novas mensagens</item>
+    </plurals>
     <string name="msg_react_more">Mais reações</string>
     <string name="emoji_search">Buscar emoji</string>
     <string name="emoji_search_clear">Limpar busca</string>
@@ -183,9 +204,16 @@
     <string name="msg_delete">Apagar</string>
     <string name="msg_pin">Fixar</string>
     <string name="msg_unpin">Desafixar</string>
+    <string name="msg_pinned">Fixada</string>
     <string name="msg_delete_title">Apagar esta mensagem?</string>
     <string name="msg_delete_body">Ela some para todo mundo e não dá para desfazer.</string>
     <string name="msg_download">Baixar</string>
+    <string name="msg_select">Selecionar texto</string>
+    <string name="chat_reply_unloaded">Toque para ver a mensagem original</string>
+    <string name="chat_reply_open">Ir para a mensagem original</string>
+    <string name="chat_reply_not_reached">A mensagem original é muito antiga e ainda não foi encontrada.</string>
+    <string name="chat_reply_continue">Continuar procurando</string>
+    <string name="msg_quick_react">Reagir com %1$s</string>
 
     <!-- Busca -->
     <string name="search_title">Buscar mensagens</string>
@@ -225,6 +253,17 @@
     <string name="search_end">Fim dos resultados</string>
     <string name="search_truncated">Mostrando os primeiros %1$d resultados. Refine a busca para ver os outros.</string>
     <string name="search_no_text">Mensagem sem texto</string>
+
+    <!-- Troca rápida de conversa -->
+    <string name="switcher_title">Trocar de conversa</string>
+    <string name="switcher_hint">Ir para uma conversa</string>
+    <string name="switcher_empty">Nenhuma conversa encontrada.</string>
+    <string name="switcher_kind_text">Canal de texto</string>
+    <string name="switcher_kind_voice">Canal de voz</string>
+    <string name="switcher_kind_dm">Conversa direta</string>
+    <string name="switcher_mention">Menção não lida</string>
+    <string name="switcher_unread">Mensagens não lidas</string>
+    <string name="switcher_unread_count">Não lidas: %1$d</string>
 
     <!-- Chamadas -->
     <string name="call_joining">Entrando na chamada…</string>

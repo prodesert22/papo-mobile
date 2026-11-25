@@ -223,6 +223,32 @@ def now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def send_control():
+    """Como o fake responde a `POST /messages`, para exercitar a fila de envio do app.
+
+    Vem do arquivo JSON em FAKE_SEND_CONTROL, lido a cada pedido (dá para mudar sem reiniciar o fake e
+    perder as sessões), ou das variáveis de ambiente. Sem nada disso, responde como sempre.
+      delay   FAKE_SEND_DELAY   segundos de espera antes de responder (depois de ler o corpo)
+      status  FAKE_SEND_STATUS  responde com este erro HTTP (429, 500, 403...) em vez de criar a mensagem
+      rate    FAKE_SEND_RATE    KB/s com que o corpo é lido: um anexo grande mostra o progresso do envio
+      create  FAKE_SEND_CREATE  1: cria a mensagem e avisa pelo WebSocket, mas responde o erro de `status`
+    """
+    control = {}
+    path = os.environ.get("FAKE_SEND_CONTROL")
+    if path:
+        try:
+            with open(path) as f:
+                control = json.load(f)
+        except (OSError, ValueError):
+            control = {}
+
+    def pick(key, env):
+        return control.get(key, os.environ.get(env, 0))
+
+    return {"delay": float(pick("delay", "FAKE_SEND_DELAY")), "status": int(pick("status", "FAKE_SEND_STATUS")),
+            "rate": float(pick("rate", "FAKE_SEND_RATE")), "create": bool(int(pick("create", "FAKE_SEND_CREATE")))}
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -404,7 +430,20 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/messages":
             ctype = self.headers.get("Content-Type", "")
             length = int(self.headers.get("Content-Length") or 0)
-            body = self.rfile.read(length)
+            control = send_control()
+            body = b""
+            while len(body) < length:
+                piece = self.rfile.read(min(16384, length - len(body)))
+                if not piece:
+                    break
+                body += piece
+                if control["rate"] > 0:
+                    time.sleep(len(piece) / (control["rate"] * 1024))
+            if len(body) < length:
+                # O cliente desistiu no meio do envio: como um servidor de verdade, não cria mensagem de um corpo cortado.
+                self.close_connection = True
+                return
+            time.sleep(control["delay"])
             parsed = BytesParser().parsebytes(b"Content-Type: " + ctype.encode() + b"\r\n\r\n" + body)
             fields, attachments = {}, []
             for part in parsed.get_payload():
@@ -420,6 +459,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "thumbnail_height": 64 if image else None, "moderation_status": "clean"})
                 else:
                     fields[name] = data.decode()
+            if control["status"] >= 400 and not control["create"]:
+                return self.problem(control["status"], "Erro simulado", "Resposta simulada por FAKE_SEND_STATUS")
             m = new_message(fields["channel_id"], me, fields.get("content", ""), fields.get("reply_to"), attachments)
             READS[(me, m["channel_id"])] = m["id"]
             event = {k: m[k] for k in ("id", "channel_id", "author_id", "content", "reply_to", "attachments", "created_at")}
@@ -427,6 +468,8 @@ class Handler(BaseHTTPRequestHandler):
             if m["channel_id"] in DMS:
                 for u in set(DMS[m["channel_id"]]):
                     emit({"type": "dm_update", "dm": dm_view(m["channel_id"], u)}, only={u})
+            if control["status"] >= 400:
+                return self.problem(control["status"], "Erro simulado", "Mensagem criada, mas a resposta foi simulada como erro")
             return self.send(201, view(m, me))
         data = self.body()
         if method == "POST" and path == "/search":

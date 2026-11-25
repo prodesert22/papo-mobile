@@ -2,6 +2,7 @@ package chat.papo.mobile.account
 
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.chat.ChatStore
+import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
 import chat.papo.mobile.chat.RecentEmojis
 import chat.papo.mobile.chat.RecentSearchFilters
@@ -38,6 +39,7 @@ class AccountSession(
     private val db = AccountDb(driver)
     val emojis = EmojiCatalog(api, media, db.metaQueries, scope, io, background)
     val recentEmojis = RecentEmojis(db.metaQueries, scope, io)
+    val drafts = Drafts(db.metaQueries, scope, io)
     val recentSearches = RecentSearchFilters()
 
     val ws = WsClient(client, scope, sessionStillValid = ::sessionStillValid)

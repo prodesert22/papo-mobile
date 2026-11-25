@@ -32,6 +32,7 @@ class MessageSearchTest {
         createdAtIso = "",
         edited = false,
         replyTo = null,
+        webhookId = webhook?.let { "wh-$it" },
         externalAuthor = webhook?.let { ExternalAuthorDto(it) },
         attachments = emptyList(),
         embeds = emptyList(),
@@ -67,6 +68,86 @@ class MessageSearchTest {
         // Consulta vazia não filtra nem reordena.
         assertEquals(people, searchByName("   ", people) { listOf(it.username) })
         assertTrue(searchByName("zé", people) { listOf(it.username, it.displayName) }.isEmpty())
+    }
+
+    private fun byName(query: String, people: List<User>) =
+        searchByName(query, people) { listOf(it.username, it.displayName) }.map { it.id }
+
+    @Test
+    fun consultaAtravessaOEspacoDoNomeDeExibicao() {
+        val people = listOf(user("a", "mestre7", "Lu Moraes"), user("b", "bia", "Bia"))
+        assertEquals(listOf("a"), byName("lum", people))
+        assertEquals(listOf("a"), byName("LUMOR", people))
+        assertEquals(listOf("a"), byName("umor", people)) // do meio de uma palavra até a outra
+        assertEquals(listOf("a"), byName("lu", people)) // o casamento de antes continua valendo
+    }
+
+    @Test
+    fun consultaAtravessaUnderscorePontoEHifenDoUsername() {
+        val people = listOf(user("1", "lu_moraes"), user("2", "lu.moraes"), user("3", "lu-moraes"), user("4", "bia"))
+        assertEquals(listOf("1", "2", "3"), byName("lum", people))
+        assertEquals(listOf("1", "2", "3"), byName("umor", people))
+    }
+
+    @Test
+    fun consultaComQuebraCasaDoMesmoJeitoQueSemQuebra() {
+        val people = listOf(user("a", "mestre7", "Lu Moraes"), user("b", "lumoraes2"), user("c", "bia"))
+        assertEquals(listOf("a", "b"), byName("lu m", people)) // espaço: a começa com "lu m"; b só sem a quebra de a
+        assertEquals(listOf("a", "b"), byName("lu_m", people))
+        assertEquals(listOf("a", "b"), byName("lu.m", people))
+        assertEquals(listOf("a", "b"), byName("lu-m", people))
+        assertEquals(listOf("a", "b"), byName("l u m", people))
+    }
+
+    @Test
+    fun casamentoAtravessandoQuebrasVemDepoisDeContem() {
+        val people = listOf(
+            user("quebra", "x1", "Lu Moraes"),
+            user("contem", "alumno"),
+            user("palavra", "x2", "Ana Lum"),
+            user("comeca", "lumen"),
+            user("igual", "lum"),
+        )
+        assertEquals(listOf("igual", "comeca", "palavra", "contem", "quebra"), byName("lum", people))
+    }
+
+    @Test
+    fun dentroDoMesmoGrupoVaiAOrdemDeEntrada() {
+        val people = listOf(user("2", "x2", "Lu Moraes"), user("1", "x1", "Lu Moura"), user("3", "x3", "Lu Mota"))
+        assertEquals(listOf("2", "1", "3"), byName("lum", people))
+        assertEquals(listOf("3", "1", "2"), byName("lum", people.reversed()))
+    }
+
+    @Test
+    fun semAsQuebrasAsLetrasPrecisamEstarJuntasESeguidas() {
+        val people = listOf(user("a", "mestre7", "Lu Moraes"))
+        assertTrue(byName("lmo", people).isEmpty()) // "lumoraes" não tem l-m-o em sequência
+        assertTrue(byName("l m", people).isEmpty())
+        assertTrue(byName("moralu", people).isEmpty()) // fora da ordem
+        assertTrue(byName("lumoraesx", people).isEmpty()) // maior que o nome
+    }
+
+    @Test
+    fun consultaSoDeQuebrasSoCasaQuemTemEssaQuebra() {
+        val people = listOf(user("a", "ana-bia"), user("b", "mestre7", "Lu Moraes"), user("c", "lu_moraes"), user("d", "cantorvivo"))
+        assertEquals(listOf("a"), byName("-", people))
+        assertEquals(listOf("c"), byName(" _ ", people))
+        // Sem as quebras a consulta ficaria vazia e acharia todo mundo.
+        assertTrue(byName(".", people).isEmpty())
+        assertTrue(byName("- _", people).isEmpty())
+    }
+
+    @Test
+    fun itemSemNomeNaoCasaComConsultaNenhuma() {
+        assertTrue(searchByName("lu", listOf(1, 2)) { emptyList() }.isEmpty())
+        assertEquals(listOf(1, 2), searchByName("", listOf(1, 2)) { emptyList() })
+    }
+
+    @Test
+    fun pedacoDoMeioDoUsernameCasa() {
+        val people = listOf(user("a", "cantorvivo"), user("b", "cantor_vivo"), user("c", "bia"))
+        assertEquals(listOf("a", "b"), byName("torvi", people)) // contido, e contido atravessando o `_`
+        assertEquals(listOf("a", "b"), byName("TORVI ", people))
     }
 
     @Test
