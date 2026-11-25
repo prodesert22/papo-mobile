@@ -5,6 +5,32 @@ Implementa o subconjunto de auth/servidor da OpenAPI com sessão por cookie
 `Auth`. Não substitui o backend real: serve para ver as telas funcionando.
 
 Uso: fake_papo.py <porta> [senha_do_servidor]
+
+Cargos e permissões (desligados por padrão: tudo liberado, como sempre, e `/roles` não existe).
+`FAKE_PERMISSIONS` os liga com a regra do servidor real, lida no código dele (`internal/services/messages.go`,
+`reactions.go`, `voice.go`, `internal/middleware/permissions.go`): `GET /roles`, `permissions[]` em `GET /channels`,
+`roles` nos usuários, `owner_id` em `GET /server`, e 403 em ler, enviar, anexar, fixar, excluir mensagem alheia,
+reagir e entrar na voz. O valor é `demo` (o cenário abaixo) ou o caminho de um JSON:
+
+    {"owner": "dona",                                   # usuário dono (criado, com a senha Senha@000, se não existe)
+     "roles": [{"name": "Moderação", "color": "#E86CA5", # cor opcional
+                "permissions": ["pin_message", "everyone_message", "send_attachment"]}],
+     "users": {"bia": ["Moderação"]},                    # cargos de cada usuário, por nome
+     "channels": [{"name": "avisos",                     # canal criado (type: text ou voice) se não existe
+                   "entries": {"Moderação": ["read_channel", "send_messages", "delete_messages", "connect_voice"]}}],
+     "messages": [{"channel": "papo", "author": "bia", "content": "@everyone oi"}]}
+
+Flags de cargo: manage_server, manage_channels, manage_roles, manage_webhooks, ban_members, pin_message,
+everyone_message, send_attachment. Flags de canal: read_channel, send_messages, delete_messages, connect_voice.
+Canal sem `entries` é aberto. O cenário `demo`: dono `dona` (Senha@000); `bia` Moderação, `ana` Leitores, `caio` sem
+cargo; `avisos` (Leitores só lê), `equipe` (só Moderação) e a voz `Palco` (Leitores lê, mas não entra); `papo` e
+"Sala de voz" abertos; `@everyone` de `bia` (pode), `caio` (não pode) e `dona` (dona) no `papo`.
+
+Para mudar ao vivo, entre como o dono e use as rotas da OpenAPI (com cookie), que mandam os eventos como o servidor:
+`POST /roles`, `PUT`/`DELETE /roles/{id}` (estes dois, como no servidor, **não** mandam evento),
+`POST /users/{id}/roles` e `DELETE /users/{id}/roles/{role_id}` (`role_add`/`role_remove`),
+`PUT /channels/{id}/permissions/{role_id}` e `DELETE /channels/{id}/role/{role_id}` (`channel_update`).
+Os ids dos cargos são fixos (derivados do nome) e saem na linha de partida, junto com os dos usuários.
 """
 import base64
 import hashlib
@@ -130,6 +156,8 @@ def search_messages(data, query, me):
         channels = [channel_id] if channel_id not in DMS or me in DMS[channel_id] else []
     else:
         channels = [c["id"] for c in CHANNELS]
+    # Com as permissões ligadas, só entram canais que o usuário lê (o servidor: dono, canal aberto ou cargo com leitura).
+    channels = [c for c in channels if has_channel_flag(c, me, "read_channel")]
     names = {c["id"]: c["name"] for c in CHANNELS}
     terms = [fold(t) for t in text.split()]
     token = "@mention(<@%s>)" % mention.lower()
@@ -167,7 +195,12 @@ def view(m, user_id=None):
 
 
 def audience(channel_id):
-    return set(DMS[channel_id]) if channel_id in DMS else None  # None = todos
+    if channel_id in DMS:
+        return set(DMS[channel_id])
+    if ACCESS["on"]:
+        # Como o servidor: o evento do canal só chega a quem lê o canal.
+        return {u["id"] for u in USERS.values() if has_channel_flag(channel_id, u["id"], "read_channel")}
+    return None  # todos
 
 
 def frame(text):
@@ -204,8 +237,9 @@ def last_message(channel_id):
 
 
 def summary(name):
+    roles = role_summaries(uid(name)) if ACCESS["on"] else USERS[name].get("roles", [])
     return {"id": uid(name), "username": name, "nickname": USERS[name].get("nickname"), "banned": False,
-            "created_at": USERS[name]["created"], "roles": USERS[name].get("roles", [])}
+            "created_at": USERS[name]["created"], "roles": roles}
 
 
 def dm_view(dm_id, user_id):
@@ -221,6 +255,173 @@ def dm_view(dm_id, user_id):
 
 def now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# ── Cargos e permissões ──────────────────────────────────────────────────────────────────────────
+# Ligados por FAKE_PERMISSIONS (ver o docstring). Desligados, `has_*` e `can_*` respondem sim e nada muda.
+
+ROLE_FLAGS = ("manage_server", "manage_channels", "manage_roles", "manage_webhooks", "ban_members",
+              "pin_message", "everyone_message", "send_attachment")
+CHANNEL_FLAGS = ("read_channel", "send_messages", "delete_messages", "connect_voice")
+ACCESS = {"on": False, "owner": None}  # owner: id do dono do servidor (None: servidor sem dono)
+ROLES = {}       # role_id -> {id, name, color, permissions: {flag: bool}, created_at}
+USER_ROLES = {}  # user_id -> [role_id], na ordem da atribuição
+ENTRIES = {}     # channel_id -> {role_id: {flag: bool}}: `permissions` do canal; sem entradas, o canal é aberto
+
+DEMO = {
+    "owner": "dona",
+    "roles": [
+        {"name": "Moderação", "color": "#E86CA5", "permissions": ["pin_message", "everyone_message", "send_attachment"]},
+        {"name": "Leitores", "color": "#5B8DEF", "permissions": []},
+    ],
+    "users": {"bia": ["Moderação"], "ana": ["Leitores"]},
+    "channels": [
+        {"name": "avisos", "entries": {"Leitores": ["read_channel"],
+                                        "Moderação": ["read_channel", "send_messages", "delete_messages"]}},
+        {"name": "equipe", "entries": {"Moderação": ["read_channel", "send_messages"]}},
+        {"name": "Palco", "type": "voice", "entries": {"Leitores": ["read_channel"],
+                                                       "Moderação": ["read_channel", "connect_voice"]}},
+    ],
+    "messages": [
+        {"channel": "papo", "author": "bia", "content": "@everyone reunião às 15h, quem puder passa na sala de voz."},
+        {"channel": "papo", "author": "caio", "content": "@everyone pizza grátis na copa!"},
+        {"channel": "papo", "author": "dona", "content": "Bom dia, @EVERYONE: a manutenção de sábado foi adiada."},
+        {"channel": "papo", "author": "bia", "content": "em código `@everyone` não destaca"},
+        {"channel": "avisos", "author": "bia", "content": "@everyone o aviso fixo mudou, leiam com calma."},
+        {"channel": "equipe", "author": "bia", "content": "Pauta da reunião de equipe: só quem tem o cargo lê isto."},
+    ],
+}
+
+
+def role_summaries(user_id):
+    return [{"id": r["id"], "name": r["name"], "color": r["color"]} for r in my_roles(user_id)]
+
+
+def my_roles(user_id):
+    return [ROLES[r] for r in USER_ROLES.get(user_id, []) if r in ROLES]
+
+
+def role_view(role):
+    return {"id": role["id"], "name": role["name"], "color": role["color"],
+            "permissions": dict(role["permissions"]), "created_at": role["created_at"]}
+
+
+def entry_views(channel_id):
+    entries = ENTRIES.get(channel_id, {})
+    return [{"role_id": rid, "role_name": ROLES[rid]["name"], "permissions": dict(flags)}
+            for rid, flags in sorted(entries.items(), key=lambda e: ROLES[e[0]]["name"])]
+
+
+def new_role(name, color, flags, role_id=None):
+    role = {"id": role_id or str(uuid.uuid4()), "name": name, "color": color,
+            "permissions": {f: f in flags for f in ROLE_FLAGS}, "created_at": now()}
+    ROLES[role["id"]] = role
+    return role
+
+
+def has_role_flag(user_id, flag):
+    """userHasRolePermission: o dono tem tudo; os outros precisam de um cargo com a flag (não há cargo padrão)."""
+    if not ACCESS["on"]:
+        return True
+    return user_id == ACCESS["owner"] or any(r["permissions"][flag] for r in my_roles(user_id))
+
+
+def has_channel_flag(channel_id, user_id, flag, free_if_open=True):
+    """userHasChannelPermission. Em DM: só membro, e `free_if_open=False` (excluir) nega até o dono. Em canal: o dono
+    sempre; canal aberto (sem entradas) é livre se `free_if_open`; senão a união das entradas dos cargos do usuário."""
+    if not ACCESS["on"]:
+        return True
+    if channel_id in DMS:
+        return free_if_open and user_id in DMS[channel_id]
+    if user_id == ACCESS["owner"]:
+        return True
+    entries = ENTRIES.get(channel_id, {})
+    if free_if_open and not entries:
+        return True
+    return any(entries.get(r["id"], {}).get(flag) for r in my_roles(user_id))
+
+
+def can_pin(channel_id, user_id, unpin=False):
+    """Fixar: membro em DM, `pin_message` em canal. Desafixar em canal pede também leitura."""
+    if channel_id in DMS:
+        return has_channel_flag(channel_id, user_id, "read_channel")
+    return has_role_flag(user_id, "pin_message") and (not unpin or has_channel_flag(channel_id, user_id, "read_channel"))
+
+
+def can_delete_other(channel_id, user_id):
+    """Excluir mensagem de outra pessoa: `delete_messages` de canal, que o canal aberto não dá (só o dono) e a DM nega a todos."""
+    return ACCESS["on"] and has_channel_flag(channel_id, user_id, "delete_messages", free_if_open=False)
+
+
+def permission_spec(value):
+    if value == "demo":
+        return DEMO
+    try:
+        with open(value) as f:
+            return json.load(f)
+    except (OSError, ValueError) as error:
+        raise SystemExit("FAKE_PERMISSIONS: não consegui ler %s: %s" % (value, error))
+
+
+def setup_access(spec):
+    """Liga as permissões e semeia dono, cargos, cargos dos usuários, entradas dos canais e mensagens de `spec`."""
+    def fail(text):
+        raise SystemExit("FAKE_PERMISSIONS: " + text)
+
+    def user_id(name):
+        if name not in USERS:
+            USERS[name] = {"id": str(uuid.uuid4()), "password": "Senha@000", "created": "2026-01-04T00:00:00Z"}
+        return USERS[name]["id"]
+
+    def check(flags, allowed, what):
+        for flag in flags:
+            if flag not in allowed:
+                fail("flag de %s desconhecida: %s" % (what, flag))
+        return flags
+
+    ACCESS["on"] = True
+    ACCESS["owner"] = user_id(spec["owner"]) if spec.get("owner") else None
+    by_name = {}
+    for item in spec.get("roles", []):
+        flags = check(item.get("permissions", []), ROLE_FLAGS, "cargo")
+        # Id derivado do nome: o mesmo em toda partida, para os curl de teste não dependerem de uma consulta.
+        role = new_role(item["name"], item.get("color"), flags, str(uuid.uuid5(uuid.NAMESPACE_DNS, "papo-fake-role-" + item["name"])))
+        by_name[role["name"]] = role
+    for name, role_names in spec.get("users", {}).items():
+        unknown = [r for r in role_names if r not in by_name]
+        if unknown:
+            fail("cargo desconhecido em users.%s: %s" % (name, unknown[0]))
+        USER_ROLES[user_id(name)] = [by_name[r]["id"] for r in role_names]
+    category = next((c for c in CHANNELS if c["type"] == "category"), None)
+    for item in spec.get("channels", []):
+        channel = next((c for c in CHANNELS if c["name"] == item["name"]), None)
+        if channel is None:
+            channel = {"id": str(uuid.uuid4()), "name": item["name"], "type": item.get("type", "text"),
+                       "position": max(c["position"] for c in CHANNELS) + 1}
+            if category:
+                channel["parent_id"] = category["id"]
+            CHANNELS.append(channel)
+        entries = {}
+        for role_name, flags in item.get("entries", {}).items():
+            if role_name not in by_name:
+                fail("cargo desconhecido em channels.%s: %s" % (item["name"], role_name))
+            check(flags, CHANNEL_FLAGS, "canal")
+            entries[by_name[role_name]["id"]] = {f: f in flags for f in CHANNEL_FLAGS}
+        if entries:
+            ENTRIES[channel["id"]] = entries
+    for item in spec.get("messages", []):
+        channel = next((c for c in CHANNELS if c["name"] == item["channel"]), None)
+        if channel is None:
+            fail("canal desconhecido em messages: %s" % item["channel"])
+        new_message(channel["id"], user_id(item["author"]), item["content"])
+
+
+def announce_access():
+    print("Permissões ligadas. dono=%s" % (name_of(ACCESS["owner"]) or "(ninguém)"), flush=True)
+    for role in ROLES.values():
+        print("  cargo %s %s" % (role["id"], role["name"]), flush=True)
+    for name in USERS:
+        print("  usuário %s %s" % (uid(name), name), flush=True)
 
 
 def send_control():
@@ -286,6 +487,9 @@ class Handler(BaseHTTPRequestHandler):
     def problem(self, status, title, detail):
         self.send(status, {"type": "https://papo.com/errors/x", "title": title, "status": status, "detail": detail, "instance": self.path})
 
+    def forbidden(self, detail):
+        self.problem(403, "Acesso negado", detail)
+
     def session(self):
         s = SESSIONS.get(self.cookie())
         if s is None:
@@ -339,6 +543,8 @@ class Handler(BaseHTTPRequestHandler):
                     emit({"type": "heartbeat_ack"}, only={me})
                 elif msg.get("type") == "typing":
                     emit({"type": "typing", "channel_id": msg["channel_id"], "user_id": me, "is_typing": True}, only=audience(msg["channel_id"]))
+                elif msg.get("type") == "voice_join" and ACCESS["on"]:
+                    self.voice_check(me, msg.get("channel_id"))
         except (OSError, ValueError):
             pass
         finally:
@@ -349,6 +555,15 @@ class Handler(BaseHTTPRequestHandler):
             if gone:
                 emit({"type": "presence_update", "user_id": me, "status": "offline", "status_message": None, "typing": None, "nickname": None})
             self.close_connection = True
+
+    def voice_check(self, me, channel_id):
+        """`voice_join` como o servidor: sem `connect_voice` (ou fora de um canal de voz) responde `voice-forbidden`.
+        Entrar de fato não existe neste fake: quem pode não recebe resposta nenhuma."""
+        channel = next((c for c in CHANNELS if c["id"] == channel_id), None)
+        if channel is None:
+            return emit({"type": "error", "message": "canal não encontrado"}, only={me})
+        if channel["type"] != "voice" or not has_channel_flag(channel_id, me, "connect_voice"):
+            emit({"type": "error", "message": "sem permissão para a sala de voz", "code": "voice-forbidden"}, only={me})
 
     def chat_get(self, url, query):
         path = url.path
@@ -374,12 +589,24 @@ class Handler(BaseHTTPRequestHandler):
                 item["last_message"] = last_message(c["id"])
                 item["last_read_message"] = READS.get((me, c["id"]))
                 item["notification_settings"] = "only_mentions"
+                if ACCESS["on"]:
+                    # Todos os canais que não são DM, sem filtrar leitura e com a última mensagem de canal que o usuário
+                    # não lê: como o servidor, que deixa o app esconder. Cópia do defeito, não decisão.
+                    item["permissions"] = entry_views(c["id"])
                 out.append(item)
             self.send(200, {"channels": out})
         elif path == "/dms":
             self.send(200, {"dms": [dm_view(d, me) for d, pair in DMS.items() if me in pair]})
         elif path == "/users":
             self.send(200, {"users": [summary(n) for n in USERS], "has_more": False})
+        elif path == "/roles" and ACCESS["on"]:
+            self.send(200, {"roles": [role_view(r) for r in ROLES.values()]})
+        elif re.fullmatch(r"/channels/[^/]+/permissions", path) and ACCESS["on"]:
+            cid = path.split("/")[2]
+            if cid in DMS or not any(c["id"] == cid for c in CHANNELS):
+                self.problem(404, "Recurso não encontrado", "canal não encontrado")
+            else:
+                self.send(200, {"channel_id": cid, "permissions": entry_views(cid)})
         elif path == "/emojis":
             # Como o servidor real: 25 por página, cursor since + last_id e token bucket (RATE_LIMIT=10, RATE_BURST=20).
             tokens, at = EMOJI_BUCKETS.get(self.cookie(), [20.0, time.monotonic()])
@@ -399,10 +626,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, {"emojis": rest[:25], "has_more": len(rest) > 25})
         elif re.fullmatch(r"/channels/[^/]+/pinned", path):
             cid = path.split("/")[2]
+            if not has_channel_flag(cid, me, "read_channel"):
+                self.forbidden("usuário não tem permissão para ler o canal")
+                return True
             byid = {x["id"]: x for x in MESSAGES.get(cid, [])}
             self.send(200, {"channel_id": cid, "pinned": [view(byid[i], me) for i in PINS.get(cid, []) if i in byid]})
         elif re.fullmatch(r"/channels/[^/]+/messages", path):
             cid = path.split("/")[2]
+            if not has_channel_flag(cid, me, "read_channel"):
+                self.forbidden("usuário não tem permissão para ler o canal")
+                return True
             asc = query.get("order", ["desc"])[0] == "asc"
             since, last_id = query.get("since", [None])[0], query.get("last_id", [None])[0]
             ms = sorted(MESSAGES.get(cid, []), key=lambda x: (x["created_at"], x["id"]))
@@ -459,6 +692,12 @@ class Handler(BaseHTTPRequestHandler):
                                         "thumbnail_height": 64 if image else None, "moderation_status": "clean"})
                 else:
                     fields[name] = data.decode()
+            cid = fields["channel_id"]
+            # Em DM o anexo não pede `send_attachment`; em canal, sim (e o envio pede `send_messages`).
+            if not has_channel_flag(cid, me, "send_messages") or (attachments and cid not in DMS and not has_role_flag(me, "send_attachment")):
+                for attachment in attachments:
+                    FILES.pop(attachment["id"], None)
+                return self.forbidden("usuário não tem permissão para enviar esta mensagem")
             if control["status"] >= 400 and not control["create"]:
                 return self.problem(control["status"], "Erro simulado", "Resposta simulada por FAKE_SEND_STATUS")
             m = new_message(fields["channel_id"], me, fields.get("content", ""), fields.get("reply_to"), attachments)
@@ -489,7 +728,8 @@ class Handler(BaseHTTPRequestHandler):
             msg = self.find(m.group(1))
             if msg is None:
                 return self.problem(404, "Não encontrado", "Mensagem inexistente")
-            if msg["author_id"] != me:
+            # Editar é só do autor; excluir a de outro pede `delete_messages` do canal (só com as permissões ligadas).
+            if msg["author_id"] != me and not (method == "DELETE" and can_delete_other(msg["channel_id"], me)):
                 return self.problem(403, "Proibido", "Só o autor pode alterar a mensagem")
             if method == "PUT":
                 msg["content"], msg["edited_at"] = data["content"], stamp()
@@ -504,8 +744,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(204)
         m = re.fullmatch(r"/channels/([^/]+)/messages/([^/]+)/pin", path)
         if m:
-            pins = PINS.setdefault(m.group(1), [])
             pinned = method == "POST"
+            if not can_pin(m.group(1), me, unpin=not pinned):
+                return self.forbidden("usuário não tem permissão para fixar a mensagem" if pinned
+                                      else "usuário não tem permissão para remover a fixação da mensagem")
+            pins = PINS.setdefault(m.group(1), [])
             if pinned and m.group(2) not in pins:
                 pins.append(m.group(2))
             if not pinned and m.group(2) in pins:
@@ -515,12 +758,149 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/channels/([^/]+)/messages/([^/]+)/reactions", path)
         if m:
             msg = self.find(m.group(2))
+            if method == "POST" and not has_channel_flag(msg["channel_id"], me, "send_messages"):
+                return self.forbidden("usuário não tem permissão para reagir neste canal")
+            if method != "POST" and not has_channel_flag(msg["channel_id"], me, "read_channel"):
+                return self.forbidden("usuário não tem permissão para ler o canal")
             key = (data.get("emoji_id"), data.get("unicode"))
             users = msg["reactions"].setdefault(key, set())
             users.add(me) if method == "POST" else users.discard(me)
             emit({"type": "react_update", "message_id": msg["id"], "emoji_id": key[0], "unicode": key[1], "count": len(users)}, only=audience(msg["channel_id"]))
             return self.send(201 if method == "POST" else 204, {"message_id": msg["id"]} if method == "POST" else None)
+        if ACCESS["on"] and self.access_write(method, path, data, me):
+            return
         self.problem(404, "Não encontrado", "Rota inexistente")
+
+    def access_write(self, method, path, data, me):
+        """Cargos, cargos dos usuários e entradas de canal, como na OpenAPI. True se a rota é uma destas."""
+        def allowed(flag):
+            ok = has_role_flag(me, flag)
+            if not ok:
+                self.forbidden("usuário não possui a permissão necessária para esta operação")
+            return ok
+
+        if path == "/roles" and method == "POST":
+            if allowed("manage_roles"):
+                self.create_role(data)
+            return True
+        m = re.fullmatch(r"/roles/([^/]+)", path)
+        if m and method in ("PUT", "DELETE"):
+            if allowed("manage_roles"):
+                self.change_role(method, m.group(1), data)
+            return True
+        m = re.fullmatch(r"/users/([^/]+)/roles", path)
+        if m and method == "POST":
+            if allowed("manage_roles"):
+                self.assign_role(m.group(1), data.get("role_id"))
+            return True
+        m = re.fullmatch(r"/users/([^/]+)/roles/([^/]+)", path)
+        if m and method == "DELETE":
+            if allowed("manage_roles"):
+                self.remove_role(m.group(1), m.group(2))
+            return True
+        m = re.fullmatch(r"/channels/([^/]+)/permissions/([^/]+)", path)
+        if m and method == "PUT":
+            if allowed("manage_channels"):
+                self.set_entry(m.group(1), m.group(2), data.get("permissions"))
+            return True
+        m = re.fullmatch(r"/channels/([^/]+)/role/([^/]+)", path)
+        if m and method == "DELETE":
+            if allowed("manage_channels"):
+                self.set_entry(m.group(1), m.group(2), None)
+            return True
+        return False
+
+    def role_fields(self, data):
+        """Nome, cor e flags de um corpo de criar ou atualizar cargo; None (depois de responder 400) se inválido."""
+        name, color = (data.get("name") or "").strip(), data.get("color")
+        if not name or len(name) > 32 or (color is not None and not re.fullmatch(r"#[0-9a-fA-F]{6}", str(color))):
+            self.problem(400, "Parâmetro inválido", "name é obrigatório e deve ter no máximo 32 caracteres; color deve ser hexadecimal #RRGGBB")
+            return None
+        given = data.get("permissions") if isinstance(data.get("permissions"), dict) else {}
+        return name, color, [f for f in ROLE_FLAGS if given.get(f) is True]
+
+    def create_role(self, data):
+        fields = self.role_fields(data)
+        if fields is None:
+            return
+        name, color, flags = fields
+        members = list(dict.fromkeys(data.get("users") or []))
+        if any(r["name"] == name for r in ROLES.values()):
+            return self.problem(409, "Nome de role já existe", "o nome informado já está em uso")
+        if any(name_of(u) is None for u in members):
+            return self.problem(404, "Recurso não encontrado", "usuário não encontrado")
+        role = new_role(name, color, flags)
+        for user_id in members:
+            USER_ROLES.setdefault(user_id, []).append(role["id"])
+            emit({"type": "role_add", "user_id": user_id, "role_id": role["id"]})
+        self.send(201, role_view(role))
+
+    def change_role(self, method, role_id, data):
+        role = ROLES.get(role_id)
+        if role is None:
+            return self.problem(404, "Recurso não encontrado", "role não encontrada")
+        # Como o servidor, nenhum dos dois manda evento: quem está conectado só vê a mudança ao reconectar.
+        if method == "DELETE":
+            del ROLES[role_id]
+            for ids in USER_ROLES.values():
+                if role_id in ids:
+                    ids.remove(role_id)
+            for entries in ENTRIES.values():
+                entries.pop(role_id, None)
+            return self.send(204)
+        fields = self.role_fields(data)
+        if fields is None:
+            return
+        name, color, flags = fields
+        if any(r["name"] == name and r["id"] != role_id for r in ROLES.values()):
+            return self.problem(409, "Nome de role já existe", "o nome informado já está em uso")
+        role["name"], role["color"] = name, color
+        role["permissions"] = {f: f in flags for f in ROLE_FLAGS}
+        self.send(200, role_view(role))
+
+    def assign_role(self, user_id, role_id):
+        if not role_id:
+            return self.problem(400, "Parâmetro inválido", "role_id é obrigatório")
+        if name_of(user_id) is None:
+            return self.problem(404, "Recurso não encontrado", "usuário não encontrado")
+        if role_id not in ROLES:
+            return self.problem(404, "Recurso não encontrado", "role não encontrada")
+        # Atribuir de novo é idempotente, e o evento sai mesmo assim.
+        if role_id not in USER_ROLES.setdefault(user_id, []):
+            USER_ROLES[user_id].append(role_id)
+        emit({"type": "role_add", "user_id": user_id, "role_id": role_id})
+        self.send(201, {"user_id": user_id, "role_id": role_id, "assigned_at": now()})
+
+    def remove_role(self, user_id, role_id):
+        if name_of(user_id) is None:
+            return self.problem(404, "Recurso não encontrado", "usuário não encontrado")
+        if role_id not in ROLES:
+            return self.problem(404, "Recurso não encontrado", "role não encontrada")
+        if role_id not in USER_ROLES.get(user_id, []):
+            return self.problem(404, "Recurso não encontrado", "role não atribuída ao usuário")
+        USER_ROLES[user_id].remove(role_id)
+        emit({"type": "role_remove", "user_id": user_id, "role_id": role_id})
+        self.send(204)
+
+    def set_entry(self, channel_id, role_id, permissions):
+        """PUT (permissions é um objeto) ou DELETE (None) da entrada de um cargo no canal."""
+        channel = next((c for c in CHANNELS if c["id"] == channel_id), None)
+        if channel is None:
+            return self.problem(404, "Recurso não encontrado", "canal não encontrado")
+        if role_id not in ROLES:
+            return self.problem(404, "Recurso não encontrado", "role não encontrada")
+        if permissions is None:
+            ENTRIES.get(channel_id, {}).pop(role_id, None)
+        else:
+            given = permissions if isinstance(permissions, dict) else {}
+            ENTRIES.setdefault(channel_id, {})[role_id] = {f: given.get(f) is True for f in CHANNEL_FLAGS}
+        # Cópia do defeito do servidor: este evento não leva as permissões e manda `parent_id` nulo, mesmo com o canal
+        # numa categoria (a OpenAPI diz que ele vem sempre). Quem precisa das permissões relê `GET /channels`.
+        emit({"type": "channel_update", "channel_id": channel_id, "name": channel["name"], "position": channel["position"],
+              "topic": channel.get("topic"), "parent_id": None})
+        if permissions is None:
+            return self.send(204)
+        self.send(200, {"channel_id": channel_id, "role_id": role_id, "permissions": dict(ENTRIES[channel_id][role_id])})
 
     def do_PUT(self):
         self.write("PUT")
@@ -543,13 +923,17 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"OK")
         elif self.path == "/server":
-            self.send(200, {"id": str(uuid.uuid4()), "name": NAME, "public": SERVER_PASSWORD is None,
-                            "owner_username": "dono", "member_count": len(USERS), "channel_count": 3})
+            server = {"id": str(uuid.uuid4()), "name": NAME, "public": SERVER_PASSWORD is None,
+                      "owner_username": "dono", "member_count": len(USERS), "channel_count": 3}
+            if ACCESS["on"]:
+                server.update(owner_id=ACCESS["owner"], owner_username=name_of(ACCESS["owner"]), role_count=len(ROLES))
+            self.send(200, server)
         elif self.path == "/auth/whoami":
             s = self.session()
             if s:
                 self.send(200, {"id": USERS[s["user"]]["id"], "username": s["user"], "nickname": None,
-                                "roles": [], "settings": {"version": 1, "config": {}}})
+                                "roles": role_summaries(uid(s["user"])) if ACCESS["on"] else [],
+                                "settings": {"version": 1, "config": {}}})
         elif self.path == "/auth/connected_devices":
             s = self.session()
             if s:
@@ -648,5 +1032,8 @@ if __name__ == "__main__":
     reacted = new_message(PAPO, uid("bia"), "reaja com um emoji do servidor")
     reacted["reactions"][(parrot, None)] = {uid("bia"), uid("caio")}
     reacted["reactions"][(None, "🔥")] = {uid("caio")}
+    if os.environ.get("FAKE_PERMISSIONS"):
+        setup_access(permission_spec(os.environ["FAKE_PERMISSIONS"]))
+        announce_access()
     print(f"{NAME} em http://0.0.0.0:{PORT}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

@@ -24,7 +24,7 @@ adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```sh
 ./gradlew :shared:testAndroidHostTest          # unit tests
 ./gradlew :androidApp:lintDebug                # Android lint
-python3 -m unittest discover -s tools/tests    # tests for tools/release.py
+python3 -m unittest discover -s tools/tests    # tests for tools/release.py and the fake backend
 tools/dev/run-device-tests.sh <serial>         # instrumented tests on one device
 ```
 
@@ -38,7 +38,9 @@ On an emulator, a server running on your computer is reachable at
 `http://10.0.2.2:<port>`. Without a server, `python3 tools/dev/fake_papo.py 8081`
 starts a fake one that covers sign-in, text chat and message search, with the
 users `ana` (`Senha@123`) and `bia` (`Senha@456`). It does not replace a real
-server and has no voice calls.
+server and has no voice calls. With `FAKE_PERMISSIONS=demo` it also has roles, channel
+permissions and an owner (`dona`, `Senha@000`); the docstring of `fake_papo.py`
+describes the scenario and how to load your own from a JSON file.
 
 ## Release builds
 
