@@ -23,6 +23,9 @@ import org.jetbrains.compose.resources.Font
 private val Manga = Color(0xFFFFB238)
 private val Agua = Color(0xFF5CC8BE)
 
+// Dourado do cliente web (`--gold`), do destaque das mensagens que mencionam ou respondem a quem usa a conta.
+private val Ouro = Color(0xFFE7A80B)
+
 private val DarkColors = darkColorScheme(
     primary = Manga,
     onPrimary = Color(0xFF2B1B00),
@@ -83,7 +86,10 @@ private val LightColors = lightColorScheme(
     onErrorContainer = Color(0xFF410E0B),
 )
 
-/** Cores fora do esquema do Material: o trilho de contas é escuro nos dois temas. */
+/**
+ * Cores fora do esquema do Material: o trilho de contas é escuro nos dois temas. [highlight] é o fundo
+ * translúcido da mensagem dirigida a quem usa a conta e [highlightBar] a barra no começo da linha.
+ */
 @Immutable
 data class PapoColors(
     val rail: Color,
@@ -92,6 +98,8 @@ data class PapoColors(
     val accent: Color,
     val onAccent: Color,
     val online: Color,
+    val highlight: Color,
+    val highlightBar: Color,
 )
 
 private val DarkPapoColors = PapoColors(
@@ -101,9 +109,16 @@ private val DarkPapoColors = PapoColors(
     accent = Manga,
     onAccent = Color(0xFF2B1B00),
     online = Agua,
+    highlight = Ouro.copy(alpha = 0.18f),
+    highlightBar = Ouro,
 )
 
-private val LightPapoColors = DarkPapoColors.copy(rail = Color(0xFF0F3A46), onRailMuted = Color(0xFF9DBFC6))
+private val LightPapoColors = DarkPapoColors.copy(
+    rail = Color(0xFF0F3A46),
+    onRailMuted = Color(0xFF9DBFC6),
+    highlight = Ouro.copy(alpha = 0.16f),
+    highlightBar = Ouro,
+)
 
 val LocalPapoColors = staticCompositionLocalOf { DarkPapoColors }
 

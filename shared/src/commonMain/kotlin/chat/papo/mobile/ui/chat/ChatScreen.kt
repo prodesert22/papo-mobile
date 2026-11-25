@@ -131,6 +131,7 @@ import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.authorsByRecency
 import chat.papo.mobile.chat.continuesGroup
 import chat.papo.mobile.chat.filterPinned
+import chat.papo.mobile.chat.isAddressedTo
 import chat.papo.mobile.chat.mentionQueryAt
 import chat.papo.mobile.chat.newArrivals
 import chat.papo.mobile.chat.renderMentions
@@ -457,6 +458,7 @@ fun ChatScreen(
                                 replyMissing = message.replyTo in state.missingReplies,
                                 compact = compact,
                                 pinned = pinnedIds[viewModel.channelId]?.contains(message.id) == true,
+                                addressedToMe = isAddressedTo(session.userId, message, message.replyTo?.let { byId[it] }),
                                 highlighted = state.replyTo?.id == message.id || state.editing?.id == message.id ||
                                     state.focusId == message.id,
                                 onOpenReply = { viewModel.openReply(message) },

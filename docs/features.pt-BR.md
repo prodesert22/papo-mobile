@@ -35,7 +35,7 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Um rascunho para cada conversa, com a mensagem que você estava respondendo.
 - Anexos, respostas, edição e exclusão, reações, mensagens fixadas e menções. As
   menções acham as pessoas por qualquer parte do nome, sem se importar com
-  acentos.
+  acentos, e as mensagens que mencionam você ou respondem a você ficam destacadas.
 - Toque numa resposta para ir à mensagem original, deslize uma mensagem para
   respondê-la e toque duas vezes para reagir com 👍. Copie uma mensagem ou
   selecione parte do texto.

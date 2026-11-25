@@ -47,6 +47,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -74,6 +76,8 @@ import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -103,6 +107,7 @@ import chat.papo.mobile.resources.chat_reply_unloaded
 import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.chat_unknown_user
 import chat.papo.mobile.resources.msg_download
+import chat.papo.mobile.resources.msg_pinned
 import chat.papo.mobile.resources.msg_quick_react
 import chat.papo.mobile.resources.msg_reply
 import chat.papo.mobile.ui.components.LocalPlatformUi
@@ -283,6 +288,11 @@ fun EmojiImage(session: AccountSession, emojiId: String, modifier: Modifier = Mo
  *
  * Gestos: deslizar para o lado do fim da linha chama [onReply], o toque duplo chama [onQuickReact]
  * e o toque longo, [onLongPress]. Os dois primeiros também são ações de acessibilidade.
+ *
+ * [addressedToMe] marca a mensagem que menciona ou responde a quem usa a conta: fundo dourado e uma barra
+ * no começo da linha. [highlighted] é o destaque passageiro (a mensagem que se responde ou edita, ou a que se
+ * acabou de abrir) e tem o fundo no lugar do dourado, que continua na barra. Toda mensagem [pinned] leva o
+ * alfinete no fim da linha, também as agrupadas, que não têm cabeçalho.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -297,6 +307,7 @@ fun MessageItem(
     replyMissing: Boolean,
     compact: Boolean,
     pinned: Boolean,
+    addressedToMe: Boolean,
     highlighted: Boolean,
     onOpenReply: () -> Unit,
     onReply: () -> Unit,
@@ -310,12 +321,19 @@ fun MessageItem(
         ?: stringResource(Res.string.chat_unknown_user)
     val replyLabel = stringResource(Res.string.msg_reply)
     val reactLabel = stringResource(Res.string.msg_quick_react, EmojiPickerModel.DEFAULT_REACTIONS.first())
+    val papoColors = LocalPapoColors.current
+    val background = when {
+        highlighted -> MaterialTheme.colorScheme.surfaceContainerHigh
+        addressedToMe -> papoColors.highlight
+        else -> Color.Transparent
+    }
 
     SwipeToReply(onReply, Modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(if (highlighted) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
+                .background(background)
+                .then(if (addressedToMe) Modifier.startBar(papoColors.highlightBar, HighlightBarWidth) else Modifier)
                 .combinedClickable(onClick = {}, onLongClick = onLongPress, onDoubleClick = onQuickReact)
                 .semantics {
                     customActions = listOf(
@@ -350,10 +368,6 @@ fun MessageItem(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        if (pinned) {
-                            Spacer(Modifier.width(6.dp))
-                            Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(13.dp), tint = LocalPapoColors.current.accent)
-                        }
                     }
                 }
                 if (message.content.isNotEmpty()) {
@@ -383,8 +397,28 @@ fun MessageItem(
                     ReactionRow(session, message, onReact)
                 }
             }
+            if (pinned) {
+                Spacer(Modifier.width(8.dp))
+                // Alinhado à primeira linha: a do nome (20 dp) nas mensagens com cabeçalho, a do texto (24 dp) nas agrupadas.
+                Icon(
+                    Icons.Filled.PushPin,
+                    contentDescription = stringResource(Res.string.msg_pinned),
+                    modifier = Modifier.padding(top = if (compact) 5.dp else 3.dp).size(14.dp),
+                    tint = papoColors.accent,
+                )
+            }
         }
     }
+}
+
+/** Largura da barra de destaque no começo da linha. */
+private val HighlightBarWidth = 3.dp
+
+/** Uma barra de [width] no começo da linha, na altura toda: à esquerda, ou à direita em idiomas da direita para a esquerda. */
+private fun Modifier.startBar(color: Color, width: Dp): Modifier = drawBehind {
+    val barWidth = width.toPx()
+    val x = if (layoutDirection == LayoutDirection.Rtl) size.width - barWidth else 0f
+    drawRect(color, Offset(x, 0f), Size(barWidth, size.height))
 }
 
 /**

@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemGestures
@@ -107,7 +108,12 @@ fun SwipeToReply(onReply: () -> Unit, modifier: Modifier = Modifier, content: @C
     ) {
         val reached = armed
         // `absoluteOffset`: o `offset` espelha em idiomas da direita para a esquerda, e o sentido de `toward` já é o da tela.
-        Box(Modifier.absoluteOffset { IntOffset((pull * toward).roundToInt(), 0) }) {
+        // O ícone dá a esta caixa a altura mínima de `IconSize`; `propagateMinConstraints` faz o conteúdo ocupá-la inteira,
+        // senão o fundo e a barra de uma mensagem curta acabariam acima do fim da caixa, deixando uma faixa vazia.
+        Box(
+            Modifier.absoluteOffset { IntOffset((pull * toward).roundToInt(), 0) }.heightIn(min = IconSize),
+            propagateMinConstraints = true,
+        ) {
             content()
             // O ícone anda junto com a mensagem, logo depois do fim dela: nunca fica por cima do texto.
             Box(

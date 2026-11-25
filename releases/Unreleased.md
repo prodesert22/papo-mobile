@@ -50,3 +50,8 @@
 - While you read further up in a conversation, a **↓ N novas mensagens** button
   counts what others sent meanwhile without moving what you are reading; tap it
   to go to the newest. Far from the end, a **↓** button takes you there.
+- Messages that mention you or reply to one of your messages are highlighted in
+  gold, as in the web client.
+- Every pinned message shows a pin beside it, including messages grouped under
+  the previous one's name; before, the pin only showed next to the author's
+  name.

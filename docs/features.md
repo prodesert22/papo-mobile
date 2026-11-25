@@ -34,7 +34,7 @@ release notes in [releases/](../releases/) describe each version's changes.
 - A draft for each conversation, with the message you were replying to.
 - Attachments, replies, editing and deleting, reactions, pinned messages and
   mentions. Mentions find people by any part of their name, without caring about
-  accents.
+  accents, and messages that mention you or reply to you are highlighted.
 - Tap a reply to go to the original message, swipe a message to reply to it and
   double tap it to react with 👍. Copy a message or select part of its text.
 - Message search on the server, by text and by conversation, author, mention,

@@ -204,6 +204,7 @@
     <string name="msg_delete">Apagar</string>
     <string name="msg_pin">Fixar</string>
     <string name="msg_unpin">Desafixar</string>
+    <string name="msg_pinned">Fixada</string>
     <string name="msg_delete_title">Apagar esta mensagem?</string>
     <string name="msg_delete_body">Ela some para todo mundo e não dá para desfazer.</string>
     <string name="msg_download">Baixar</string>
