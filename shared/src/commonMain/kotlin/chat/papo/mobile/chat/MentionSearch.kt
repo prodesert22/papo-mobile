@@ -36,6 +36,26 @@ fun mentionQueryAt(text: String, cursor: Int): MentionQuery? {
 }
 
 /**
+ * O autocompletar oferece `@everyone` para [query]? Só com [allowed] (a permissão do autor e nunca numa DM, que já
+ * avisa todos: ver `ConversationAccess.mentionEveryone`) e se `everyone` começa com o que foi digitado, sem
+ * diferenciar maiúsculas, como o web. Consulta vazia oferece; `everyone ` (com espaço) já não.
+ */
+fun offersEveryone(query: String, allowed: Boolean): Boolean = allowed && EVERYONE_NAME.startsWith(query.lowercase())
+
+/** O rascunho depois de escolher uma menção: o [text] novo e onde fica o cursor. */
+data class MentionEdit(val text: String, val cursor: Int)
+
+/**
+ * Troca a [mention] que o cursor ([cursor]) está terminando de digitar por `@nome ` e põe o cursor depois do
+ * espaço. É texto comum: o servidor lê o `@everyone` literal, e o `@username` escolhido vira `@mention(<@id>)` só
+ * no envio (ver [encodeMentions]).
+ */
+fun completeMention(text: String, mention: MentionQuery, cursor: Int, name: String): MentionEdit {
+    val inserted = "@$name "
+    return MentionEdit(text.substring(0, mention.start) + inserted + text.substring(cursor), mention.start + inserted.length)
+}
+
+/**
  * Quem pode ser mencionado com [query]: todos menos [me] e os banidos, do melhor casamento (nome igual,
  * começa com, começo de palavra, contém, contém atravessando espaço, `_`, `.` ou `-`, como `lum` em
  * "Lu Moraes"; ver [searchByName]) ao pior, no username ou no nome de exibição.

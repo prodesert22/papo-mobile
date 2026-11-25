@@ -3,6 +3,7 @@ package chat.papo.mobile.chat
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import chat.papo.mobile.core.parseInstant
+import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.ChannelDto
 import chat.papo.mobile.data.api.ChatApi
@@ -24,13 +25,17 @@ import chat.papo.mobile.data.ws.WsState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -45,6 +50,7 @@ import chat.papo.mobile.data.db.account.Channel as ChannelRow
 import chat.papo.mobile.data.db.account.Dm as DmRow
 import chat.papo.mobile.data.db.account.Message as MessageRow
 import chat.papo.mobile.data.db.account.User as UserRow
+import kotlinx.coroutines.channels.Channel as RequestChannel
 
 /**
  * Conversas de uma conta. O banco local é a fonte do que a tela mostra: as
@@ -57,14 +63,31 @@ class ChatStore(
     private val ws: WsClient,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
+    /** Fonte das permissões da conta. O padrão não conhece o dono do servidor e, sem ele, nada é negado. */
+    private val permissions: AccessStore = AccessStore(db.metaQueries, api, scope, io),
 ) {
     private val q = db.chatQueries
     private val meta = db.metaQueries
     private val syncMutex = Mutex()
 
+    /**
+     * A resposta do POST/DELETE de uma reação e o evento `react_update` chegam por caminhos que não têm ordem
+     * entre si e gravam a mesma linha. Quem lê e grava sem esta trava pode escrever de volta o que leu antes da
+     * gravação do outro e apagá-la: a contagem velha volta, ou o "eu reagi" some.
+     */
+    private val reactionLock = Mutex()
+
     val channels: StateFlow<List<Channel>> =
         q.selectChannels().asFlow().mapToList(io).map { rows -> rows.map { it.toModel() } }
             .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** O que se sabe das permissões da conta; a regra que o lê está em `Permissions.kt`. */
+    val access: StateFlow<PermissionSnapshot> = permissions.snapshot
+
+    /** Os canais que a conta pode ver: sem os que a leitura nega e sem a categoria que o filtro esvaziou. */
+    val visibleChannels: StateFlow<List<Channel>> =
+        combine(channels, access) { list, snapshot -> visibleChannels(list, snapshot, myUserId) }
+            .stateIn(scope, SharingStarted.Eagerly, visibleChannels(channels.value, access.value, myUserId))
 
     val dms: StateFlow<List<Dm>> =
         q.selectDms().asFlow().mapToList(io).map { rows -> rows.map { it.toModel() } }
@@ -115,15 +138,7 @@ class ChatStore(
     fun start() {
         scope.launch { ws.events.collect { runCatching { handle(it) } } }
         scope.launch {
-            // Cada reconexão pode ter perdido eventos: recarrega as listas e o canal aberto.
-            ws.state.collect { state ->
-                if (state == WsState.Connected) {
-                    notifyActivity(force = true)
-                    runSync()
-                    // Quem lê um trecho antigo fica onde está; o fim do histórico vem quando voltar para ele.
-                    viewing?.let { if (!isDetached(it)) runCatching { refreshLatest(it) } }
-                }
-            }
+            ws.state.collect { state -> if (state == WsState.Connected) onConnected() }
         }
         scope.launch {
             while (true) {
@@ -132,6 +147,15 @@ class ChatStore(
             }
         }
         ws.start()
+    }
+
+    /** Cada reconexão pode ter perdido eventos: recarrega as listas, as permissões e o canal aberto. */
+    internal suspend fun onConnected() {
+        notifyActivity(force = true)
+        runSync()
+        // Quem lê um trecho antigo fica onde está; o fim do histórico vem quando voltar para ele. Canal que
+        // a leitura nega nem é pedido: seria um 403 certo.
+        viewing?.let { if (!isDetached(it) && !readDenied(it)) runCatching { refreshLatest(it) } }
     }
 
     /** Canal que está na tela agora; mensagens dele não contam como não lidas. */
@@ -150,15 +174,17 @@ class ChatStore(
         }
     }
 
-    /** Recarrega canais, conversas diretas e usuários. */
+    /** Recarrega o dono e os cargos do servidor, os canais com as permissões, as conversas diretas e os usuários. */
     suspend fun sync() = syncMutex.withLock {
         _syncing.value = true
         try {
+            permissions.refreshMeta()
             val channelList = api.channels()
             val dmList = api.dms()
+            permissions.applyChannels(channelList)
             withContext(io) {
                 q.transaction {
-                    channelList.forEach(::upsert)
+                    storeChannels(channelList)
                     if (channelList.isEmpty()) q.deleteAllChannels() else q.deleteChannelsNotIn(channelList.map { it.id })
                     dmList.forEach(::upsert)
                     if (dmList.isEmpty()) q.deleteAllDms() else q.deleteDmsNotIn(dmList.map { it.id })
@@ -170,16 +196,115 @@ class ChatStore(
         }
     }
 
+    /**
+     * Grava os usuários e guarda os cargos de cada um nas permissões. Os cargos só entram no fim, com todas as
+     * páginas: `usersComplete` vale quando a última delas chegou e o próprio usuário estava nelas.
+     */
     private suspend fun syncUsers() {
-        var since: String? = null
+        val since = permissions.beginUsersSync()
+        val roles = HashMap<String, Set<String>>()
+        var cursor: String? = null
         var lastId: String? = null
-        repeat(MAX_USER_PAGES) {
-            val page = api.users(since, lastId)
+        var complete = false
+        for (i in 0 until MAX_USER_PAGES) {
+            val page = api.users(cursor, lastId)
             withContext(io) { q.transaction { page.users.forEach(::upsert) } }
+            page.users.forEach { user -> roles[user.id] = user.roles.mapTo(HashSet()) { it.id } }
             val last = page.users.lastOrNull()
-            if (!page.hasMore || last?.createdAt == null) return
-            since = last.createdAt
+            if (!page.hasMore) {
+                complete = true
+                break
+            }
+            if (last?.createdAt == null) break
+            cursor = last.createdAt
             lastId = last.id
+        }
+        // Sem o próprio usuário nas páginas, "ausente = sem cargos" negaria tudo por um dado que faltou.
+        permissions.applyUsers(roles, complete && myUserId in roles, since)
+    }
+
+    /**
+     * Grava os canais de uma resposta de `GET /channels`. De canal que a leitura nega não se guarda a prévia da
+     * última mensagem: o servidor a manda mesmo assim, e o conteúdo não é do usuário. Só dentro de [io].
+     */
+    private fun storeChannels(channels: List<ChannelDto>) {
+        val snapshot = permissions.snapshot.value
+        channels.forEach {
+            val denied = snapshot.channel(myUserId, it.id, ChannelFlag.Read) == Decision.Denied
+            upsert(if (denied) it.copy(lastMessage = null) else it)
+        }
+    }
+
+    /**
+     * Relê os canais e as entradas de permissão deles sem tocar nas conversas diretas nem nos usuários.
+     * Também restaura o `parent_id` que o servidor não manda no `channel_update` de uma mudança de permissão.
+     */
+    private suspend fun refreshChannels() {
+        val channelList = api.channels()
+        permissions.applyChannels(channelList)
+        withContext(io) { q.transaction { storeChannels(channelList) } }
+    }
+
+    /**
+     * Pede a releitura das permissões depois de um 403: o que o app sabia ficou velho (um `PUT /roles` não
+     * avisa ninguém). No máximo uma a cada poucos segundos; nada é reenviado (regra 15).
+     */
+    fun requestRefresh() {
+        if (!permissions.allowForbiddenRefresh()) return
+        scope.launch {
+            quietly {
+                permissions.refreshMeta()
+                refreshChannels()
+            }
+        }
+    }
+
+    /** Faz [block] e, se o servidor recusar com 403, pede a releitura das permissões antes de repassar o erro. */
+    private suspend fun <T> reportingForbidden(block: suspend () -> T): T = try {
+        block()
+    } catch (e: ApiException) {
+        if (e.isForbidden) requestRefresh()
+        throw e
+    }
+
+    /** Trabalho de segundo plano que pode falhar sem que ninguém precise saber; o cancelamento segue adiante. */
+    private suspend fun quietly(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun readDenied(channelId: String): Boolean =
+        permissions.snapshot.value.channel(myUserId, channelId, ChannelFlag.Read) == Decision.Denied
+
+    /**
+     * Apaga do aparelho o que se guardou de um canal que o usuário não lê mais: as mensagens, a prévia da
+     * última e a marca de trecho antigo. O rascunho (`draft:`) fica: é do usuário, e o canal volta com o acesso.
+     */
+    suspend fun forgetHistory(channelId: String) {
+        withContext(io) {
+            q.transaction {
+                q.deleteChannelMessages(channelId)
+                q.setChannelLastMessage(null, null, null, null, channelId)
+                meta.remove(DETACHED + channelId)
+            }
+        }
+        hasOlder.remove(channelId)
+        _pinned.update { it - channelId }
+    }
+
+    /** Esquece o histórico de cada canal que passa a ter a leitura negada, não importa o que mudou as permissões. */
+    private suspend fun forgetUnreadableChannels() {
+        var forgotten = emptySet<String>()
+        combine(channels, access) { list, snapshot ->
+            list.filter { it.type != ChannelType.Category && snapshot.channel(myUserId, it.id, ChannelFlag.Read) == Decision.Denied }
+                .mapTo(HashSet()) { it.id }
+        }.collect { denied ->
+            (denied - forgotten).forEach { quietly { forgetHistory(it) } }
+            forgotten = denied
         }
     }
 
@@ -197,7 +322,7 @@ class ChatStore(
      * terminar na mensagem mais nova, mesmo que antes estivesse longe do fim.
      */
     suspend fun refreshLatest(channelId: String) {
-        val page = api.messages(channelId, limit = PAGE_SIZE)
+        val page = reportingForbidden { api.messages(channelId, limit = PAGE_SIZE) }
         var discarded = false
         var arrived = emptyList<MessageDto>()
         withContext(io) {
@@ -234,7 +359,7 @@ class ChatStore(
     suspend fun loadOlder(channelId: String, limit: Int = PAGE_SIZE): Boolean {
         if (hasOlder[channelId] == false) return false
         val oldest = withContext(io) { q.oldestMessage(channelId).executeAsOneOrNull() } ?: return false
-        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = limit)
+        val page = reportingForbidden { api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = limit) }
         withContext(io) { q.transaction { page.messages.forEach(::upsert) } }
         hasOlder[channelId] = page.hasMore && page.messages.isNotEmpty()
         return hasOlder[channelId] == true
@@ -254,10 +379,12 @@ class ChatStore(
      */
     suspend fun locate(channelId: String, messageId: String, createdAtIso: String): Located {
         position(channelId, messageId)?.let { return Located.Found(it) }
-        val after = api.messages(channelId, since = createdAtIso, lastId = messageId, order = "asc", limit = AROUND_NEWER)
+        val after = reportingForbidden {
+            api.messages(channelId, since = createdAtIso, lastId = messageId, order = "asc", limit = AROUND_NEWER)
+        }
         // Nada depois dela: seria a mais nova do canal, e a página mais recente já foi lida.
         val next = after.messages.firstOrNull() ?: return Located.Missing
-        val before = api.messages(channelId, since = next.createdAt, lastId = next.id, limit = PAGE_SIZE)
+        val before = reportingForbidden { api.messages(channelId, since = next.createdAt, lastId = next.id, limit = PAGE_SIZE) }
         if (before.messages.none { it.id == messageId }) return Located.Missing
         val around = before.messages + after.messages
         withContext(io) {
@@ -329,7 +456,9 @@ class ChatStore(
      */
     suspend fun loadNewer(channelId: String): Int {
         val newest = withContext(io) { q.newestMessage(channelId).executeAsOneOrNull()?.takeIf { detachedNow(channelId) } } ?: return 0
-        val page = api.messages(channelId, since = newest.created_at, lastId = newest.id, order = "asc", limit = PAGE_SIZE)
+        val page = reportingForbidden {
+            api.messages(channelId, since = newest.created_at, lastId = newest.id, order = "asc", limit = PAGE_SIZE)
+        }
         var arrived = emptyList<MessageDto>()
         withContext(io) {
             q.transaction {
@@ -348,6 +477,20 @@ class ChatStore(
 
     private val queue = Outbox(scope) { message, onProgress -> deliver(message, onProgress) }
 
+    /** Pedidos de releitura dos canais; o `debounce` junta os que chegam em rajada (um `channel_update` por permissão mudada). */
+    private val channelRefreshRequests = RequestChannel<Unit>(RequestChannel.CONFLATED)
+
+    // Depois de todos os campos: o escopo pode usá-los já na primeira instrução.
+    init {
+        scope.launch { refreshChannelsOnRequest() }
+        scope.launch { forgetUnreadableChannels() }
+    }
+
+    @OptIn(FlowPreview::class)
+    private suspend fun refreshChannelsOnRequest() {
+        channelRefreshRequests.receiveAsFlow().debounce(CHANNELS_REFRESH_DEBOUNCE).collect { quietly { refreshChannels() } }
+    }
+
     /** O que o usuário mandou e o servidor ainda não confirmou, de todos os canais, na ordem do envio. */
     val outbox: StateFlow<List<PendingMessage>> get() = queue.pending
 
@@ -362,7 +505,9 @@ class ChatStore(
     fun withdraw(localId: String) = queue.withdraw(localId)
 
     private suspend fun deliver(message: PendingMessage, onProgress: (sent: Long, total: Long?) -> Unit) {
-        val sent = api.sendMessage(message.channelId, message.content, message.replyToId, message.files, onProgress)
+        val sent = reportingForbidden {
+            api.sendMessage(message.channelId, message.content, message.replyToId, message.files, onProgress)
+        }
         val away = withContext(io) {
             q.transactionWithResult {
                 val away = detachedNow(sent.channelId)
@@ -390,29 +535,30 @@ class ChatStore(
     }
 
     suspend fun edit(messageId: String, content: String) {
-        val edited = api.editMessage(messageId, content.trim())
+        val edited = reportingForbidden { api.editMessage(messageId, content.trim()) }
         withContext(io) { upsert(edited) }
     }
 
     suspend fun delete(messageId: String) {
-        api.deleteMessage(messageId)
+        reportingForbidden { api.deleteMessage(messageId) }
         withContext(io) { q.deleteMessage(messageId) }
     }
 
     suspend fun toggleReaction(message: Message, emojiId: String?, unicode: String?) {
         val request = ReactionRequest(emojiId, unicode)
         val mine = message.userReactions.any { it.emojiId == emojiId && it.unicode == unicode }
-        if (mine) api.unreact(message.channelId, message.id, request) else api.react(message.channelId, message.id, request)
+        reportingForbidden {
+            if (mine) api.unreact(message.channelId, message.id, request) else api.react(message.channelId, message.id, request)
+        }
         withContext(io) {
-            val row = q.selectMessage(message.id).executeAsOneOrNull() ?: return@withContext
-            val own = decodeList(UserReactionDto.serializer(), row.user_reactions)
-            val updated = if (mine) {
-                own.filterNot { it.emojiId == emojiId && it.unicode == unicode }
-            } else {
-                own + UserReactionDto(emojiId = emojiId, unicode = unicode)
+            reactionLock.withLock {
+                // A linha é lida aqui, já com a trava: o evento pode ter chegado antes ou chegar depois desta resposta.
+                val row = q.selectMessage(message.id).executeAsOneOrNull() ?: return@withContext
+                val own = decodeList(UserReactionDto.serializer(), row.user_reactions).filterNot { it.emojiId == emojiId && it.unicode == unicode }
+                val updated = if (mine) own else own + UserReactionDto(emojiId = emojiId, unicode = unicode)
+                // A contagem chega só pelo evento react_update; aqui muda apenas o "eu reagi".
+                q.setMessageReactions(row.reactions, encodeList(UserReactionDto.serializer(), updated), message.id)
             }
-            // A contagem chega pelo evento react_update; aqui só muda o "eu reagi".
-            q.setMessageReactions(row.reactions, encodeList(UserReactionDto.serializer(), updated), message.id)
         }
     }
 
@@ -433,13 +579,13 @@ class ChatStore(
     // Pins
 
     suspend fun loadPinned(channelId: String): List<Message> {
-        val list = api.pinned(channelId)
+        val list = reportingForbidden { api.pinned(channelId) }
         _pinned.update { it + (channelId to list.map { m -> m.id }.toSet()) }
         return list.map { it.toModel() }
     }
 
     suspend fun setPinned(channelId: String, messageId: String, pinned: Boolean) {
-        if (pinned) api.pin(channelId, messageId) else api.unpin(channelId, messageId)
+        reportingForbidden { if (pinned) api.pin(channelId, messageId) else api.unpin(channelId, messageId) }
         applyPin(channelId, messageId, pinned)
     }
 
@@ -529,18 +675,20 @@ class ChatStore(
             is WsEvent.MessageEdited -> withContext(io) { q.editMessage(event.content, event.editedAt, event.id) }
             is WsEvent.MessageDeleted -> withContext(io) { q.deleteMessage(event.id) }
             is WsEvent.ReactionUpdated -> withContext(io) {
-                val row = q.selectMessage(event.messageId).executeAsOneOrNull() ?: return@withContext
-                val others = decodeList(ReactionSummaryDto.serializer(), row.reactions)
-                    .filterNot { it.emojiId == event.emojiId && it.unicode == event.unicode }
-                val updated = if (event.count > 0) others + ReactionSummaryDto(event.emojiId, event.unicode, event.count) else others
-                var own = row.user_reactions
-                if (event.count == 0) {
-                    own = encodeList(
-                        UserReactionDto.serializer(),
-                        decodeList(UserReactionDto.serializer(), own).filterNot { it.emojiId == event.emojiId && it.unicode == event.unicode },
-                    )
+                reactionLock.withLock {
+                    val row = q.selectMessage(event.messageId).executeAsOneOrNull() ?: return@withContext
+                    val others = decodeList(ReactionSummaryDto.serializer(), row.reactions)
+                        .filterNot { it.emojiId == event.emojiId && it.unicode == event.unicode }
+                    val updated = if (event.count > 0) others + ReactionSummaryDto(event.emojiId, event.unicode, event.count) else others
+                    var own = row.user_reactions
+                    if (event.count == 0) {
+                        own = encodeList(
+                            UserReactionDto.serializer(),
+                            decodeList(UserReactionDto.serializer(), own).filterNot { it.emojiId == event.emojiId && it.unicode == event.unicode },
+                        )
+                    }
+                    q.setMessageReactions(encodeList(ReactionSummaryDto.serializer(), updated), own, event.messageId)
                 }
-                q.setMessageReactions(encodeList(ReactionSummaryDto.serializer(), updated), own, event.messageId)
             }
             is WsEvent.EmbedsUpdated -> withContext(io) {
                 q.setMessageEmbeds(encodeList(EmbedDto.serializer(), event.embeds), event.messageId)
@@ -559,11 +707,20 @@ class ChatStore(
                     _pinned.update { all -> all.mapValues { it.value - event.messageId } }
                 }
             }
-            is WsEvent.ChannelCreated -> withContext(io) {
-                q.insertChannelIfAbsent(event.channelId, event.name, event.channelType, event.position.toLong(), event.topic, event.parentId)
+            is WsEvent.ChannelCreated -> {
+                withContext(io) {
+                    q.insertChannelIfAbsent(event.channelId, event.name, event.channelType, event.position.toLong(), event.topic, event.parentId)
+                }
+                // O evento não traz as permissões do canal novo; a leitura delas vem logo depois.
+                channelRefreshRequests.trySend(Unit)
             }
-            is WsEvent.ChannelUpdated -> withContext(io) {
-                q.updateChannelInfo(event.name, event.position.toLong(), event.topic, event.parentId, event.channelId)
+            is WsEvent.ChannelUpdated -> {
+                withContext(io) {
+                    q.updateChannelInfo(event.name, event.position.toLong(), event.topic, event.parentId, event.channelId)
+                }
+                // Mudar a permissão de um cargo no canal também chega aqui, sem as permissões e sem `parent_id`
+                // (o canal sairia da categoria): a releitura traz as entradas e devolve a categoria.
+                channelRefreshRequests.trySend(Unit)
             }
             is WsEvent.ChannelDeleted -> withContext(io) {
                 q.transaction {
@@ -579,7 +736,15 @@ class ChatStore(
                 publishTyping()
             }
             is WsEvent.AvatarUpdated -> withContext(io) { q.bumpAvatar(event.userId) }
-            is WsEvent.UserJoined, is WsEvent.RoleAdded, is WsEvent.RoleRemoved -> scope.launch { runCatching { syncUsers() } }
+            is WsEvent.UserJoined -> launchUsersSync()
+            is WsEvent.RoleAdded -> {
+                permissions.roleAdded(event.userId, event.roleId)
+                launchUsersSync()
+            }
+            is WsEvent.RoleRemoved -> {
+                permissions.roleRemoved(event.userId, event.roleId)
+                launchUsersSync()
+            }
             is WsEvent.DmUpdated -> withContext(io) { q.transaction { upsert(event.dm) } }
             is WsEvent.PresenceUpdated -> {
                 _presence.update { it + (event.userId to Presence(event.status, event.statusMessage)) }
@@ -602,6 +767,10 @@ class ChatStore(
             }
             else -> Unit
         }
+    }
+
+    private fun launchUsersSync() {
+        scope.launch { quietly { syncUsers() } }
     }
 
     // Gravação
@@ -757,6 +926,8 @@ class ChatStore(
         const val ORIGINAL_MAX_PAGES = 5
         const val DETACHED = "detached:"
         const val MAX_USER_PAGES = 50
+        // Mudar permissões de canal manda um channel_update por cargo; uma releitura basta para a rajada.
+        val CHANNELS_REFRESH_DEBOUNCE = 1.seconds
         // O servidor nunca avisa que alguém parou de digitar: o indicador expira aqui.
         val TYPING_THROTTLE = 2.seconds
         val TYPING_TTL = 6.seconds

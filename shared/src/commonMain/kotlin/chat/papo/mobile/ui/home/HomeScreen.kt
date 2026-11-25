@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.papo.mobile.AppSession
 import chat.papo.mobile.account.Account
+import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.account_settings
 import chat.papo.mobile.resources.rail_add
@@ -174,14 +175,15 @@ private fun AccountRail(
     }
 }
 
-/** Há canal ou conversa direta com mensagem não lida nesta conta. */
+/** Há canal que a conta pode ler, ou conversa direta, com mensagem não lida nesta conta. */
 @Composable
 private fun hasUnread(session: AppSession, accountId: String): Boolean {
     val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
-    val chat = sessions[accountId]?.chat ?: return false
-    val channels by chat.channels.collectAsStateWithLifecycle()
-    val dms by chat.dms.collectAsStateWithLifecycle()
-    return channels.any { it.unread } || dms.any { it.unreadCount > 0 }
+    val account = sessions[accountId] ?: return false
+    val channels by account.chat.channels.collectAsStateWithLifecycle()
+    val permissions by account.chat.access.collectAsStateWithLifecycle()
+    val dms by account.chat.dms.collectAsStateWithLifecycle()
+    return readableChannels(channels, permissions, account.userId).any { it.unread } || dms.any { it.unreadCount > 0 }
 }
 
 @Composable

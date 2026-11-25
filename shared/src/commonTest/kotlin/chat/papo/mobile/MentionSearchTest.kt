@@ -5,12 +5,18 @@ import chat.papo.mobile.chat.MentionQuery
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.ConversationAccess
+import chat.papo.mobile.chat.MentionEdit
 import chat.papo.mobile.chat.authorsByRecency
+import chat.papo.mobile.chat.completeMention
 import chat.papo.mobile.chat.mentionQueryAt
+import chat.papo.mobile.chat.offersEveryone
 import chat.papo.mobile.chat.suggestMentions
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class MentionSearchTest {
     // Gatilho
@@ -253,5 +259,52 @@ class MentionSearchTest {
         val messages = listOf(message("4", "b"), message("3", null), message("2", "a"), message("1", "b"))
         assertEquals(listOf("b", "a"), authorsByRecency(messages))
         assertEquals(emptyList(), authorsByRecency(emptyList()))
+    }
+
+    // @everyone no autocompletar
+
+    @Test
+    fun everyoneEOferecidoQuandoAConsultaEOComecoDeEveryone() {
+        for (query in listOf("", "e", "ev", "every", "everyone", "EVERY", "Everyone")) {
+            assertTrue(offersEveryone(query, allowed = true), query)
+        }
+    }
+
+    @Test
+    fun everyoneNaoEOferecidoParaOutraConsulta() {
+        for (query in listOf("x", "joao", "everyones", "everyone ", " ", "ve", "everyonex")) {
+            assertFalse(offersEveryone(query, allowed = true), query)
+        }
+    }
+
+    @Test
+    fun everyoneNuncaEOferecidoSemAPermissao() {
+        for (query in listOf("", "ev", "everyone")) {
+            assertFalse(offersEveryone(query, allowed = false), query)
+        }
+    }
+
+    @Test
+    fun everyoneSegueOAcessoDaConversa() {
+        // Sem dado (acesso irrestrito) e na DM o acesso não traz `mentionEveryone`: nunca se oferece.
+        val unknown = ConversationAccess.Unrestricted
+        val direct = ConversationAccess.Unrestricted.copy(mentionEveryone = false, deleteOthers = false, joinVoice = false)
+        val allowed = ConversationAccess.Unrestricted.copy(mentionEveryone = true)
+        assertFalse(offersEveryone("", unknown.mentionEveryone))
+        assertFalse(offersEveryone("", direct.mentionEveryone))
+        assertTrue(offersEveryone("", allowed.mentionEveryone))
+    }
+
+    @Test
+    fun escolherEveryoneInsereOTextoEPoeOCursorDepoisDoEspaco() {
+        assertEquals(MentionEdit("@everyone ", 10), completeMention("@", MentionQuery(0, ""), 1, "everyone"))
+        assertEquals(MentionEdit("oi @everyone ", 13), completeMention("oi @ev", MentionQuery(3, "ev"), 6, "everyone"))
+    }
+
+    @Test
+    fun escolherUmNomePreservaOQueVemDepoisDoCursor() {
+        // O espaço que já havia depois do cursor fica: a escolha põe o seu próprio e não apaga nada do que vem depois.
+        assertEquals(MentionEdit("oi @joao  e mais", 9), completeMention("oi @jo e mais", MentionQuery(3, "jo"), 6, "joao"))
+        assertEquals(MentionEdit("a\n@bia ", 7), completeMention("a\n@b", MentionQuery(2, "b"), 4, "bia"))
     }
 }

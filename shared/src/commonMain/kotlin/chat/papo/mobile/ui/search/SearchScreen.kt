@@ -81,6 +81,7 @@ import chat.papo.mobile.chat.SearchFilters
 import chat.papo.mobile.chat.SearchHit
 import chat.papo.mobile.chat.SearchOrder
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.searchByName
 import chat.papo.mobile.core.formatDate
@@ -138,7 +139,7 @@ import kotlinx.datetime.toLocalDateTime
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Instant
 
-/** Nomes que a busca mostra, tirados do que a conta já tem guardado. */
+/** Nomes que a busca mostra, tirados do que a conta já tem guardado; [channels] são só os que a conta pode ler. */
 private class Directory(val users: Map<String, User>, channels: List<Channel>, dms: List<Dm>) {
     val channels = channels.filter { it.type != ChannelType.Category }
     val dms = dms
@@ -161,8 +162,11 @@ fun SearchScreen(session: AccountSession, viewModel: SearchViewModel, onBack: ()
     val recent by viewModel.recentFilters.collectAsStateWithLifecycle()
     val users by chat.users.collectAsStateWithLifecycle()
     val channels by chat.channels.collectAsStateWithLifecycle()
+    val permissions by chat.access.collectAsStateWithLifecycle()
     val dms by chat.dms.collectAsStateWithLifecycle()
-    val directory = remember(users, channels, dms) { Directory(users, channels, dms) }
+    val directory = remember(users, channels, permissions, dms) {
+        Directory(users, readableChannels(channels, permissions, session.userId), dms)
+    }
 
     var text by rememberSaveable { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current

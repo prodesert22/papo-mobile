@@ -27,7 +27,7 @@ class MessageTextTest {
     // Recuo de 100 sp por nível e 10 sp por caractere do marcador (com o espaço).
     private val metrics = ListMetrics(step = 100.sp) { marker -> (marker.length * 10).sp }
 
-    private fun build(content: String, emojis: Map<String, String> = emptyMap()) = messageText(
+    private fun build(content: String, emojis: Map<String, String> = emptyMap(), everyone: Boolean = false) = messageText(
         content = content,
         nameOf = { if (it == id) "Ana" else null },
         accent = Color.Blue,
@@ -35,6 +35,7 @@ class MessageTextTest {
         muted = Color.DarkGray,
         emojiIds = emojis,
         lists = metrics,
+        highlightEveryone = everyone,
     )
 
     private fun MessageText.texts() = parts.map { (it as MessagePart.Text).text }
@@ -194,5 +195,69 @@ class MessageTextTest {
         val texts = build("- [ ] a\n- [x] b").texts()
         assertEquals(listOf("☐${nbsp}a", "☑${nbsp}b"), texts.map { it.text })
         assertNotNull(texts[0].paragraphStyles.single().item.textIndent)
+    }
+
+    // @everyone
+
+    @Test
+    fun everyoneComDestaqueSaiComoMencao() {
+        val text = build("oi @everyone, reunião", everyone = true).texts().single()
+        assertEquals("oi @everyone, reunião", text.text)
+        val style = text.spanStyles.single { text.text.substring(it.start, it.end) == "@everyone" }.item
+        assertEquals(Color.Blue, style.color)
+        assertEquals(FontWeight.SemiBold, style.fontWeight)
+        assertEquals(1, text.spanStyles.count { it.item.color == Color.Blue })
+    }
+
+    @Test
+    fun everyoneSemDestaqueEhTextoComum() {
+        val built = build("oi @everyone, reunião")
+        val text = built.texts().single()
+        assertEquals("oi @everyone, reunião", text.text)
+        assertTrue(text.spanStyles.none { it.item.color == Color.Blue || it.item.fontWeight == FontWeight.SemiBold })
+        assertFalse(built.hasImages)
+    }
+
+    @Test
+    fun everyoneMantemAsMaiusculasDoAutorComEOuSemDestaque() {
+        assertEquals("@EVERYONE", build("@EVERYONE", everyone = true).texts().single().text)
+        assertEquals("@EVERYONE", build("@EVERYONE").texts().single().text)
+    }
+
+    @Test
+    fun everyoneEmCodigoEmLinkOuColadoNumaPalavraMaiorNaoGanhaDestaque() {
+        val code = build("`@everyone`", everyone = true).texts().single()
+        assertEquals(FontFamily.Monospace, code.spanStyles.single().item.fontFamily)
+        assertEquals(Color.Unspecified, code.spanStyles.single().item.color)
+        val link = build("[@everyone](https://x.test/p)", everyone = true).texts().single()
+        assertEquals(1, link.getLinkAnnotations(0, link.length).size)
+        val glued = build("@everyones e @everyone_x", everyone = true).texts().single()
+        assertTrue(glued.spanStyles.none { it.item.color == Color.Blue })
+    }
+
+    @Test
+    fun everyoneSemDestaqueNaoRepeteABarraDaCitacao() {
+        // Sem o destaque o trecho se funde ao vizinho; senão cada pedaço da citação ganharia a barra.
+        assertEquals("▎ hey @everyone", build("> hey @everyone").texts().single().text)
+    }
+
+    @Test
+    fun everyoneComDestaqueNaCitacaoNaoTemBarraPropriaComoAMencao() {
+        assertEquals("▎ hey @everyone", build("> hey @everyone", everyone = true).texts().single().text)
+    }
+
+    @Test
+    fun everyoneEmItemDeListaTemOMesmoDestaque() {
+        val texts = build("- avisem @everyone", everyone = true).texts()
+        assertEquals("•${nbsp}avisem @everyone", texts.single().text)
+        val style = texts.single().spanStyles.single { texts.single().text.substring(it.start, it.end) == "@everyone" }.item
+        assertEquals(Color.Blue, style.color)
+    }
+
+    @Test
+    fun everyoneNaoAtrapalhaOEmojiDoServidorAoLado() {
+        val built = build("@everyone :party:", mapOf("party" to "e1"), everyone = true)
+        assertEquals(setOf("e1"), built.emojiIds)
+        assertTrue(built.hasImages)
     }
 }

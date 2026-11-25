@@ -26,6 +26,10 @@ class ChatApi(private val client: PapoClient) {
     suspend fun channels(): List<ChannelDto> =
         http.get { url(path("/channels")) }.bodyOrThrow<ChannelsResponse>().channels
 
+    /** Cargos do servidor com as flags. Só pede login (não é `/auth`); a lista inteira vem de uma vez, sem paginação. */
+    suspend fun roles(): List<RoleDto> =
+        http.get { url(path("/roles")) }.bodyOrThrow<RolesResponse>().roles
+
     suspend fun dms(): List<DirectConversationDto> =
         http.get { url(path("/dms")) }.bodyOrThrow<DmsResponse>().dms
 

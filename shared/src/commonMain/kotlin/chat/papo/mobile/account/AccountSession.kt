@@ -1,6 +1,7 @@
 package chat.papo.mobile.account
 
 import app.cash.sqldelight.db.SqlDriver
+import chat.papo.mobile.chat.AccessStore
 import chat.papo.mobile.chat.ChatStore
 import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
@@ -43,7 +44,9 @@ class AccountSession(
     val recentSearches = RecentSearchFilters()
 
     val ws = WsClient(client, scope, sessionStillValid = ::sessionStillValid)
-    val chat = ChatStore(userId, db, api, ws, scope, io)
+    /** Dono do servidor, cargos e entradas por canal desta conta; o `ChatStore` o lê e o atualiza. */
+    val permissions = AccessStore(db.metaQueries, api, scope, io, server = auth::server)
+    val chat = ChatStore(userId, db, api, ws, scope, io, permissions)
 
     private var started = false
 

@@ -8,6 +8,9 @@ import chat.papo.mobile.chat.OpenConversation
 import chat.papo.mobile.chat.SwitchEntry
 import chat.papo.mobile.chat.SwitchKind
 import chat.papo.mobile.core.AppDispatchers
+import chat.papo.mobile.data.api.ChannelDto
+import chat.papo.mobile.data.api.ChannelPermissionEntryDto
+import chat.papo.mobile.data.api.ChannelPermissionsDto
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.db.registry.RegistryDb
 import chat.papo.mobile.data.ws.WsEvent
@@ -108,6 +111,9 @@ class QuickSwitcherViewModelTest {
 
     private fun pairs(entries: List<SwitchEntry>?) = entries.orEmpty().map { it.accountId to it.channelId }
 
+    private fun entry(role: String, read: Boolean = false, voice: Boolean = false) =
+        ChannelPermissionEntryDto(role, permissions = ChannelPermissionsDto(readChannel = read, connectVoice = voice))
+
     @Test
     fun reuneAsConversasDeDuasContasSemFazerNenhumaRequisicao() = runTest {
         val f = Fixture(this)
@@ -145,6 +151,42 @@ class QuickSwitcherViewModelTest {
         assertEquals(1, updated.first().unreadCount)
 
         assertEquals(requestsBefore, f.backend.engine.requestHistory.size)
+    }
+
+    @Test
+    fun canalSemLeituraNuncaEListadoEVoltaQuandoALeituraVolta() = runTest {
+        val f = Fixture(this)
+        f.manager.load()
+        val um = f.login("um.test")
+        val dois = f.login("dois.test")
+        f.channel(um, "c1", "geral")
+        f.channel(um, "c2", "secreto")
+        f.channel(um, "v1", "Palco", type = "voice")
+        f.channel(dois, "c2", "secreto") // o mesmo id em outro servidor é outro canal, e nada o esconde
+        runCurrent()
+        // A conta `um` só tem o cargo "leitores": "c2" é do cargo "mod", e "v1" dá voz, mas não leitura, a "leitores".
+        val permissions = f.manager.sessionMap.value.getValue(um).permissions
+        permissions.refreshMeta()
+        permissions.applyChannels(
+            listOf(
+                ChannelDto("c1"),
+                ChannelDto("c2", permissions = listOf(entry("mod", read = true))),
+                ChannelDto("v1", type = "voice", permissions = listOf(entry("leitores", voice = true))),
+            ),
+        )
+        permissions.applyUsers(mapOf("id-ana" to setOf("leitores")), complete = true, since = permissions.beginUsersSync())
+        runCurrent()
+        val requestsBefore = f.backend.engine.requestHistory.size
+
+        val vm = viewModel(f)
+        val hidden = vm.entries.first { it?.size == 2 }
+
+        assertEquals(setOf(um to "c1", dois to "c2"), pairs(hidden).toSet())
+        assertEquals(requestsBefore, f.backend.engine.requestHistory.size) // esconder não pede nada
+
+        permissions.roleAdded("id-ana", "mod")
+
+        assertEquals(setOf(um to "c1", um to "c2", dois to "c2"), pairs(vm.entries.first { it?.size == 3 }).toSet())
     }
 
     @Test

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -44,7 +45,9 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -103,6 +106,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -117,6 +121,8 @@ import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.ChannelType
+import chat.papo.mobile.chat.EVERYONE_MENTION
+import chat.papo.mobile.chat.EVERYONE_NAME
 import chat.papo.mobile.chat.EmojiCompletion
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiRef
@@ -128,12 +134,15 @@ import chat.papo.mobile.chat.UnicodeEmoji
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.UnicodeEmojis
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.authorCanEveryone
 import chat.papo.mobile.chat.authorsByRecency
+import chat.papo.mobile.chat.completeMention
 import chat.papo.mobile.chat.continuesGroup
 import chat.papo.mobile.chat.filterPinned
-import chat.papo.mobile.chat.isAddressedTo
+import chat.papo.mobile.chat.isHighlightedFor
 import chat.papo.mobile.chat.mentionQueryAt
 import chat.papo.mobile.chat.newArrivals
+import chat.papo.mobile.chat.offersEveryone
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.suggestMentions
 import chat.papo.mobile.core.dayKey
@@ -150,11 +159,13 @@ import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_emoji
 import chat.papo.mobile.resources.msg_react_more
 import chat.papo.mobile.resources.chat_empty
+import chat.papo.mobile.resources.chat_empty_read_only
 import chat.papo.mobile.resources.chat_focus_missing
 import chat.papo.mobile.resources.chat_go_to_latest
 import chat.papo.mobile.resources.chat_history_start
 import chat.papo.mobile.resources.chat_locating
 import chat.papo.mobile.resources.chat_keyboard
+import chat.papo.mobile.resources.chat_no_access
 import chat.papo.mobile.resources.chat_new_messages
 import chat.papo.mobile.resources.chat_pinned
 import chat.papo.mobile.resources.chat_pinned_empty
@@ -162,6 +173,7 @@ import chat.papo.mobile.resources.chat_pinned_filter
 import chat.papo.mobile.resources.chat_pinned_no_match
 import chat.papo.mobile.resources.chat_placeholder
 import chat.papo.mobile.resources.chat_placeholder_dm
+import chat.papo.mobile.resources.chat_read_only
 import chat.papo.mobile.resources.chat_remove_attachment
 import chat.papo.mobile.resources.chat_reply_continue
 import chat.papo.mobile.resources.chat_reply_not_reached
@@ -174,6 +186,7 @@ import chat.papo.mobile.resources.chat_typing_one
 import chat.papo.mobile.resources.chat_unknown_user
 import chat.papo.mobile.resources.chat_viewing_older
 import chat.papo.mobile.resources.chat_yesterday
+import chat.papo.mobile.resources.mention_everyone_hint
 import chat.papo.mobile.resources.msg_copy
 import chat.papo.mobile.resources.msg_delete
 import chat.papo.mobile.resources.msg_delete_body
@@ -229,6 +242,9 @@ fun ChatScreen(
     val typing by chat.typing.collectAsStateWithLifecycle()
     val pinnedIds by chat.pinned.collectAsStateWithLifecycle()
     val detachedChannels by chat.detached.collectAsStateWithLifecycle()
+    // O que se sabe das permissões da conta (cargo do autor do `@everyone`) e o que a conversa permite (oferecê-lo).
+    val permissions by chat.access.collectAsStateWithLifecycle()
+    val access by viewModel.access.collectAsStateWithLifecycle()
     // O trecho à vista é antigo e não chega à mensagem mais nova (aberto a partir de uma busca).
     val detached = viewModel.channelId in detachedChannels
     val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
@@ -250,6 +266,7 @@ fun ChatScreen(
     val title = channel?.name ?: dmUser?.displayName ?: ""
 
     val isVoice = channel?.type == ChannelType.Voice
+    val isDm = dms.any { it.id == viewModel.channelId }
     val draft = viewModel.draft
     // O rascunho vai para o banco quando a tela sai de cena: outra tela por cima, app em segundo plano ou fim da conversa.
     LifecycleResumeEffect(session) {
@@ -261,6 +278,16 @@ fun ChatScreen(
     var columnPx by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
     var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
+    // Perder a leitura com uma folha ou diálogo aberto: eles agiriam sobre uma conversa que a pessoa já não vê.
+    LaunchedEffect(access.readDenied) {
+        if (access.readDenied) {
+            actionsFor = null
+            reactingTo = null
+            selecting = null
+            confirmDelete = null
+            viewing = null
+        }
+    }
     val listState = rememberLazyListState()
     val byId = remember(messages) { messages.associateBy { it.id } }
     // Quem falou há pouco no canal vem primeiro nas sugestões de menção.
@@ -394,7 +421,7 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    if (isVoice && onJoinCall != null) {
+                    if (isVoice && onJoinCall != null && access.joinVoice) {
                         IconButton(onClick = onJoinCall) {
                             Icon(Icons.Filled.Call, contentDescription = stringResource(Res.string.channels_join_call))
                         }
@@ -405,7 +432,7 @@ fun ChatScreen(
                     IconButton(onClick = onSearch) {
                         Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.chat_search))
                     }
-                    if (channel != null && channel.type != ChannelType.Category) {
+                    if (pinnedListOffered(access, isDm, channel?.type)) {
                         IconButton(onClick = viewModel::showPinned) {
                             Icon(Icons.Filled.PushPin, contentDescription = stringResource(Res.string.chat_pinned))
                         }
@@ -416,10 +443,16 @@ fun ChatScreen(
     ) { padding ->
         // O espaço de baixo (teclado, gaveta de emoji ou barra de navegação) é do compositor.
         Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).onSizeChanged { columnPx = it.height }) {
+            // Sem leitura não há lista nem compositor; o rascunho continua guardado para quando o acesso voltar.
+            if (access.readDenied) {
+                NoAccessPane(Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)))
+                return@Column
+            }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (messages.isEmpty() && pending.isEmpty() && state.loadedOnce) {
                     Text(
-                        stringResource(Res.string.chat_empty),
+                        // "Diga oi" não serve a quem não pode enviar.
+                        stringResource(if (access.send) Res.string.chat_empty else Res.string.chat_empty_read_only),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.BottomStart).padding(20.dp),
@@ -445,6 +478,7 @@ fun ChatScreen(
                         val older = messages.getOrNull(index + 1)
                         val newDay = older == null || older.createdAt?.dayKey() != message.createdAt?.dayKey()
                         val compact = older != null && continuesGroup(older, message)
+                        val everyoneAuthor = authorCanEveryone(permissions, message.authorId, message.webhookId)
                         Column {
                             if (newDay && (older != null || state.reachedStart)) DaySeparator(message)
                             MessageItem(
@@ -458,13 +492,18 @@ fun ChatScreen(
                                 replyMissing = message.replyTo in state.missingReplies,
                                 compact = compact,
                                 pinned = pinnedIds[viewModel.channelId]?.contains(message.id) == true,
-                                addressedToMe = isAddressedTo(session.userId, message, message.replyTo?.let { byId[it] }),
+                                addressedToMe = isHighlightedFor(session.userId, message, message.replyTo?.let { byId[it] }, everyoneAuthor),
+                                highlightEveryone = everyoneAuthor,
                                 highlighted = state.replyTo?.id == message.id || state.editing?.id == message.id ||
                                     state.focusId == message.id,
+                                canReact = access.react,
+                                canRemoveOwnReaction = access.removeOwnReaction,
                                 onOpenReply = { viewModel.openReply(message) },
-                                onReply = { viewModel.startReply(message) },
-                                onQuickReact = { viewModel.quickReact(message) },
-                                onLongPress = { actionsFor = message },
+                                // Sem envio não se responde, nem deslizando nem pela acessibilidade; sem reação, nem o toque duplo.
+                                onReply = { viewModel.startReply(message) }.takeIf { access.send },
+                                onQuickReact = { viewModel.quickReact(message) }.takeIf { access.react },
+                                // A folha só abre se tiver o que oferecer (copiar não existe numa mensagem só de anexo).
+                                onLongPress = { if (messageActionOffer(access, message, session.userId).any) actionsFor = message },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
                                 onOpenImage = { viewing = it },
                             )
@@ -533,6 +572,11 @@ fun ChatScreen(
 
             if (detached) OlderHistoryBar(busy = state.loadingNewer || state.returning, onLatest = viewModel::goToLatest)
             TypingLine(typing[viewModel.channelId].orEmpty().mapNotNull { users[it] })
+            // Sem envio entra a barra de somente leitura no lugar do compositor; editar a própria mensagem o mantém.
+            if (!composerOffered(access, editing = state.editing != null)) {
+                ReadOnlyBar()
+                return@Column
+            }
             Composer(
                 session = session,
                 state = state,
@@ -540,6 +584,8 @@ fun ChatScreen(
                 users = users,
                 presence = presence,
                 recentAuthors = recentAuthors,
+                mentionEveryone = access.mentionEveryone,
+                canAttach = access.attach,
                 serverEmojis = serverEmojis,
                 emojiCatalog = drawableEmojis,
                 availableHeightPx = columnPx,
@@ -564,8 +610,7 @@ fun ChatScreen(
             session = session,
             message = message,
             users = users,
-            mine = message.authorId == session.userId,
-            canPin = channel != null,
+            offer = messageActionOffer(access, message, session.userId),
             pinned = isPinned,
             onDismiss = { actionsFor = null },
             onReact = { emojiId, unicode -> viewModel.react(message, emojiId, unicode) },
@@ -587,6 +632,7 @@ fun ChatScreen(
             users = users,
             emojiIds = serverEmojis.idByName,
             unicodeEmojis = unicodeEmojis,
+            highlightEveryone = authorCanEveryone(permissions, message.authorId, message.webhookId),
             onDismiss = { selecting = null },
         )
     }
@@ -616,7 +662,7 @@ fun ChatScreen(
         )
     }
     viewing?.let { ImageViewer(session, it) { viewing = null } }
-    state.pinnedList?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
+    state.pinnedList?.takeUnless { access.readDenied }?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
 }
 
 /** Quantos itens acima do fim a lista precisa estar para oferecer o atalho sem contagem. */
@@ -705,6 +751,60 @@ private fun ActionNoticeBar(text: String, actionLabel: String, onAction: () -> U
     ) { Text(text) }
 }
 
+/** Ocupa o lugar do compositor num canal em que a pessoa lê, mas não pode enviar. */
+@Composable
+private fun ReadOnlyBar() {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+        Column {
+            Row(
+                // A altura do compositor, para o canal não pular quando o envio vai e volta.
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    stringResource(Res.string.chat_read_only),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            // O mesmo espaço de baixo do compositor: teclado que ficou aberto ou a barra de navegação.
+            Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.ime.union(WindowInsets.navigationBars)))
+        }
+    }
+}
+
+/** Ocupa o lugar da lista e do compositor quando o servidor negou a leitura do canal. */
+@Composable
+private fun NoAccessPane(modifier: Modifier = Modifier) {
+    Column(
+        modifier.padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            Icons.Filled.Lock,
+            contentDescription = null,
+            modifier = Modifier.size(40.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            stringResource(Res.string.chat_no_access),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
 @Composable
 private fun presenceLabel(status: String?): String = stringResource(
     when (status) {
@@ -763,6 +863,8 @@ private fun Composer(
     users: Map<String, User>,
     presence: Map<String, Presence>,
     recentAuthors: List<String>,
+    mentionEveryone: Boolean,
+    canAttach: Boolean,
     serverEmojis: ServerEmojis,
     emojiCatalog: UnicodeEmojiCatalog?,
     availableHeightPx: Int,
@@ -879,6 +981,8 @@ private fun Composer(
             suggestMentions(mention.text, users.values, session.userId, recentAuthors, presence)
         }
     }
+    // `@everyone` vem na frente da lista, quando o autor pode usá-lo e o que foi digitado é o começo de `everyone`.
+    val everyoneSuggested = mention != null && offersEveryone(mention.text, mentionEveryone)
     // Com o teclado aberto sobra pouca conversa: a lista de sugestões nunca passa de 40% da altura da tela.
     val maxSuggestionsHeight = with(density) {
         minOf(SUGGESTION_ROW * MAX_SUGGESTION_ROWS, (availableHeightPx * 0.4f).toDp().coerceAtLeast(SUGGESTION_ROW * 2))
@@ -887,11 +991,22 @@ private fun Composer(
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
         Column {
         Column(Modifier.onSizeChanged { headerPx = it.height }) {
-            if (suggestions.isNotEmpty() && mention != null) {
-                MentionSuggestions(session, suggestions, queryText = mention.text, maxHeight = maxSuggestionsHeight) { user ->
-                    val text = draft.text.substring(0, mention.start) + "@${user.username} " + draft.text.substring(draft.selection.start)
+            if ((suggestions.isNotEmpty() || everyoneSuggested) && mention != null) {
+                MentionSuggestions(
+                    session,
+                    suggestions,
+                    showEveryone = everyoneSuggested,
+                    queryText = mention.text,
+                    maxHeight = maxSuggestionsHeight,
+                    // Texto comum: o servidor lê o `@everyone` literal, então não passa por `onPickMention`.
+                    onPickEveryone = {
+                        val edit = completeMention(draft.text, mention, draft.selection.start, EVERYONE_NAME)
+                        onDraftChange(TextFieldValue(edit.text, TextRange(edit.cursor)))
+                    },
+                ) { user ->
+                    val edit = completeMention(draft.text, mention, draft.selection.start, user.username)
                     onPickMention(user.username, user.id)
-                    onDraftChange(TextFieldValue(text, TextRange(mention.start + user.username.length + 2)))
+                    onDraftChange(TextFieldValue(edit.text, TextRange(edit.cursor)))
                 }
             }
 
@@ -973,8 +1088,13 @@ private fun Composer(
             }
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
-                IconButton(onClick = pickFiles, enabled = state.editing == null) {
-                    Icon(Icons.Filled.AttachFile, contentDescription = stringResource(Res.string.chat_attach))
+                if (canAttach) {
+                    IconButton(onClick = pickFiles, enabled = state.editing == null) {
+                        Icon(Icons.Filled.AttachFile, contentDescription = stringResource(Res.string.chat_attach))
+                    }
+                } else {
+                    // O campo ocuparia o lugar do clipe: a folga mantém o recuo de quando ele existe.
+                    Spacer(Modifier.width(8.dp))
                 }
                 TextField(
                     value = draft,
@@ -1030,20 +1150,28 @@ private fun Composer(
 }
 
 /**
- * Quem pode ser mencionado, do melhor casamento ao pior. A lista rola quando há mais do que cabe, e volta ao
- * primeiro resultado quando a consulta ([queryText]) muda.
+ * Quem pode ser mencionado, do melhor casamento ao pior, com `@everyone` na frente quando [showEveryone]. A lista
+ * rola quando há mais do que cabe, e volta ao primeiro resultado quando a consulta ([queryText]) muda ou quando
+ * `@everyone` entra ou sai da lista.
  */
 @Composable
 private fun MentionSuggestions(
     session: AccountSession,
     users: List<User>,
+    showEveryone: Boolean,
     queryText: String,
     maxHeight: Dp,
+    onPickEveryone: () -> Unit,
     onPick: (User) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    LaunchedEffect(queryText) { listState.scrollToItem(0) }
+    // Uma linha nova no topo (a permissão de `@everyone` chegou com a lista aberta) não move a rolagem: a lista segue
+    // ancorada na linha que já aparecia e deixa a nova acima da área visível, cortada ou escondida.
+    LaunchedEffect(queryText, showEveryone) { listState.scrollToItem(0) }
     LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxHeight), state = listState) {
+        if (showEveryone) {
+            item(key = EVERYONE_MENTION) { EveryoneSuggestion(onPickEveryone) }
+        }
         items(users, key = { it.id }) { user ->
             Row(
                 Modifier
@@ -1072,6 +1200,48 @@ private fun MentionSuggestions(
                 )
             }
         }
+    }
+}
+
+/** A sugestão `@everyone`: um ícone de grupo no lugar do avatar e a dica de quem o aviso alcança. */
+@Composable
+private fun EveryoneSuggestion(onPick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = SUGGESTION_ROW)
+            .clickable(onClick = onPick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(28.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Groups,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            EVERYONE_MENTION,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            stringResource(Res.string.mention_everyone_hint),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1128,8 +1298,7 @@ private fun MessageActionsSheet(
     session: AccountSession,
     message: Message,
     users: Map<String, User>,
-    mine: Boolean,
-    canPin: Boolean,
+    offer: MessageActionOffer,
     pinned: Boolean,
     onDismiss: () -> Unit,
     onReact: (emojiId: String?, unicode: String?) -> Unit,
@@ -1147,34 +1316,38 @@ private fun MessageActionsSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 16.dp)) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                quick.forEach { ref ->
-                    ReactionChoice(
-                        onClick = {
-                            session.recentEmojis.used(ref)
+            if (offer.react) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    quick.forEach { ref ->
+                        ReactionChoice(
+                            onClick = {
+                                session.recentEmojis.used(ref)
+                                when (ref) {
+                                    is EmojiRef.Unicode -> onReact(null, ref.char)
+                                    is EmojiRef.Custom -> onReact(ref.id, null)
+                                }
+                                onDismiss()
+                            },
+                        ) {
                             when (ref) {
-                                is EmojiRef.Unicode -> onReact(null, ref.char)
-                                is EmojiRef.Custom -> onReact(ref.id, null)
+                                is EmojiRef.Unicode -> ReactionGlyph(session, null, ref.char)
+                                is EmojiRef.Custom -> ReactionGlyph(session, ref.id, null)
                             }
-                            onDismiss()
-                        },
-                    ) {
-                        when (ref) {
-                            is EmojiRef.Unicode -> ReactionGlyph(session, null, ref.char)
-                            is EmojiRef.Custom -> ReactionGlyph(session, ref.id, null)
                         }
                     }
+                    ReactionChoice(onClick = onMoreReactions) {
+                        Icon(Icons.Filled.Add, contentDescription = stringResource(Res.string.msg_react_more))
+                    }
                 }
-                ReactionChoice(onClick = onMoreReactions) {
-                    Icon(Icons.Filled.Add, contentDescription = stringResource(Res.string.msg_react_more))
-                }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
-            SheetAction(Icons.AutoMirrored.Filled.Reply, stringResource(Res.string.msg_reply)) { onReply(); onDismiss() }
-            if (message.content.isNotBlank()) {
+            if (offer.reply) {
+                SheetAction(Icons.AutoMirrored.Filled.Reply, stringResource(Res.string.msg_reply)) { onReply(); onDismiss() }
+            }
+            if (offer.text) {
                 SheetAction(Icons.Filled.ContentCopy, stringResource(Res.string.msg_copy)) {
                     clipboard.setText(AnnotatedString(copyableText(message.content, users)))
                     onDismiss()
@@ -1184,14 +1357,16 @@ private fun MessageActionsSheet(
                     onDismiss()
                 }
             }
-            if (canPin) {
+            if (offer.pin) {
                 SheetAction(Icons.Filled.PushPin, stringResource(if (pinned) Res.string.msg_unpin else Res.string.msg_pin)) {
                     onTogglePin()
                     onDismiss()
                 }
             }
-            if (mine) {
+            if (offer.edit) {
                 SheetAction(Icons.Filled.Edit, stringResource(Res.string.msg_edit)) { onEdit(); onDismiss() }
+            }
+            if (offer.delete) {
                 SheetAction(Icons.Filled.Delete, stringResource(Res.string.msg_delete), destructive = true) { onDelete(); onDismiss() }
             }
         }

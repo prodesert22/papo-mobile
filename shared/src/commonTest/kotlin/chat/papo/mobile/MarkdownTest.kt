@@ -1,9 +1,11 @@
 package chat.papo.mobile
 
 import chat.papo.mobile.chat.Markdown
+import chat.papo.mobile.chat.MarkdownBlock
 import chat.papo.mobile.chat.TextSpan
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 
 class MarkdownTest {
     private fun p(text: String) = Markdown.parse(text)
@@ -86,5 +88,90 @@ class MarkdownTest {
         )
         // Links com esquema perigoso não viram link.
         assertEquals(listOf(TextSpan("[x](javascript:alert(1))")), p("[x](javascript:alert(1))"))
+    }
+
+    // @everyone
+
+    private fun everyone(text: String) = TextSpan(text, everyone = true)
+
+    @Test
+    fun everyoneViraUmTrechoProprioSemDiferenciarMaiusculas() {
+        assertEquals(listOf(TextSpan("oi "), everyone("@everyone"), TextSpan("!")), p("oi @everyone!"))
+        assertEquals(listOf(everyone("@EVERYONE")), p("@EVERYONE"))
+        assertEquals(listOf(TextSpan("a "), everyone("@Everyone"), TextSpan(" b")), p("a @Everyone b"))
+    }
+
+    @Test
+    fun everyoneSoCasaAteALetraDigitoOuSublinhadoAscii() {
+        assertEquals(listOf(TextSpan("@everyones")), p("@everyones"))
+        assertEquals(listOf(TextSpan("@everyone_x")), p("@everyone_x"))
+        assertEquals(listOf(TextSpan("@everyone1")), p("@everyone1"))
+        assertEquals(listOf(everyone("@everyone"), TextSpan("é")), p("@everyoneé"))
+        assertEquals(listOf(everyone("@everyone"), TextSpan(".")), p("@everyone."))
+    }
+
+    @Test
+    fun arrobaQueNaoEEveryoneFicaComoTexto() {
+        assertEquals(listOf(TextSpan("@every")), p("@every")) // curto demais para caber `@everyone`
+        assertEquals(listOf(TextSpan("oi @everyon")), p("oi @everyon"))
+        assertEquals(listOf(TextSpan("@joaozinho!")), p("@joaozinho!")) // cabe, mas é outro nome
+        assertEquals(listOf(TextSpan("@")), p("@"))
+    }
+
+    @Test
+    fun everyoneColadoNumaPalavraTambemCasaComoNoWeb() {
+        // O servidor e o web casam em qualquer lugar do texto; só o dourado pede início ou espaço antes.
+        assertEquals(listOf(TextSpan("x"), everyone("@everyone")), p("x@everyone"))
+    }
+
+    @Test
+    fun everyoneEmCodigoEmLinkOuEscapadoNaoViraTrecho() {
+        assertEquals(listOf(TextSpan("@everyone", code = true)), p("`@everyone`"))
+        assertEquals(listOf(TextSpan("@everyone", code = true)), p("```\n@everyone\n```"))
+        assertEquals(listOf(TextSpan("@everyone", link = "https://x.test/p")), p("[@everyone](https://x.test/p)"))
+        assertEquals(
+            listOf(TextSpan("https://x.test/@everyone", link = "https://x.test/@everyone")),
+            p("https://x.test/@everyone"),
+        )
+        assertEquals(listOf(TextSpan("@everyone")), p("\\@everyone"))
+    }
+
+    @Test
+    fun everyoneHerdaOEstiloDeOndeEstaEDoisSeguidosNaoSeFundem() {
+        assertEquals(listOf(TextSpan("@everyone", bold = true, everyone = true)), p("**@everyone**"))
+        assertEquals(listOf(everyone("@everyone"), everyone("@everyone")), p("@everyone@everyone"))
+        assertEquals(
+            listOf(TextSpan("hey ", italic = true, quote = true), TextSpan("@everyone", italic = true, quote = true, everyone = true)),
+            p("> hey @everyone"),
+        )
+    }
+
+    @Test
+    fun everyoneEmTituloELista() {
+        assertEquals(listOf(TextSpan("@everyone", bold = true, everyone = true)), p("# @everyone"))
+        assertEquals(
+            listOf(MarkdownBlock.ListItem(0, "•", listOf(TextSpan("avisem "), everyone("@everyone")))),
+            Markdown.blocks("- avisem @everyone"),
+        )
+    }
+
+    @Test
+    fun semOEveryoneOTextoVoltaAoQueEraAntesDeOReconhecer() {
+        assertEquals(listOf(TextSpan("oi @everyone!")), Markdown.withoutEveryone(p("oi @everyone!")))
+        assertEquals(
+            listOf(TextSpan("hey @everyone", italic = true, quote = true)),
+            Markdown.withoutEveryone(p("> hey @everyone")),
+        )
+        assertEquals(
+            listOf(TextSpan("a "), TextSpan("b", bold = true), TextSpan(" @everyone")),
+            Markdown.withoutEveryone(p("a **b** @everyone")),
+        )
+    }
+
+    @Test
+    fun semOEveryoneNaoMexeNosOutrosTrechosNemCopiaALista() {
+        val plain = p("oi **tudo** `bem` [site](https://x.test/p)")
+        assertSame(plain, Markdown.withoutEveryone(plain))
+        assertEquals(emptyList(), Markdown.withoutEveryone(emptyList()))
     }
 }

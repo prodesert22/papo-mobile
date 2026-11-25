@@ -51,6 +51,7 @@ internal class FakeBackend(private val serverPassword: String? = null) {
 
         when (request.url.encodedPath) {
             "/server" -> json("""{"id":"s","name":"Servidor $host","public":${serverPassword == null},"member_count":2}""")
+            "/roles" -> json("""{"roles":[]}""")
             "/auth/login_server" ->
                 if (field("server_password") == serverPassword) respond("", HttpStatusCode.NoContent, headersOf(HttpHeaders.SetCookie, "Auth=temp; Max-Age=1800"))
                 else denied("Senha do servidor incorreta")

@@ -43,7 +43,7 @@ The build uses the Gradle wrapper with JDK 21, selected by `gradle/gradle-daemon
 ./gradlew :shared:testAndroidHostTest      # unit tests
 ./gradlew :androidApp:lintDebug            # Android lint
 ./gradlew :androidApp:assembleDebug        # debug APK
-python3 -m unittest discover -s tools/tests   # tests for tools/release.py
+python3 -m unittest discover -s tools/tests   # tests for tools/release.py and the fake backend
 tools/dev/run-device-tests.sh <serial>     # instrumented tests on one device
 ```
 

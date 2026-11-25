@@ -180,4 +180,34 @@ class EncodeMentionsTest {
         assertEquals("${mention(joao)} ${mention(bia)}", encode("@joao @bia"))
         assertEquals("a\n\n${mention(joao)}", encode("a\n\n@joao"))
     }
+
+    // @everyone
+
+    private val everyoneUser = user("0b0e7c1e-0000-4000-8000-0000000000ee", "everyone")
+
+    @Test
+    fun everyoneDigitadoFicaComoTextoEOServidorOLeLiteral() {
+        assertEquals("avisem @everyone", encode("avisem @everyone"))
+        assertEquals("@EVERYONE agora", encode("@EVERYONE agora"))
+        assertEquals("@everyone.", encode("@everyone."))
+    }
+
+    @Test
+    fun everyoneDigitadoNuncaViraUmUsuarioChamadoEveryone() {
+        val who = users + everyoneUser
+        assertEquals("avisem @everyone e ${mention(joao)}", encode("avisem @everyone e @joao", who = who))
+        assertEquals("@Everyone", encode("@Everyone", who = who))
+    }
+
+    @Test
+    fun usuarioChamadoEveryoneEscolhidoNaListaVira() {
+        val who = users + everyoneUser
+        assertEquals(mention(everyoneUser.id), encode("@everyone", picked = mapOf("everyone" to everyoneUser.id), who = who))
+    }
+
+    @Test
+    fun nomeQueSoComecaComEveryoneContinuaSendoUmNomeComum() {
+        val who = users + user("0b0e7c1e-0000-4000-8000-0000000000ef", "everyone.silva")
+        assertEquals(mention("0b0e7c1e-0000-4000-8000-0000000000ef"), encode("@everyone.silva", who = who))
+    }
 }

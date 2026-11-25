@@ -8,23 +8,32 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.ConversationAccess
+import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Draft
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.Located
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.PendingMessage
+import chat.papo.mobile.chat.PermissionSnapshot
+import chat.papo.mobile.chat.conversationAccess
 import chat.papo.mobile.chat.encodeMentions
 import chat.papo.mobile.chat.renderMentions
+import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.ws.WsEvent
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.toUiError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -84,17 +93,31 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState(locating = target != null))
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
+    /**
+     * O que a conta pode fazer nesta conversa (canal ou conversa direta), segundo as permissões que a sessão conhece.
+     * Já nasce calculado com o que há agora; sem dados as respostas são "desconhecido", que oferece tudo.
+     */
+    val access: StateFlow<ConversationAccess> = combine(chat.access, chat.dms, ::accessTo)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, accessTo(chat.access.value, chat.dms.value))
+
     /** Nomes escolhidos no autocompletar deste rascunho, para virar menção no envio. */
     private val pickedMentions = HashMap<String, String>()
 
     init {
         chat.setViewing(channelId)
-        viewModelScope.launch {
-            attempt { chat.refreshLatest(channelId) }
-            _state.update { it.copy(loadedOnce = true, reachedStart = !chat.hasOlder(channelId)) }
-            target?.let { locate(it) }
+        var located = false
+        whileReadable {
+            coroutineScope {
+                this@coroutineScope.launch { quietly { chat.loadPinned(channelId) } }
+                attempt { chat.refreshLatest(channelId) }
+                _state.update { it.copy(loadedOnce = true, reachedStart = !chat.hasOlder(channelId)) }
+                // A mensagem pedida só se procura uma vez: se a leitura se perder no meio, a procura recomeça quando voltar.
+                if (!located) {
+                    target?.let { locate(it) }
+                    located = true
+                }
+            }
         }
-        viewModelScope.launch { runCatching { chat.loadPinned(channelId) } }
     }
 
     /** Mensagens com uma reação em voo; só a thread principal mexe nele. */
@@ -144,7 +167,7 @@ class ChatViewModel(
     private fun searchOriginal(id: String) {
         val s = _state.value
         // Uma procura por vez, e a original já dada como apagada não se procura de novo.
-        if (s.locating || s.returning || id in s.missingReplies) return
+        if (s.locating || s.returning || id in s.missingReplies || readDenied) return
         _state.update { it.copy(locating = true, replyNotReached = null, focusId = null) }
         viewModelScope.launch {
             var located: Located? = null
@@ -176,7 +199,7 @@ class ChatViewModel(
     /** Lendo um trecho antigo, a rolagem chegou perto do fim dele: carrega o que vem depois. */
     fun loadNewer() {
         val s = _state.value
-        if (s.loadingNewer || s.returning || s.locating || s.focusId != null || channelId !in chat.detached.value) return
+        if (s.loadingNewer || s.returning || s.locating || s.focusId != null || channelId !in chat.detached.value || readDenied) return
         _state.update { it.copy(loadingNewer = true) }
         viewModelScope.launch {
             var added = 0
@@ -189,7 +212,7 @@ class ChatViewModel(
 
     /** Deixa o trecho antigo e volta para as mensagens recentes. */
     fun goToLatest() {
-        if (_state.value.returning) return
+        if (_state.value.returning || readDenied) return
         _state.update { it.copy(returning = true, focusId = null) }
         viewModelScope.launch {
             if (attempt { chat.refreshLatest(channelId) }) {
@@ -214,7 +237,7 @@ class ChatViewModel(
     fun loadOlder() {
         val s = _state.value
         // Enquanto a mensagem pedida é procurada, é a procura que pagina o histórico.
-        if (s.loadingOlder || s.reachedStart || !s.loadedOnce || s.locating) return
+        if (s.loadingOlder || s.reachedStart || !s.loadedOnce || s.locating || readDenied) return
         _state.update { it.copy(loadingOlder = true) }
         viewModelScope.launch {
             // Primeiro mostra o que já está guardado; só vai ao servidor quando acaba.
@@ -260,6 +283,36 @@ class ChatViewModel(
     }
 
     fun dismissError() = _state.update { it.copy(error = null) }
+
+    // Permissões
+
+    private fun accessTo(snapshot: PermissionSnapshot, dms: List<Dm>) =
+        conversationAccess(snapshot, session.userId, channelId, isDm = dms.any { it.id == channelId })
+
+    /** A leitura da conversa foi negada com certeza: nada dela se pede ao servidor, e o que estava guardado já foi apagado. */
+    private val readDenied get() = access.value.readDenied
+
+    /**
+     * Roda [block] quando a leitura da conversa não está negada, ao abrir e de novo a cada vez que ela volta. Se for
+     * negada, o [block] em andamento é cancelado e as fixadas que a tela mantinha abertas se descartam; o rascunho fica.
+     */
+    private fun whileReadable(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            access.map { it.readDenied }.distinctUntilChanged().collectLatest { denied ->
+                if (denied) hidePinned() else block()
+            }
+        }
+    }
+
+    /** Trabalho que pode falhar sem que ninguém precise saber; o cancelamento segue adiante. */
+    private suspend fun quietly(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+    }
 
     // Rascunho
 
@@ -328,6 +381,8 @@ class ChatViewModel(
         val s = _state.value
         val text = draft.text
         if (s.savingEdit || (text.isBlank() && s.files.isEmpty())) return
+        // Sem permissão de envio só se edita: o servidor deixa o autor editar a própria mensagem sem olhar o envio.
+        if (s.editing == null && !access.value.send) return
         val content = encodeMentions(text, pickedMentions, chat.users.value.values)
         val editing = s.editing
         if (editing == null) {
@@ -368,10 +423,14 @@ class ChatViewModel(
     fun setPinned(message: Message, pinned: Boolean) = launch { chat.setPinned(channelId, message.id, pinned) }
 
     fun markRead(message: Message) {
+        if (readDenied) return
         viewModelScope.launch { runCatching { chat.markRead(channelId, message.id) } }
     }
 
-    fun showPinned() = launch { _state.update { it.copy(pinnedList = chat.loadPinned(channelId)) } }
+    fun showPinned() {
+        if (readDenied) return
+        launch { _state.update { it.copy(pinnedList = chat.loadPinned(channelId)) } }
+    }
 
     fun hidePinned() = _state.update { it.copy(pinnedList = null) }
 
@@ -387,6 +446,9 @@ class ChatViewModel(
         block()
         true
     } catch (e: Throwable) {
+        // O servidor recusou: o que o app sabia das permissões pode estar velho. A loja já pede nas próprias chamadas e
+        // limita a uma releitura a cada poucos segundos, então aqui não sai uma segunda.
+        if (e is ApiException && e.isForbidden) chat.requestRefresh()
         _state.update { it.copy(error = e.toUiError()) }
         false
     }

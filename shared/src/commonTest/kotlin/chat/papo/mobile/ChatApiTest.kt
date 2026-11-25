@@ -7,11 +7,14 @@ import chat.papo.mobile.core.formatDateTime
 import chat.papo.mobile.core.formatTime
 import chat.papo.mobile.core.parseInstant
 import chat.papo.mobile.data.api.ApiException
+import chat.papo.mobile.data.api.ChannelPermissionEntryDto
+import chat.papo.mobile.data.api.ChannelPermissionsDto
 import chat.papo.mobile.data.api.ChatApi
 import chat.papo.mobile.data.api.MemoryCookieStore
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.api.ReactionRequest
+import chat.papo.mobile.data.api.RolePermissionsDto
 import chat.papo.mobile.data.api.SearchRequest
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
@@ -252,6 +255,71 @@ class ChatApiTest {
         assertNull(only.content)
         assertTrue(only.attachments.isEmpty() && only.reactions.isEmpty() && only.userReactions.isEmpty())
         assertEquals("Bot", only.externalAuthor?.name)
+    }
+
+    @Test
+    fun cargosTrazemAsFlagsEFlagAusenteOuPermissoesNulasValemFalso() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) {
+            json(
+                """{"roles":[
+                    {"id":"r1","name":"Moderação","color":"#FF0000","created_at":"2026-01-01T00:00:00Z",
+                     "permissions":{"manage_server":false,"manage_channels":true,"manage_roles":false,"manage_webhooks":false,
+                       "ban_members":false,"pin_message":true,"everyone_message":true,"send_attachment":true}},
+                    {"id":"r2","name":"Leitores","color":null,"permissions":{"pin_message":true,"flag_do_futuro":true}},
+                    {"id":"r3","name":"Sem flags","permissions":null}]}""",
+            )
+        }
+
+        val roles = api.roles()
+
+        assertEquals("GET /roles", seen.single().let { "${it.request.method.value} ${it.request.url.encodedPath}" })
+        assertEquals(listOf("r1", "r2", "r3"), roles.map { it.id })
+        assertEquals("#FF0000", roles[0].color)
+        assertEquals(
+            RolePermissionsDto(manageChannels = true, pinMessage = true, everyoneMessage = true, sendAttachment = true),
+            roles[0].permissions,
+        )
+        assertNull(roles[1].color)
+        assertEquals(RolePermissionsDto(pinMessage = true), roles[1].permissions)
+        assertEquals(RolePermissionsDto(), roles[2].permissions)
+    }
+
+    @Test
+    fun cargosSemListaViramListaVazia() = runTest {
+        assertTrue(api(mutableListOf()) { json("""{"roles":null}""") }.roles().isEmpty())
+        assertTrue(api(mutableListOf()) { json("""{}""") }.roles().isEmpty())
+    }
+
+    @Test
+    fun canaisTrazemAsEntradasDePermissaoPorCargo() = runTest {
+        val api = api(mutableListOf()) {
+            json(
+                """{"channels":[
+                    {"id":"c1","name":"avisos","type":"text","position":1,"parent_id":null,"permissions":[
+                      {"role_id":"r1","role_name":"Moderação","permissions":{"read_channel":true,"send_messages":true,"delete_messages":true,"connect_voice":false}},
+                      {"role_id":"r2","role_name":"Leitores","permissions":{"read_channel":true}},
+                      {"role_id":"r3","role_name":"","permissions":{}}]},
+                    {"id":"c2","name":"geral","type":"text","position":2,"permissions":[]},
+                    {"id":"c3","name":"voz","type":"voice","position":3,"permissions":null},
+                    {"id":"c4","name":"antigo","type":"text","position":4}]}""",
+            )
+        }
+
+        val channels = api.channels()
+
+        val (avisos, geral, voz, antigo) = channels
+        assertEquals(
+            listOf(
+                ChannelPermissionEntryDto("r1", "Moderação", ChannelPermissionsDto(readChannel = true, sendMessages = true, deleteMessages = true)),
+                ChannelPermissionEntryDto("r2", "Leitores", ChannelPermissionsDto(readChannel = true)),
+                ChannelPermissionEntryDto("r3", "", ChannelPermissionsDto()),
+            ),
+            avisos.permissions,
+        )
+        assertTrue(!avisos.permissions[1].permissions.connectVoice) // flag ausente: o servidor trata como falsa
+        // Canal aberto (lista vazia), `null` e campo ausente são o mesmo: sem entradas.
+        assertTrue(geral.permissions.isEmpty() && voz.permissions.isEmpty() && antigo.permissions.isEmpty())
     }
 
     @Test

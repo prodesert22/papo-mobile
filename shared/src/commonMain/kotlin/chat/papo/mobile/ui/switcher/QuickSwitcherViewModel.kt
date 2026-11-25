@@ -6,6 +6,7 @@ import chat.papo.mobile.account.AccountManager
 import chat.papo.mobile.chat.OpenConversation
 import chat.papo.mobile.chat.SwitchEntry
 import chat.papo.mobile.chat.SwitchSource
+import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.chat.switchEntries
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +20,8 @@ import kotlinx.coroutines.flow.stateIn
 
 /**
  * Troca rápida de conversa entre as contas abertas. Só lê o que as sessões já têm guardado (canais, conversas
- * diretas e usuários); não faz nenhuma requisição, e cada entrada leva o id da conta de onde veio.
+ * diretas, usuários e permissões); não faz nenhuma requisição, e cada entrada leva o id da conta de onde veio.
+ * Canal que a conta não pode ler não é oferecido.
  *
  * [open] é a conversa de onde a troca foi aberta, se houve uma: ela não é oferecida.
  */
@@ -49,8 +51,9 @@ private fun sources(accounts: AccountManager): Flow<List<SwitchSource>> =
             combine(
                 open.map { (account, session) ->
                     val chat = session.chat
-                    combine(chat.channels, chat.dms, chat.users) { channels, dms, users ->
-                        SwitchSource(account.id, account.title, session.userId, channels, dms, users)
+                    combine(chat.channels, chat.access, chat.dms, chat.users) { channels, permissions, dms, users ->
+                        val readable = readableChannels(channels, permissions, session.userId)
+                        SwitchSource(account.id, account.title, session.userId, readable, dms, users)
                     }
                 },
             ) { it.toList() }

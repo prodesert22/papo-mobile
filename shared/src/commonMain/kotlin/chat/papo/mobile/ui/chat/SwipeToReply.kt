@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -59,9 +60,12 @@ private val IconGap = 16.dp
  *
  * Quem começa perto da borda da tela não responde: ali o sistema usa o deslize para voltar
  * (a área vem de [WindowInsets.Companion.systemGestures], e é vazia com a navegação por botões).
+ *
+ * Com [enabled] falso (sem permissão para enviar) o conteúdo não se mexe: a estrutura é a mesma e só o gesto
+ * desliga, para o estado de dentro de [content] (um anexo sensível já revelado, por exemplo) não se perder.
  */
 @Composable
-fun SwipeToReply(onReply: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+fun SwipeToReply(onReply: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
     val haptics = LocalHapticFeedback.current
@@ -85,6 +89,14 @@ fun SwipeToReply(onReply: () -> Unit, modifier: Modifier = Modifier, content: @C
         if (reached && !armed) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         armed = reached
     }
+    // Perder o direito no meio do arrasto não pode deixar a linha deslocada nem o gesto armado.
+    LaunchedEffect(enabled) {
+        if (!enabled) {
+            pull = 0f
+            armed = false
+            tracking = false
+        }
+    }
 
     Box(
         modifier
@@ -92,6 +104,7 @@ fun SwipeToReply(onReply: () -> Unit, modifier: Modifier = Modifier, content: @C
             .draggable(
                 state = dragState,
                 orientation = Orientation.Horizontal,
+                enabled = enabled,
                 onDragStarted = { start ->
                     val left = gestureInsets.getLeft(density, direction)
                     val right = gestureInsets.getRight(density, direction)

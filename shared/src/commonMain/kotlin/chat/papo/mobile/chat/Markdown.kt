@@ -1,6 +1,10 @@
 package chat.papo.mobile.chat
 
-/** Trecho de texto de uma mensagem já interpretado. */
+/**
+ * Trecho de texto de uma mensagem já interpretado. [everyone] marca um `@everyone`, que o Markdown reconhece em
+ * qualquer lugar do texto fora de código e de link, como o servidor; quem mostra decide se ele sai em destaque
+ * (só vale quando o autor pode usá-lo) ou como texto comum (ver [Markdown.withoutEveryone]).
+ */
 data class TextSpan(
     val text: String,
     val bold: Boolean = false,
@@ -10,6 +14,7 @@ data class TextSpan(
     val quote: Boolean = false,
     val link: String? = null,
     val mentionUserId: String? = null,
+    val everyone: Boolean = false,
 )
 
 /** Bloco de uma mensagem: texto corrido, item de lista ou régua horizontal. */
@@ -55,6 +60,13 @@ object Markdown {
     /** A mensagem em blocos, na ordem em que aparecem. */
     fun blocks(content: String): List<MarkdownBlock> =
         if (content.isEmpty()) emptyList() else Scanner(structured = true).scan(logicalLines(content))
+
+    /**
+     * Os [spans] com o `@everyone` de volta como texto comum, fundido ao vizinho de mesmo estilo: o que se vê
+     * quando o autor não pode usá-lo, igual a antes de o Markdown o reconhecer.
+     */
+    fun withoutEveryone(spans: List<TextSpan>): List<TextSpan> =
+        if (spans.none { it.everyone }) spans else merge(spans.map { if (it.everyone) it.copy(everyone = false) else it })
 
     /** Parte de uma linha: texto ou um bloco de código entre crases triplas. */
     private sealed interface Piece {
@@ -337,6 +349,12 @@ object Markdown {
                     i += m.value.length
                     continue
                 }
+                if (everyoneAt(text, i)) {
+                    flush()
+                    out += style.copy(text = text.substring(i, i + EVERYONE_MENTION.length), everyone = true)
+                    i += EVERYONE_MENTION.length
+                    continue
+                }
             }
             if (c == '[') {
                 val m = namedLink.find(rest)
@@ -406,7 +424,7 @@ object Markdown {
         for (span in spans) {
             if (span.text.isEmpty()) continue
             val last = out.lastOrNull()
-            if (last != null && last.link == null && last.mentionUserId == null && last.copy(text = "") == span.copy(text = "")) {
+            if (last != null && last.link == null && last.mentionUserId == null && !last.everyone && last.copy(text = "") == span.copy(text = "")) {
                 out[out.lastIndex] = last.copy(text = last.text + span.text)
             } else {
                 out += span
