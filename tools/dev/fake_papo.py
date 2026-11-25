@@ -26,6 +26,11 @@ Canal sem `entries` é aberto. O cenário `demo`: dono `dona` (Senha@000); `bia`
 cargo; `avisos` (Leitores só lê), `equipe` (só Moderação) e a voz `Palco` (Leitores lê, mas não entra); `papo` e
 "Sala de voz" abertos; `@everyone` de `bia` (pode), `caio` (não pode) e `dona` (dona) no `papo`.
 
+Quem reagiu: cada reação guarda quando foi feita e um id, e `GET /channels/{id}/messages/{id}/reactions` pagina como o
+servidor (100 reações por página, cursor `since` + `last_id`, `order`, grupos na ordem da primeira aparição). Com
+`FAKE_MANY_REACTORS=1` o `papo` ganha uma mensagem com 130 usuários inventados ("Pessoa 001"…) reagindo com três emojis
+intercalados: o grupo de cada emoji se parte entre as duas páginas, e os horários têm frações de tamanhos diferentes.
+
 Para mudar ao vivo, entre como o dono e use as rotas da OpenAPI (com cookie), que mandam os eventos como o servidor:
 `POST /roles`, `PUT`/`DELETE /roles/{id}` (estes dois, como no servidor, **não** mandam evento),
 `POST /users/{id}/roles` e `DELETE /users/{id}/roles/{role_id}` (`role_add`/`role_remove`),
@@ -188,10 +193,57 @@ def search_messages(data, query, me):
 
 def view(m, user_id=None):
     out = {k: v for k, v in m.items() if k != "reactions"}
-    # A chave de cada reação é (emoji_id, unicode); um dos dois é None.
+    # A chave de cada reação é (emoji_id, unicode); um dos dois é None. Os usuários: {user_id: (created_at, reaction_id)}.
     out["reactions"] = [{"emoji_id": k[0], "unicode": k[1], "count": len(us)} for k, us in m["reactions"].items() if us] or None
-    out["user_reactions"] = [{"id": str(uuid.uuid4()), "emoji_id": k[0], "unicode": k[1]} for k, us in m["reactions"].items() if user_id in us]
+    out["user_reactions"] = [{"id": us[user_id][1], "emoji_id": k[0], "unicode": k[1]} for k, us in m["reactions"].items() if user_id in us]
     return out
+
+
+def nano(moment):
+    """Um instante UTC como o Go escreve RFC 3339 Nano: a fração sem zeros à direita, e nenhuma quando é zero."""
+    fraction = ".%06d" % moment.microsecond if moment.microsecond else ""
+    return moment.strftime("%Y-%m-%dT%H:%M:%S") + fraction.rstrip("0") + "Z"
+
+
+def instant(text):
+    """O instante de um RFC 3339 com `Z` e fração de 0 a 9 dígitos (como `nano` escreve). ValueError se não for."""
+    found = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?Z", text or "")
+    if not found:
+        raise ValueError(text)
+    return datetime.fromisoformat(found.group(1) + "." + (found.group(2) or "").ljust(6, "0")[:6] + "+00:00")
+
+
+def react(message, key, user_id, at=None):
+    """Põe a reação de `user_id` em `message` com o emoji `key`; reagir de novo não muda nada (a rota é idempotente)."""
+    message["reactions"].setdefault(key, {}).setdefault(user_id, (at or nano(datetime.now(timezone.utc)), str(uuid.uuid4())))
+
+
+REACTION_PAGE = 100
+
+
+def reaction_page(message, query):
+    """`GET .../reactions` como o servidor (`storage/reactions.go`): 100 linhas por página em (created_at, id), com o
+    cursor exato `since` + `last_id`. `since` sem `last_id` filtra `created_at > since` em qualquer ordem, e `last_id`
+    sem `since` é ignorado. Devolve o corpo, ou None se `order` ou `since` são inválidos."""
+    order, since, last_id = query.get("order", ["desc"])[0], query.get("since", [""])[0], query.get("last_id", [""])[0]
+    if order not in ("asc", "desc"):
+        return None
+    try:
+        after = instant(since) if since else None
+    except ValueError:
+        return None
+    rows = [(instant(at), rid, user_id, key, at) for key, users in message["reactions"].items() for user_id, (at, rid) in users.items()]
+    rows.sort(reverse=order == "desc")
+    if after is not None and last_id:
+        rows = [r for r in rows if ((r[0], r[1]) < (after, last_id) if order == "desc" else (r[0], r[1]) > (after, last_id))]
+    elif after is not None:
+        rows = [r for r in rows if r[0] > after]
+    page = rows[:REACTION_PAGE]
+    groups = {}
+    for _, rid, user_id, key, created_at in page:
+        groups.setdefault(key, []).append({"id": rid, "user_id": user_id, "created_at": created_at})
+    return {"message_id": message["id"], "has_more": len(rows) > REACTION_PAGE,
+            "reactions": [{"emoji_id": k[0], "unicode": k[1], "count": len(u), "users": u} for k, u in groups.items()]}
 
 
 def audience(channel_id):
@@ -631,6 +683,22 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             byid = {x["id"]: x for x in MESSAGES.get(cid, [])}
             self.send(200, {"channel_id": cid, "pinned": [view(byid[i], me) for i in PINS.get(cid, []) if i in byid]})
+        elif re.fullmatch(r"/channels/[^/]+/messages/[^/]+/reactions", path):
+            cid, mid = path.split("/")[2], path.split("/")[4]
+            # A ordem do servidor: canal, mensagem do canal, depois a permissão de leitura.
+            msg = self.find(mid)
+            if not any(c["id"] == cid for c in CHANNELS) and cid not in DMS:
+                self.problem(404, "Recurso não encontrado", "canal não encontrado")
+            elif msg is None or msg["channel_id"] != cid:
+                self.problem(404, "Recurso não encontrado", "mensagem não encontrada neste canal")
+            elif not has_channel_flag(cid, me, "read_channel"):
+                self.forbidden("usuário não tem permissão para ler o canal")
+            else:
+                body = reaction_page(msg, query)
+                if body is None:
+                    self.problem(400, "Parâmetro inválido", "order deve ser asc ou desc; since deve ser um timestamp ISO 8601")
+                else:
+                    self.send(200, body)
         elif re.fullmatch(r"/channels/[^/]+/messages", path):
             cid = path.split("/")[2]
             if not has_channel_flag(cid, me, "read_channel"):
@@ -763,8 +831,11 @@ class Handler(BaseHTTPRequestHandler):
             if method != "POST" and not has_channel_flag(msg["channel_id"], me, "read_channel"):
                 return self.forbidden("usuário não tem permissão para ler o canal")
             key = (data.get("emoji_id"), data.get("unicode"))
-            users = msg["reactions"].setdefault(key, set())
-            users.add(me) if method == "POST" else users.discard(me)
+            users = msg["reactions"].setdefault(key, {})
+            if method == "POST":
+                react(msg, key, me)
+            else:
+                users.pop(me, None)
             emit({"type": "react_update", "message_id": msg["id"], "emoji_id": key[0], "unicode": key[1], "count": len(users)}, only=audience(msg["channel_id"]))
             return self.send(201 if method == "POST" else 204, {"message_id": msg["id"]} if method == "POST" else None)
         if ACCESS["on"] and self.access_write(method, path, data, me):
@@ -1006,7 +1077,7 @@ if __name__ == "__main__":
     new_message(PAPO, uid("bia"), "Vi sim, @mention(<@%s>) acompanhou comigo.\nSegue o print:" % uid("ana"), reply_to=first["id"],
                 attachments=[{"id": aid, "mime_type": "image/png", "original_file_name": "print.png", "size_bytes": len(FILES[aid][1]),
                               "thumbnail_id": aid, "thumbnail_width": 96, "thumbnail_height": 64, "moderation_status": "clean"}])
-    first["reactions"][(None, "👍")] = {uid("bia")}
+    react(first, (None, "👍"), uid("bia"))
     new_message(CHANNELS[2]["id"], uid("bia"), "Manutenção no sábado às 10h.")
     # Uma conversa direta já existente: a busca geral não a alcança, só a busca com channel_id.
     dm = str(uuid.uuid4())
@@ -1030,8 +1101,19 @@ if __name__ == "__main__":
     new_message(PAPO, uid("bia"), "😀🎉👍")
     new_message(PAPO, uid("caio"), "em código `:party_parrot:` não vira imagem, **negrito :ok_hand:** vira")
     reacted = new_message(PAPO, uid("bia"), "reaja com um emoji do servidor")
-    reacted["reactions"][(parrot, None)] = {uid("bia"), uid("caio")}
-    reacted["reactions"][(None, "🔥")] = {uid("caio")}
+    react(reacted, (parrot, None), uid("bia"), "2026-11-24T12:30:00Z")
+    react(reacted, (parrot, None), uid("caio"), "2026-11-24T12:30:01.5Z")
+    react(reacted, (None, "🔥"), uid("caio"), "2026-11-24T12:30:02.25Z")
+    if os.environ.get("FAKE_MANY_REACTORS"):
+        # Três emojis intercalados: cada grupo continua na segunda página, e a ordem do cursor precisa de todos os grupos.
+        crowd = new_message(PAPO, uid("bia"), "muita gente reagiu a esta mensagem")
+        keys = [(None, "🔥"), (None, "❤"), (parrot, None)]
+        for i in range(1, 131):
+            name = "pessoa%03d" % i
+            USERS[name] = {"id": str(uuid.uuid4()), "password": "Senha@555", "created": "2026-01-04T00:00:00Z", "nickname": "Pessoa %03d" % i}
+            # Frações de 0, .25, .5 e .75 s: o Go corta os zeros à direita, então os textos têm tamanhos diferentes.
+            moment = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=i // 2, microseconds=(i % 4) * 250000)
+            react(crowd, keys[i % 3], uid(name), nano(moment))
     if os.environ.get("FAKE_PERMISSIONS"):
         setup_access(permission_spec(os.environ["FAKE_PERMISSIONS"]))
         announce_access()
