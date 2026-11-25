@@ -18,7 +18,8 @@ import chat.papo.mobile.chat.Message
  * - [pin]: fixar e desafixar (`pin_message`, ou membro da DM);
  * - [edit]: só a própria mensagem (o servidor só deixa o autor, sem olhar envio nem leitura);
  * - [delete]: a própria, ou a de outra pessoa com `delete_messages` (a de webhook entra: não tem autor);
- * - [text]: copiar e selecionar o texto, que só pedem ler a mensagem.
+ * - [text]: copiar e selecionar o texto, que só pedem ler a mensagem;
+ * - [reactors]: "Ver reações", que lista quem reagiu: pede ler o canal (não reagir) e que a mensagem tenha reações.
  */
 data class MessageActionOffer(
     val react: Boolean,
@@ -27,9 +28,10 @@ data class MessageActionOffer(
     val edit: Boolean,
     val delete: Boolean,
     val text: Boolean,
+    val reactors: Boolean,
 ) {
     /** Há ao menos uma ação: a folha sem nenhuma não abre. */
-    val any: Boolean get() = react || reply || pin || edit || delete || text
+    val any: Boolean get() = react || reply || pin || edit || delete || text || reactors
 }
 
 /**
@@ -45,6 +47,7 @@ fun messageActionOffer(access: ConversationAccess, message: Message, me: String)
         edit = mine,
         delete = mine || access.deleteOthers,
         text = message.content.isNotBlank(),
+        reactors = access.read && message.reactions.isNotEmpty(),
     )
 }
 

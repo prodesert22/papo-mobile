@@ -37,6 +37,9 @@ release notes in [releases/](../releases/) describe each version's changes.
   accents, and messages that mention you or reply to you are highlighted.
 - Tap a reply to go to the original message, swipe a message to reply to it and
   double tap it to react with 👍. Copy a message or select part of its text.
+- Hold a reaction, or choose "Ver reações" in a message's actions, to see who
+  reacted, with a list for each emoji. The list is read when it opens; open it
+  again to refresh it. Reading it only needs permission to read the channel.
 - The app follows the server's permissions: it hides channels you cannot read and
   offers only the actions you may take; `@everyone` is offered and highlighted for
   those allowed to use it.

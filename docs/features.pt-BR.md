@@ -39,6 +39,9 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Toque numa resposta para ir à mensagem original, deslize uma mensagem para
   respondê-la e toque duas vezes para reagir com 👍. Copie uma mensagem ou
   selecione parte do texto.
+- Segure uma reação, ou escolha "Ver reações" nas ações de uma mensagem, para ver
+  quem reagiu, com uma lista para cada emoji. A lista é lida quando abre; abra de
+  novo para atualizá-la. Para vê-la basta poder ler o canal.
 - O app segue as permissões do servidor: esconde os canais que você não pode ler e
   só oferece as ações que você pode fazer; o `@everyone` aparece e é destacado para
   quem tem permissão.

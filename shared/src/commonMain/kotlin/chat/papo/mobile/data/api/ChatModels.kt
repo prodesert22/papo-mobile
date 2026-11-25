@@ -277,3 +277,31 @@ data class IceServersResponse(@SerialName("ice_servers") val iceServers: List<Ic
 
 /** Arquivo escolhido pelo usuário para enviar. [read] abre o conteúdo do zero a cada chamada. */
 class OutgoingFile(val name: String, val mimeType: String, val size: Long, val read: () -> ByteArray)
+
+/**
+ * Uma reação de alguém (`MessageReactionUser`). [createdAt] fica como o servidor mandou: junto de [id] é o cursor da
+ * página seguinte, e o servidor compara o instante, não o texto.
+ */
+@Serializable
+data class ReactionUserDto(
+    val id: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("created_at") val createdAt: String,
+)
+
+/** Quem reagiu com um emoji (`MessageReactionGroup`). [count] é o número de [users] na página, não o total do emoji. */
+@Serializable
+data class ReactionGroupDto(
+    @SerialName("emoji_id") val emojiId: String? = null,
+    val unicode: String? = null,
+    val count: Int = 0,
+    val users: List<ReactionUserDto> = emptyList(),
+)
+
+/** Uma página de `GET /channels/{id}/messages/{id}/reactions` (`MessageReactionList`). */
+@Serializable
+data class ReactionListDto(
+    @SerialName("message_id") val messageId: String,
+    val reactions: List<ReactionGroupDto> = emptyList(),
+    @SerialName("has_more") val hasMore: Boolean = false,
+)

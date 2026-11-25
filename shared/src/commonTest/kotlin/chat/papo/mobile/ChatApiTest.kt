@@ -146,6 +146,68 @@ class ChatApiTest {
     }
 
     @Test
+    fun quemReagiuPedeDescSemCursorNaPrimeiraPaginaEComOCursorExatoNaSeguinte() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) {
+            json(
+                """{"message_id":"m1","has_more":true,"campo_do_futuro":1,"reactions":[
+                    {"emoji_id":null,"unicode":"🔥","count":2,"users":[
+                      {"id":"r1","user_id":"u2","created_at":"2026-01-01T00:00:03.5Z"},
+                      {"id":"r2","user_id":"u3","created_at":"2026-01-01T00:00:01Z"}]},
+                    {"emoji_id":"e1","unicode":null,"count":1,"users":[{"id":"r3","user_id":"u4","created_at":"2026-01-01T00:00:02.123456Z"}]}]}""",
+            )
+        }
+
+        val first = api.reactions("c1", "m1")
+        api.reactions("c1", "m1", since = "2026-01-01T00:00:01Z", lastId = "r2")
+
+        assertEquals("m1", first.messageId)
+        assertTrue(first.hasMore)
+        assertEquals(listOf(null to "🔥", "e1" to null), first.reactions.map { it.emojiId to it.unicode })
+        assertEquals(listOf("r1", "r2"), first.reactions[0].users.map { it.id })
+        assertEquals("u2", first.reactions[0].users[0].userId)
+        // O horário vem como texto e não é reescrito: ele é metade do cursor.
+        assertEquals("2026-01-01T00:00:03.5Z", first.reactions[0].users[0].createdAt)
+        assertTrue(seen.all { it.request.method == HttpMethod.Get && it.request.url.encodedPath == "/channels/c1/messages/m1/reactions" })
+        assertEquals("order=desc", seen[0].request.url.encodedQuery)
+        val params = seen[1].request.url.parameters
+        assertEquals("desc", params["order"])
+        assertEquals("2026-01-01T00:00:01Z", params["since"])
+        assertEquals("r2", params["last_id"])
+    }
+
+    @Test
+    fun quemReagiuNuncaMandaMetadeDoCursor() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) { json("""{"message_id":"m1","reactions":[],"has_more":false}""") }
+
+        // O servidor lê `since` sozinho como "criado depois", que em desc volta ao começo: o cliente não o manda.
+        api.reactions("c1", "m1", since = "2026-01-01T00:00:01Z")
+        api.reactions("c1", "m1", lastId = "r2")
+
+        assertEquals(listOf("order=desc", "order=desc"), seen.map { it.request.url.encodedQuery })
+    }
+
+    @Test
+    fun quemReagiuSemLeituraDoCanalViraErroDoServidor() = runTest {
+        val api = api(mutableListOf()) {
+            json("""{"type":"t","title":"Acesso negado","status":403,"detail":"usuário não tem permissão para ler o canal"}""", HttpStatusCode.Forbidden)
+        }
+        val error = assertFailsWith<ApiException> { api.reactions("c1", "m1") }
+        assertTrue(error.isForbidden)
+        assertEquals("usuário não tem permissão para ler o canal", error.detail)
+    }
+
+    @Test
+    fun quemReagiuComListasNulasOuAusentesNaoQuebra() = runTest {
+        val api = api(mutableListOf()) { json("""{"message_id":"m1","reactions":[{"unicode":"🔥","count":0,"users":null}]}""") }
+        val page = api.reactions("c1", "m1")
+        assertEquals(emptyList(), page.reactions.single().users)
+        assertTrue(!page.hasMore)
+        assertEquals(emptyList(), api(mutableListOf()) { json("""{"message_id":"m1","reactions":null,"has_more":false}""") }.reactions("c1", "m1").reactions)
+    }
+
+    @Test
     fun leituraEdicaoPinEDm() = runTest {
         val seen = mutableListOf<Recorded>()
         val api = api(seen) { request ->

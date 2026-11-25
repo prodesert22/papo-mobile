@@ -10,3 +10,6 @@
   from a message's actions, and your own reactions can always be taken back.
 - Fixed: taking back your own reaction could leave the old count on the
   message until it was opened again.
+- Hold a reaction, or use the new action in a message's menu, to see who
+  reacted, with a list for each emoji. You can see it in any channel you can
+  read, even where you cannot react.

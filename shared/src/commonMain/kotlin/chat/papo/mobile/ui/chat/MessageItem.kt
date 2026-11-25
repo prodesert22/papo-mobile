@@ -50,9 +50,11 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
@@ -109,6 +111,7 @@ import chat.papo.mobile.resources.chat_unknown_user
 import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.resources.msg_pinned
 import chat.papo.mobile.resources.msg_quick_react
+import chat.papo.mobile.resources.msg_reactors_label
 import chat.papo.mobile.resources.msg_reply
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
@@ -297,7 +300,8 @@ fun EmojiImage(session: AccountSession, emojiId: String, modifier: Modifier = Mo
  * para enviar ou reagir), o gesto e a ação de acessibilidade correspondentes não existem.
  *
  * [canReact] e [canRemoveOwnReaction] dizem quais bolinhas de reação respondem ao toque: com [canReact] todas;
- * sem ele, só a minha, e só com [canRemoveOwnReaction] (ver [reactionToggleable]).
+ * sem ele, só a minha, e só com [canRemoveOwnReaction] (ver [reactionToggleable]). O toque longo numa bolinha chama
+ * [onShowReactors] em qualquer uma, com ou sem essas permissões: ver quem reagiu só pede ler o canal.
  *
  * [addressedToMe] marca a mensagem dirigida a quem usa a conta, que a menciona, responde a ela ou é um `@everyone`
  * de quem pode usá-lo (a própria também, como no web): fundo dourado e uma barra no começo da linha.
@@ -330,6 +334,7 @@ fun MessageItem(
     onLongPress: () -> Unit,
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
+    onShowReactors: (ReactionSummaryDto) -> Unit,
 ) {
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
         ?: author?.displayName
@@ -409,7 +414,7 @@ fun MessageItem(
                 }
                 if (message.reactions.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
-                    ReactionRow(session, message, canReact, canRemoveOwnReaction, onReact)
+                    ReactionRow(session, message, canReact, canRemoveOwnReaction, onReact, onShowReactors)
                 }
             }
             if (pinned) {
@@ -694,7 +699,7 @@ private fun EmbedCard(session: AccountSession, embed: EmbedDto) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun ReactionRow(
     session: AccountSession,
@@ -702,11 +707,14 @@ private fun ReactionRow(
     canReact: Boolean,
     canRemoveOwnReaction: Boolean,
     onReact: (ReactionSummaryDto) -> Unit,
+    onShowReactors: (ReactionSummaryDto) -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
+    val showReactorsLabel = stringResource(Res.string.msg_reactors_label)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         message.reactions.forEach { reaction ->
             val mine = message.reactedWith(reaction)
-            // Sem toque a bolinha continua mostrando quem reagiu; só deixa de somar ou tirar a reação.
+            // Sem toque a bolinha continua mostrando a contagem; só deixa de somar ou tirar a reação.
             val toggleable = reactionToggleable(canReact, canRemoveOwnReaction, mine)
             val scheme = MaterialTheme.colorScheme
             Row(
@@ -714,7 +722,14 @@ private fun ReactionRow(
                     .clip(RoundedCornerShape(14.dp))
                     .background(if (mine) scheme.primaryContainer else scheme.surfaceContainerHigh)
                     .border(1.dp, if (mine) scheme.primary else Color.Transparent, RoundedCornerShape(14.dp))
-                    .then(if (toggleable) Modifier.clickable { onReact(reaction) } else Modifier)
+                    .combinedClickable(
+                        onClick = { if (toggleable) onReact(reaction) },
+                        onLongClickLabel = showReactorsLabel,
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onShowReactors(reaction)
+                        },
+                    )
                     .padding(horizontal = 9.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

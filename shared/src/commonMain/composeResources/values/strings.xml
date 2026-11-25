@@ -219,6 +219,11 @@
     <string name="chat_reply_not_reached">A mensagem original é muito antiga e ainda não foi encontrada.</string>
     <string name="chat_reply_continue">Continuar procurando</string>
     <string name="msg_quick_react">Reagir com %1$s</string>
+    <string name="msg_view_reactions">Ver reações</string>
+    <string name="msg_reactors_label">Ver quem reagiu</string>
+    <string name="reactors_title">Reações</string>
+    <string name="reactors_empty">Ninguém reagiu com este emoji.</string>
+    <string name="reactors_load_more">Carregar mais</string>
 
     <!-- Busca -->
     <string name="search_title">Buscar mensagens</string>
