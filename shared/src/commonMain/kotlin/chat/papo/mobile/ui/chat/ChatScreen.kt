@@ -1047,7 +1047,7 @@ private fun Composer(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             suggestion.unicode?.let { Text(it.char, fontSize = 22.sp) }
-                            suggestion.server?.let { EmojiImage(session, it.id, Modifier.size(24.dp)) }
+                            suggestion.server?.let { EmojiImage(session, it.id, Modifier.size(24.dp), animate = false) }
                             Spacer(Modifier.width(6.dp))
                             Text(suggestion.label, style = MaterialTheme.typography.labelLarge)
                         }
