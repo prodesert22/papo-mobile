@@ -57,6 +57,20 @@ class ReactorsTest {
     }
 
     @Test
+    fun ocursorAceitaOFusoQueOServidorRealMandaEVoltaComoVeio() {
+        // Formato observado no papo-server local (2026-11-25): hora local com "-04:00", não "Z", e frações de
+        // tamanhos diferentes. A mais antiga (.330816) está no grupo do meio, e uma com "Z" no mesmo instante
+        // teria de empatar.
+        val oldest = "2026-11-25T19:25:43.330816-04:00"
+        val page = listOf(
+            group("😀", reaction("r1", "2026-11-25T19:25:43.952208-04:00")),
+            group("👍", reaction("r2", "2026-11-25T19:25:43.643009-04:00"), reaction("r3", oldest)),
+            group("🔥", reaction("r4", "2026-11-25T23:25:43.4859Z")),
+        )
+        assertEquals(ReactorCursor(oldest, "r3"), nextReactorCursor(page))
+    }
+
+    @Test
     fun noMesmoInstanteDesempataPeloMenorId() {
         val page = listOf(group("🔥", reaction("b", at(5))), group("❤", reaction("a", at(5)), reaction("c", at(5))))
         assertEquals(ReactorCursor(at(5), "a"), nextReactorCursor(page))
