@@ -36,3 +36,19 @@ fun <T> searchByName(query: String, items: List<T>, names: (T) -> List<String>):
         .sortedBy { it.first }
         .map { it.second }
 }
+
+/** Fixadas cujo texto ou autor casam com [query], sem diferenciar acento nem maiúsculas. */
+fun filterPinned(pinned: List<Message>, users: Map<String, User>, query: String): List<Message> {
+    val folded = foldForSearch(query.trim())
+    if (folded.isEmpty()) return pinned
+    return pinned.filter { message ->
+        val author = message.authorId?.let { users[it] }
+        val fields = listOfNotNull(
+            renderMentions(message.content) { users[it]?.displayName },
+            message.externalAuthor?.name,
+            author?.displayName,
+            author?.username,
+        )
+        fields.any { folded in foldForSearch(it) }
+    }
+}

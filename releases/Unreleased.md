@@ -11,6 +11,8 @@
   a conversation are listed but cannot be opened this way yet.
 - **Filtros recentes** offers the filters of your last five searches again. They
   are kept only in memory and are gone when the app locks or closes.
+- **Mensagens fixadas** has a field that filters the list by text or author as
+  you type.
 - Searching for a person or a conversation by name ignores accents: `joao` finds
   "João".
 - Fixed the names in **Com quem você quer falar?**, which were unreadable in the

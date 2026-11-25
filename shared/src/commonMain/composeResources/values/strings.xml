@@ -146,6 +146,8 @@
     <string name="chat_sensitive">Conteúdo sensível. Toque para ver.</string>
     <string name="chat_pinned">Mensagens fixadas</string>
     <string name="chat_pinned_empty">Nada fixado neste canal.</string>
+    <string name="chat_pinned_filter">Filtrar fixadas</string>
+    <string name="chat_pinned_no_match">Nenhuma fixada com esse filtro.</string>
     <string name="chat_search">Buscar nesta conversa</string>
     <string name="chat_locating">Localizando mensagem…</string>
     <string name="chat_focus_missing">Essa mensagem não está mais na conversa. Ela pode ter sido apagada.</string>

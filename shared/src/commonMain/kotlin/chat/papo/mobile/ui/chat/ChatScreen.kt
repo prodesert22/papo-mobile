@@ -46,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
@@ -89,6 +90,7 @@ import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.ChannelType
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.filterPinned
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
@@ -107,6 +109,8 @@ import chat.papo.mobile.resources.chat_history_start
 import chat.papo.mobile.resources.chat_locating
 import chat.papo.mobile.resources.chat_pinned
 import chat.papo.mobile.resources.chat_pinned_empty
+import chat.papo.mobile.resources.chat_pinned_filter
+import chat.papo.mobile.resources.chat_pinned_no_match
 import chat.papo.mobile.resources.chat_placeholder
 import chat.papo.mobile.resources.chat_placeholder_dm
 import chat.papo.mobile.resources.chat_remove_attachment
@@ -703,19 +707,32 @@ private fun SheetAction(icon: ImageVector, label: String, destructive: Boolean =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PinnedSheet(session: AccountSession, pinned: List<Message>, users: Map<String, User>, onDismiss: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val shown = remember(pinned, users, query) { filterPinned(pinned, users, query) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
             Text(stringResource(Res.string.chat_pinned), style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
-            if (pinned.isEmpty()) {
+            if (pinned.isNotEmpty()) {
+                // O filtro é local: nada vai ao servidor enquanto se digita.
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text(stringResource(Res.string.chat_pinned_filter)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            if (shown.isEmpty()) {
                 Text(
-                    stringResource(Res.string.chat_pinned_empty),
+                    stringResource(if (pinned.isEmpty()) Res.string.chat_pinned_empty else Res.string.chat_pinned_no_match),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(pinned, key = { it.id }) { message ->
+                items(shown, key = { it.id }) { message ->
                     val author = message.authorId?.let { users[it] }
                     Row(Modifier.padding(vertical = 8.dp)) {
                         UserAvatar(session, author, size = 32.dp)

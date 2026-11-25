@@ -1,12 +1,15 @@
 package chat.papo.mobile
 
 import chat.papo.mobile.chat.AttachmentFilter
+import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.RecentSearchFilters
 import chat.papo.mobile.chat.SearchFilters
 import chat.papo.mobile.chat.SearchOrder
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.filterPinned
 import chat.papo.mobile.chat.foldForSearch
 import chat.papo.mobile.chat.searchByName
+import chat.papo.mobile.data.api.ExternalAuthorDto
 import chat.papo.mobile.data.api.PapoJson
 import chat.papo.mobile.data.api.SearchRequest
 import kotlinx.datetime.LocalDate
@@ -19,6 +22,22 @@ import kotlin.test.assertTrue
 class MessageSearchTest {
     private fun user(id: String, username: String, nickname: String? = null) =
         User(id, username, nickname, statusMessage = null, typingPhrase = null, banned = false, roleColor = null, avatarVersion = 0)
+
+    private fun message(id: String, content: String, authorId: String? = null, webhook: String? = null) = Message(
+        id = id,
+        channelId = "c1",
+        authorId = authorId,
+        content = content,
+        createdAt = null,
+        createdAtIso = "",
+        edited = false,
+        replyTo = null,
+        externalAuthor = webhook?.let { ExternalAuthorDto(it) },
+        attachments = emptyList(),
+        embeds = emptyList(),
+        reactions = emptyList(),
+        userReactions = emptyList(),
+    )
 
     @Test
     fun dobraTiraAcentosEMaiusculas() {
@@ -48,6 +67,26 @@ class MessageSearchTest {
         // Consulta vazia não filtra nem reordena.
         assertEquals(people, searchByName("   ", people) { listOf(it.username) })
         assertTrue(searchByName("zé", people) { listOf(it.username, it.displayName) }.isEmpty())
+    }
+
+    @Test
+    fun filtroDasFixadasOlhaTextoMencaoEAutor() {
+        val bia = "0b0e7c1e-1111-2222-3333-444455556666"
+        val users = mapOf(bia to user(bia, "bia", "Beatriz Gonçalves"), "u1" to user("u1", "ana"))
+        val pinned = listOf(
+            message("m1", "Reunião amanhã às 10h", authorId = "u1"),
+            message("m2", "falem com @mention(<@$bia>)", authorId = "u1"),
+            message("m3", "deploy concluído", webhook = "Robô de Deploy"),
+            message("m4", "regras do canal", authorId = bia),
+        )
+
+        assertEquals(listOf("m1"), filterPinned(pinned, users, "reuniao").map { it.id })
+        // Menção casa pelo nome mostrado; o autor casa pelo nome de exibição ou pelo usuário.
+        assertEquals(listOf("m2", "m4"), filterPinned(pinned, users, "goncalves").map { it.id })
+        assertEquals(listOf("m4"), filterPinned(pinned, users, "BIA").map { it.id })
+        assertEquals(listOf("m3"), filterPinned(pinned, users, "robo").map { it.id })
+        assertEquals(pinned, filterPinned(pinned, users, " "))
+        assertTrue(filterPinned(pinned, users, "inexistente").isEmpty())
     }
 
     @Test
