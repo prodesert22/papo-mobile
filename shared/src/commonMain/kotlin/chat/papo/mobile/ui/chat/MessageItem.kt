@@ -52,6 +52,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.ParagraphStyle
@@ -77,6 +81,7 @@ import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.EmojiCatalog
+import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiPiece
 import chat.papo.mobile.chat.EmojiText
 import chat.papo.mobile.chat.Markdown
@@ -93,9 +98,13 @@ import chat.papo.mobile.data.api.ReactionSummaryDto
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_edited
 import chat.papo.mobile.resources.chat_reply_missing
+import chat.papo.mobile.resources.chat_reply_open
+import chat.papo.mobile.resources.chat_reply_unloaded
 import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.chat_unknown_user
 import chat.papo.mobile.resources.msg_download
+import chat.papo.mobile.resources.msg_quick_react
+import chat.papo.mobile.resources.msg_reply
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.formatBytes
@@ -268,7 +277,12 @@ fun EmojiImage(session: AccountSession, emojiId: String, modifier: Modifier = Mo
 
 /**
  * Uma mensagem. [compact] é a continuação de quem acabou de falar: sem avatar
- * nem nome, só o texto alinhado.
+ * nem nome, só o texto alinhado. Se ela responde a outra, a prévia mostra [repliedTo]
+ * quando está carregada; senão avisa que [replyMissing] (o servidor não a tem mais) ou convida a
+ * procurá-la com [onOpenReply].
+ *
+ * Gestos: deslizar para o lado do fim da linha chama [onReply], o toque duplo chama [onQuickReact]
+ * e o toque longo, [onLongPress]. Os dois primeiros também são ações de acessibilidade.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -280,9 +294,13 @@ fun MessageItem(
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
     repliedTo: Message?,
+    replyMissing: Boolean,
     compact: Boolean,
     pinned: Boolean,
     highlighted: Boolean,
+    onOpenReply: () -> Unit,
+    onReply: () -> Unit,
+    onQuickReact: () -> Unit,
     onLongPress: () -> Unit,
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
@@ -290,70 +308,80 @@ fun MessageItem(
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
         ?: author?.displayName
         ?: stringResource(Res.string.chat_unknown_user)
+    val replyLabel = stringResource(Res.string.msg_reply)
+    val reactLabel = stringResource(Res.string.msg_quick_react, EmojiPickerModel.DEFAULT_REACTIONS.first())
 
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(if (highlighted) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
-            .combinedClickable(onClick = {}, onLongClick = onLongPress)
-            .padding(start = 12.dp, end = 12.dp, top = if (compact) 1.dp else 8.dp, bottom = 1.dp),
-    ) {
-        Box(Modifier.width(40.dp)) {
-            if (!compact) UserAvatar(session, author, size = 40.dp, fallbackName = authorName)
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            if (message.replyTo != null) {
-                ReplyPreview(repliedTo, repliedTo?.authorId?.let { users[it] }, users)
-            }
-            if (!compact) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        authorName,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = parseHexColor(author?.roleColor) ?: MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+    SwipeToReply(onReply, Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(if (highlighted) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
+                .combinedClickable(onClick = {}, onLongClick = onLongPress, onDoubleClick = onQuickReact)
+                .semantics {
+                    customActions = listOf(
+                        CustomAccessibilityAction(replyLabel) { onReply(); true },
+                        CustomAccessibilityAction(reactLabel) { onQuickReact(); true },
                     )
-                    Spacer(Modifier.width(8.dp))
+                }
+                .padding(start = 12.dp, end = 12.dp, top = if (compact) 1.dp else 8.dp, bottom = 1.dp),
+        ) {
+            Box(Modifier.width(40.dp)) {
+                if (!compact) UserAvatar(session, author, size = 40.dp, fallbackName = authorName)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                if (message.replyTo != null) {
+                    ReplyPreview(repliedTo, replyMissing, repliedTo?.authorId?.let { users[it] }, users, onOpenReply, onLongPress)
+                }
+                if (!compact) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            authorName,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = parseHexColor(author?.roleColor) ?: MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            message.createdAt?.formatTime().orEmpty(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (pinned) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(13.dp), tint = LocalPapoColors.current.accent)
+                        }
+                    }
+                }
+                if (message.content.isNotEmpty()) {
+                    MessageBodyText(session, message.content, users, emojiIds, unicodeEmojis)
+                }
+                if (message.edited) {
                     Text(
-                        message.createdAt?.formatTime().orEmpty(),
+                        stringResource(Res.string.chat_edited),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (pinned) {
-                        Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(13.dp), tint = LocalPapoColors.current.accent)
+                }
+                message.attachments.forEach { attachment ->
+                    Spacer(Modifier.height(6.dp))
+                    if (attachment.isImage && attachment.thumbnailId != null) {
+                        ImageAttachment(session, attachment, onOpen = { onOpenImage(attachment) })
+                    } else {
+                        FileAttachment(session, attachment)
                     }
                 }
-            }
-            if (message.content.isNotEmpty()) {
-                MessageBodyText(session, message.content, users, emojiIds, unicodeEmojis)
-            }
-            if (message.edited) {
-                Text(
-                    stringResource(Res.string.chat_edited),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            message.attachments.forEach { attachment ->
-                Spacer(Modifier.height(6.dp))
-                if (attachment.isImage && attachment.thumbnailId != null) {
-                    ImageAttachment(session, attachment, onOpen = { onOpenImage(attachment) })
-                } else {
-                    FileAttachment(session, attachment)
+                message.embeds.forEach { embed ->
+                    Spacer(Modifier.height(6.dp))
+                    EmbedCard(session, embed)
                 }
-            }
-            message.embeds.forEach { embed ->
-                Spacer(Modifier.height(6.dp))
-                EmbedCard(session, embed)
-            }
-            if (message.reactions.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                ReactionRow(session, message, onReact)
+                if (message.reactions.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    ReactionRow(session, message, onReact)
+                }
             }
         }
     }
@@ -429,9 +457,40 @@ private fun rememberListMetrics(style: TextStyle): ListMetrics {
     }
 }
 
+/**
+ * Prévia da mensagem respondida, em três estados: carregada (o conteúdo, e tocar vai até ela), ainda
+ * não carregada (convida a procurá-la; tocar procura) e sabidamente apagada ([missing]; sem toque).
+ * O toque longo continua abrindo as ações da mensagem, como no resto da linha.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ReplyPreview(replied: Message?, author: User?, users: Map<String, User>) {
-    Row(Modifier.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun ReplyPreview(
+    replied: Message?,
+    missing: Boolean,
+    author: User?,
+    users: Map<String, User>,
+    onOpen: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val gone = replied == null && missing
+    // Ainda não carregada: o texto tem cor de ação, porque tocar nele procura a mensagem.
+    val unloaded = replied == null && !missing
+    val color = if (unloaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val openLabel = stringResource(Res.string.chat_reply_open)
+    Row(
+        Modifier
+            .padding(bottom = 2.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .then(
+                if (gone) {
+                    Modifier
+                } else {
+                    Modifier.combinedClickable(onClickLabel = openLabel, role = Role.Button, onClick = onOpen, onLongClick = onLongPress)
+                },
+            )
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Icon(
             Icons.AutoMirrored.Filled.Reply,
             contentDescription = null,
@@ -439,17 +498,20 @@ private fun ReplyPreview(replied: Message?, author: User?, users: Map<String, Us
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.width(4.dp))
-        val text = if (replied == null) {
-            stringResource(Res.string.chat_reply_missing)
-        } else {
-            val name = replied.externalAuthor?.name ?: author?.displayName ?: stringResource(Res.string.chat_unknown_user)
-            val body = renderMentions(replied.content) { users[it]?.displayName }.ifBlank { replied.attachments.firstOrNull()?.fileName.orEmpty() }
-            "$name: $body"
+        val text = when {
+            replied != null -> {
+                val name = replied.externalAuthor?.name ?: author?.displayName ?: stringResource(Res.string.chat_unknown_user)
+                val body = renderMentions(replied.content) { users[it]?.displayName }.ifBlank { replied.attachments.firstOrNull()?.fileName.orEmpty() }
+                "$name: $body"
+            }
+            gone -> stringResource(Res.string.chat_reply_missing)
+            else -> stringResource(Res.string.chat_reply_unloaded)
         }
         Text(
             text,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = color,
+            fontStyle = if (gone) FontStyle.Italic else null,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

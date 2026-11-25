@@ -156,6 +156,8 @@ import chat.papo.mobile.resources.chat_pinned_no_match
 import chat.papo.mobile.resources.chat_placeholder
 import chat.papo.mobile.resources.chat_placeholder_dm
 import chat.papo.mobile.resources.chat_remove_attachment
+import chat.papo.mobile.resources.chat_reply_continue
+import chat.papo.mobile.resources.chat_reply_not_reached
 import chat.papo.mobile.resources.chat_replying_to
 import chat.papo.mobile.resources.chat_search
 import chat.papo.mobile.resources.chat_send
@@ -314,13 +316,15 @@ fun ChatScreen(
     val focusIndex = state.focusId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
     LaunchedEffect(state.focusId, focusIndex >= 0) {
         if (focusIndex < 0) return@LaunchedEffect
+        val focused = state.focusId
         try {
             // A lista é invertida: o deslocamento negativo sobe a mensagem e deixa à vista o que veio depois dela.
             listState.scrollToItem(focusIndex + lead, -listState.layoutInfo.viewportSize.height / 3)
             delay(4.seconds)
         } finally {
-            // Também ao sair da tela antes do tempo: voltar a ela não deve rolar de novo.
-            viewModel.clearFocus()
+            // Também ao sair da tela antes do tempo: voltar a ela não deve rolar de novo. Só limpa o foco
+            // desta mensagem: se outro salto já pediu outra, o efeito foi cancelado por isso e ela fica.
+            viewModel.clearFocus(focused)
         }
     }
 
@@ -419,10 +423,14 @@ fun ChatScreen(
                                 emojiIds = serverEmojis.idByName,
                                 unicodeEmojis = unicodeEmojis,
                                 repliedTo = message.replyTo?.let { byId[it] },
+                                replyMissing = message.replyTo in state.missingReplies,
                                 compact = compact,
                                 pinned = pinnedIds[viewModel.channelId]?.contains(message.id) == true,
                                 highlighted = state.replyTo?.id == message.id || state.editing?.id == message.id ||
                                     state.focusId == message.id,
+                                onOpenReply = { viewModel.openReply(message) },
+                                onReply = { viewModel.startReply(message) },
+                                onQuickReact = { viewModel.quickReact(message) },
                                 onLongPress = { actionsFor = message },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
                                 onOpenImage = { viewing = it },
@@ -463,6 +471,14 @@ fun ChatScreen(
                 Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (state.targetMissing) {
                         NoticeBar(stringResource(Res.string.chat_focus_missing), viewModel::dismissTargetMissing)
+                    }
+                    if (state.replyNotReached != null) {
+                        ActionNoticeBar(
+                            stringResource(Res.string.chat_reply_not_reached),
+                            stringResource(Res.string.chat_reply_continue),
+                            onAction = viewModel::continueReplySearch,
+                            onClose = viewModel::dismissReplyNotReached,
+                        )
                     }
                     state.error?.let { error -> NoticeBar(error.text(), viewModel::dismissError) }
                 }
@@ -585,6 +601,25 @@ private fun NoticeBar(text: String, onClose: () -> Unit) {
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inverseOnSurface),
             ) { Text(stringResource(Res.string.action_close), fontWeight = FontWeight.SemiBold) }
         },
+    ) { Text(text) }
+}
+
+/** Aviso com uma ação principal ([actionLabel]); o X fecha. */
+@Composable
+private fun ActionNoticeBar(text: String, actionLabel: String, onAction: () -> Unit, onClose: () -> Unit) {
+    val onBar = MaterialTheme.colorScheme.inverseOnSurface
+    Snackbar(
+        action = {
+            TextButton(onClick = onAction, colors = ButtonDefaults.textButtonColors(contentColor = onBar)) {
+                Text(actionLabel, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissAction = {
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = stringResource(Res.string.action_close), tint = onBar)
+            }
+        },
+        actionOnNewLine = true,
     ) { Text(text) }
 }
 

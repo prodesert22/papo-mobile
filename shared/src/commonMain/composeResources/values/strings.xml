@@ -204,6 +204,11 @@
     <string name="msg_delete_body">Ela some para todo mundo e não dá para desfazer.</string>
     <string name="msg_download">Baixar</string>
     <string name="msg_select">Selecionar texto</string>
+    <string name="chat_reply_unloaded">Toque para ver a mensagem original</string>
+    <string name="chat_reply_open">Ir para a mensagem original</string>
+    <string name="chat_reply_not_reached">A mensagem original é muito antiga e ainda não foi encontrada.</string>
+    <string name="chat_reply_continue">Continuar procurando</string>
+    <string name="msg_quick_react">Reagir com %1$s</string>
 
     <!-- Busca -->
     <string name="search_title">Buscar mensagens</string>

@@ -9,12 +9,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.Draft
+import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.Located
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.PendingMessage
 import chat.papo.mobile.chat.encodeMentions
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.data.api.OutgoingFile
+import chat.papo.mobile.data.ws.WsEvent
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.toUiError
 import kotlinx.coroutines.CancellationException
@@ -47,7 +49,7 @@ data class ChatUiState(
     val locating: Boolean = false,
     /** Mensagem pedida ao abrir, já ao alcance da lista: a tela rola até ela e a destaca. */
     val focusId: String? = null,
-    /** A mensagem pedida ao abrir não existe mais na conversa. */
+    /** A mensagem procurada (pedida ao abrir ou original de uma resposta) não existe mais na conversa. */
     val targetMissing: Boolean = false,
     /** Lendo um trecho antigo: carregando o que vem depois dele. */
     val loadingNewer: Boolean = false,
@@ -55,6 +57,10 @@ data class ChatUiState(
     val returning: Boolean = false,
     /** Muda a cada volta às mensagens recentes, para a tela rolar até o fim. */
     val latestTick: Int = 0,
+    /** Ids de mensagens que o servidor não tem mais: a prévia de quem as respondeu avisa e deixa de ser tocável. */
+    val missingReplies: Set<String> = emptySet(),
+    /** Id da original que a procura não alcançou no limite de páginas: a tela oferece continuar de onde parou. */
+    val replyNotReached: String? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -91,17 +97,79 @@ class ChatViewModel(
         viewModelScope.launch { runCatching { chat.loadPinned(channelId) } }
     }
 
+    /** Mensagens com uma reação em voo; só a thread principal mexe nele. */
+    private val reacting = HashSet<String>()
+
+    init {
+        // O servidor avisa quando uma mensagem é apagada: quem a respondeu passa a mostrar isso sem percorrer o histórico.
+        viewModelScope.launch {
+            session.ws.events.collect { if (it is WsEvent.MessageDeleted) onMessageDeleted(it) }
+        }
+    }
+
     private suspend fun locate(target: MessageTarget) {
         var located: Located? = null
         attempt { located = chat.locate(channelId, target.id, target.createdAtIso) }
-        when (val result = located) {
+        settle(target.id, located)
+    }
+
+    /** Aplica o resultado de uma procura: rola até a mensagem, avisa que sumiu ou que a procura parou. [located] nulo é falha (já no erro). */
+    private fun settle(id: String, located: Located?) {
+        when (located) {
             is Located.Found -> {
                 // A janela da tela precisa alcançar a mensagem e sobrar contexto antes dela.
-                limit.update { maxOf(it, result.position + PAGE) }
-                _state.update { it.copy(locating = false, focusId = target.id) }
+                limit.update { maxOf(it, located.position + PAGE) }
+                _state.update { it.copy(locating = false, focusId = id) }
             }
-            Located.Missing -> _state.update { it.copy(locating = false, targetMissing = true) }
+            Located.Missing -> _state.update {
+                it.copy(locating = false, targetMissing = true, missingReplies = it.missingReplies.plusBounded(id))
+            }
+            Located.NotReached -> _state.update { it.copy(locating = false, replyNotReached = id) }
             null -> _state.update { it.copy(locating = false) }
+        }
+    }
+
+    /** Leva a tela à mensagem que [message] responde, procurando para trás no histórico se ela não está carregada. */
+    fun openReply(message: Message) {
+        searchOriginal(message.replyTo ?: return)
+    }
+
+    /** Segue a procura que parou no limite de páginas, a partir da mensagem mais antiga já carregada. */
+    fun continueReplySearch() {
+        searchOriginal(_state.value.replyNotReached ?: return)
+    }
+
+    fun dismissReplyNotReached() = _state.update { it.copy(replyNotReached = null) }
+
+    private fun searchOriginal(id: String) {
+        val s = _state.value
+        // Uma procura por vez, e a original já dada como apagada não se procura de novo.
+        if (s.locating || s.returning || id in s.missingReplies) return
+        _state.update { it.copy(locating = true, replyNotReached = null, focusId = null) }
+        viewModelScope.launch {
+            var located: Located? = null
+            attempt { located = chat.locateOlder(channelId, id) }
+            settle(id, located)
+        }
+    }
+
+    internal fun onMessageDeleted(event: WsEvent.MessageDeleted) {
+        if (event.channelId == channelId) noteMissing(event.id)
+    }
+
+    private fun noteMissing(id: String) = _state.update { it.copy(missingReplies = it.missingReplies.plusBounded(id)) }
+
+    /** Duplo toque: alterna o 👍 padrão na mensagem. Ignorado enquanto a reação anterior dela ainda está em voo. */
+    fun quickReact(message: Message) {
+        if (!reacting.add(message.id)) return
+        viewModelScope.launch {
+            try {
+                // A linha da tela pode estar um passo atrás do banco: decide o "já reagi" pelo que está guardado.
+                val current = messages.value.firstOrNull { it.id == message.id } ?: message
+                attempt { chat.toggleReaction(current, null, EmojiPickerModel.DEFAULT_REACTIONS.first()) }
+            } finally {
+                reacting.remove(message.id)
+            }
         }
     }
 
@@ -135,7 +203,11 @@ class ChatViewModel(
     /** A tela desta conversa voltou a ser a visível. */
     fun onVisible() = chat.setViewing(channelId)
 
-    fun clearFocus() = _state.update { it.copy(focusId = null) }
+    /**
+     * Termina o destaque. Com [id], só vale se o destaque ainda é dessa mensagem: a tela chama isto ao cancelar o efeito
+     * do destaque anterior, e sem a conferência esse aviso atrasado apagaria o destaque que acabou de começar.
+     */
+    fun clearFocus(id: String? = null) = _state.update { if (id == null || it.focusId == id) it.copy(focusId = null) else it }
 
     fun dismissTargetMissing() = _state.update { it.copy(targetMissing = false) }
 
@@ -286,7 +358,10 @@ class ChatViewModel(
     /** Descarta uma mensagem da fila; se estava saindo, cancela o envio. */
     fun withdraw(localId: String) = chat.withdraw(localId)
 
-    fun delete(message: Message) = launch { chat.delete(message.id) }
+    fun delete(message: Message) = launch {
+        chat.delete(message.id)
+        noteMissing(message.id)
+    }
 
     fun react(message: Message, emojiId: String?, unicode: String?) = launch { chat.toggleReaction(message, emojiId, unicode) }
 
@@ -320,4 +395,12 @@ class ChatViewModel(
         const val PAGE = 60L
         const val MAX_FILES = 10
     }
+}
+
+private const val MAX_MISSING_REPLIES = 200
+
+/** Acrescenta [id] sem passar de [max]: o que foi dado como apagado há mais tempo é esquecido, e uma nova procura confirma de novo. */
+internal fun Set<String>.plusBounded(id: String, max: Int = MAX_MISSING_REPLIES): Set<String> {
+    val all = this - id + id
+    return if (all.size > max) all.drop(all.size - max).toSet() else all
 }

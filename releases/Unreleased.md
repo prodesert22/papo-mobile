@@ -35,3 +35,9 @@
 - Voice channels have a chat. Open it with the chat button at the end of a voice
   channel in the list or with **Abrir chat** during a call; **Entrar na
   chamada** in its top bar joins the call.
+- Tap the preview above a reply to go to the original message, highlighted. When
+  it is not loaded yet the app looks further back in the conversation, a few
+  pages at a time, and **Continuar procurando** keeps looking. The preview says
+  whether the original is still to be loaded or no longer exists.
+- Swipe a message sideways to reply to it, and double tap it to react with 👍
+  (double tap again to take the reaction back).

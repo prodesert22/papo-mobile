@@ -227,11 +227,14 @@ class ChatStore(
         }
     }
 
-    /** Carrega a página anterior à mensagem mais antiga guardada. Devolve false quando o histórico acabou. */
-    suspend fun loadOlder(channelId: String): Boolean {
+    /**
+     * Carrega a página anterior à mensagem mais antiga guardada, de até [limit] mensagens (o servidor
+     * entrega no máximo 100). Devolve false quando o histórico acabou.
+     */
+    suspend fun loadOlder(channelId: String, limit: Int = PAGE_SIZE): Boolean {
         if (hasOlder[channelId] == false) return false
         val oldest = withContext(io) { q.oldestMessage(channelId).executeAsOneOrNull() } ?: return false
-        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = PAGE_SIZE)
+        val page = api.messages(channelId, since = oldest.created_at, lastId = oldest.id, limit = limit)
         withContext(io) { q.transaction { page.messages.forEach(::upsert) } }
         hasOlder[channelId] = page.hasMore && page.messages.isNotEmpty()
         return hasOlder[channelId] == true
@@ -273,6 +276,28 @@ class ChatStore(
             if (oldest == before.messages.last().id) hasOlder[channelId] = before.hasMore
         }
         return position(channelId, messageId)?.let { Located.Found(it) } ?: Located.Missing
+    }
+
+    /**
+     * Procura uma mensagem que está antes do trecho guardado, sem saber o instante dela: é o caso da
+     * mensagem respondida, porque `reply_to` traz só o id e o servidor não lê uma mensagem avulsa.
+     * Sem instante não há cursor que leve até ela, então a única saída é paginar para trás a partir
+     * da mais antiga guardada, conferindo cada página. A resposta sempre aponta para uma mensagem do
+     * mesmo canal e mais antiga, e o trecho guardado não tem buracos: se ela existe, está atrás dele.
+     *
+     * Chegar ao começo do canal sem achá-la é [Located.Missing] (foi apagada). Cada página traz
+     * [ORIGINAL_PAGE_SIZE] mensagens e a procura desiste depois de [maxPages] delas com
+     * [Located.NotReached]: o que foi lido continua guardado, e chamar de novo segue dali.
+     */
+    suspend fun locateOlder(channelId: String, messageId: String, maxPages: Int = ORIGINAL_MAX_PAGES): Located {
+        require(maxPages > 0) { "maxPages precisa ser positivo: $maxPages" }
+        position(channelId, messageId)?.let { return Located.Found(it) }
+        repeat(maxPages) {
+            val more = loadOlder(channelId, ORIGINAL_PAGE_SIZE)
+            position(channelId, messageId)?.let { return Located.Found(it) }
+            if (!more) return Located.Missing
+        }
+        return Located.NotReached
     }
 
     /** Quantas mensagens guardadas do canal são mais novas que esta; null se ela não está guardada nele. */
@@ -726,6 +751,9 @@ class ChatStore(
         // Ao abrir uma mensagem antiga: o máximo que o servidor entrega do que veio depois dela.
         // Quanto mais longe essa página chega, maior a chance de encostar no trecho já guardado.
         const val AROUND_NEWER = 100
+        // Procura da mensagem respondida: páginas do tamanho máximo do servidor, e quantas ler antes de desistir.
+        const val ORIGINAL_PAGE_SIZE = 100
+        const val ORIGINAL_MAX_PAGES = 5
         const val DETACHED = "detached:"
         const val MAX_USER_PAGES = 50
         // O servidor nunca avisa que alguém parou de digitar: o indicador expira aqui.

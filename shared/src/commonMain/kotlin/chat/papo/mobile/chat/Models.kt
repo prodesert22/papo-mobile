@@ -85,6 +85,12 @@ sealed interface Located {
 
     /** O servidor não a tem mais neste canal: foi apagada ou nunca foi dele. */
     data object Missing : Located
+
+    /**
+     * A procura para trás parou no limite de páginas sem achá-la nem chegar ao começo do canal:
+     * ela pode existir mais para trás. As páginas lidas ficam guardadas, e uma nova procura continua dali.
+     */
+    data object NotReached : Located
 }
 
 /** online, offline, away ou busy. */
