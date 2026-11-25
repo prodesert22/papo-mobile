@@ -19,12 +19,14 @@ import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 import chat.papo.mobile.data.api.OutgoingFile
+import chat.papo.mobile.ui.components.PlatformImage
 import chat.papo.mobile.ui.components.PlatformUi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class AndroidPlatformUi(context: Context) : PlatformUi {
     private val app = context.applicationContext
+    private val images = AndroidImages(app)
 
     // Paint não é seguro entre threads; as consultas são curtas, então um cadeado basta.
     private val glyphPaint = Paint()
@@ -103,4 +105,6 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
             false
         }
     }
+
+    override suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage? = images.decode(bytes, maxPx, animate)
 }
