@@ -257,6 +257,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                             onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
                             onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
                             onSearch = { navController.navigate(SearchRoute(it.id)) },
+                            onEditProfile = { navController.navigate(EditProfileRoute(it.id)) },
                             onSwitch = { navController.navigate(SwitcherRoute()) },
                             onAppSettings = { navController.navigate(AppSettingsRoute) },
                             content = { account ->
