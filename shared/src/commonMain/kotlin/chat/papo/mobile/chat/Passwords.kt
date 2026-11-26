@@ -20,21 +20,14 @@ fun passwordProblems(password: String): List<PasswordProblem> {
     var symbol = false
     var i = 0
     while (i < password.length) {
-        val c = password[i]
         // Um par de substitutos é um só code point.
-        if (c.isHighSurrogate() && i + 1 < password.length && password[i + 1].isLowSurrogate()) {
-            symbol = true
-            i += 2
-        } else {
-            when (c.category) {
-                CharCategory.UPPERCASE_LETTER -> upper = true
-                CharCategory.LOWERCASE_LETTER, CharCategory.TITLECASE_LETTER, CharCategory.MODIFIER_LETTER, CharCategory.OTHER_LETTER,
-                CharCategory.DECIMAL_DIGIT_NUMBER, CharCategory.LETTER_NUMBER, CharCategory.OTHER_NUMBER,
-                -> Unit
-                else -> symbol = true
-            }
-            i++
+        val pair = password[i].isHighSurrogate() && i + 1 < password.length && password[i + 1].isLowSurrogate()
+        when (if (pair) CharKind.Symbol else kindOf(password[i])) {
+            CharKind.Upper -> upper = true
+            CharKind.Symbol -> symbol = true
+            CharKind.Plain -> Unit
         }
+        i += if (pair) 2 else 1
         points++
     }
     return buildList {
@@ -42,6 +35,17 @@ fun passwordProblems(password: String): List<PasswordProblem> {
         if (!upper) add(PasswordProblem.NoUppercase)
         if (!symbol) add(PasswordProblem.NoSymbol)
     }
+}
+
+private enum class CharKind { Upper, Plain, Symbol }
+
+/** Maiúscula; letra ou número que não é maiúscula; ou qualquer outra coisa (símbolo, pontuação, espaço). */
+private fun kindOf(c: Char): CharKind = when (c.category) {
+    CharCategory.UPPERCASE_LETTER -> CharKind.Upper
+    CharCategory.LOWERCASE_LETTER, CharCategory.TITLECASE_LETTER, CharCategory.MODIFIER_LETTER, CharCategory.OTHER_LETTER,
+    CharCategory.DECIMAL_DIGIT_NUMBER, CharCategory.LETTER_NUMBER, CharCategory.OTHER_NUMBER,
+    -> CharKind.Plain
+    else -> CharKind.Symbol
 }
 
 /** O resultado de conferir a senha nova e a repetição dela antes de mandar qualquer coisa ao servidor. */
@@ -80,7 +84,10 @@ fun parseResetLink(input: String, server: ServerUrl): ResetLink? {
     if (text.isEmpty()) return null
     // Um token cru não tem barra nem dois-pontos; qualquer um dos dois quer dizer que é um endereço.
     if ('/' !in text && ':' !in text) return text.takeIf(::isResetToken)?.let { ResetLink(it, otherHost = null) }
+    return resetLinkFromUrl(text, server)
+}
 
+private fun resetLinkFromUrl(text: String, server: ServerUrl): ResetLink? {
     val schemeEnd = text.indexOf("://")
     if (schemeEnd < 0) return null
     val scheme = text.substring(0, schemeEnd).lowercase()
@@ -88,14 +95,13 @@ fun parseResetLink(input: String, server: ServerUrl): ResetLink? {
     val rest = text.substring(schemeEnd + 3).substringBefore('#').substringBefore('?')
     val slash = rest.indexOf('/')
     if (slash < 0) return null
-    val authority = rest.substring(0, slash)
     val segments = rest.substring(slash).split('/').filter { it.isNotEmpty() }
-    val marker = segments.indexOfFirst { it == RESET_SEGMENT }
-    val token = segments.drop(marker + 1).lastOrNull()?.takeIf { marker >= 0 && isResetToken(it) } ?: return null
+    val marker = segments.indexOf(RESET_SEGMENT)
+    if (marker < 0) return null
+    val token = segments.drop(marker + 1).lastOrNull()?.takeIf(::isResetToken) ?: return null
 
-    val link = (ServerUrl.parse("$scheme://$authority") as? ServerUrl.Parsed.Ok)?.url ?: return null
-    val linkHost = hostName(link)
-    return ResetLink(token, otherHost = linkHost.takeUnless { it == hostName(server) })
+    val link = (ServerUrl.parse("$scheme://${rest.substring(0, slash)}") as? ServerUrl.Parsed.Ok)?.url ?: return null
+    return ResetLink(token, otherHost = hostName(link).takeUnless { it == hostName(server) })
 }
 
 private fun isResetToken(text: String): Boolean =
