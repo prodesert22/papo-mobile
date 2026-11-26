@@ -354,4 +354,5 @@
     <string name="embed_youtube_stopped">O player do YouTube parou. Use Abrir no YouTube.</string>
     <!-- 02 · trilha A · onda 3 (áudio) -->
     <!-- 02 · trilha B · onda 3 (links, teclado) -->
+    <string name="embed_youtube_unavailable">O player do YouTube não funciona neste aparelho. Use Abrir no YouTube.</string>
 </resources>
