@@ -45,6 +45,8 @@ import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.PlatformUi
 import chat.papo.mobile.ui.home.HomeScreen
 import chat.papo.mobile.ui.lock.LockScreen
+import chat.papo.mobile.ui.profile.ProfileScreen
+import chat.papo.mobile.ui.profile.ProfileViewModel
 import chat.papo.mobile.ui.search.SearchScreen
 import chat.papo.mobile.ui.search.SearchViewModel
 import chat.papo.mobile.ui.settings.AccountSettingsScreen
@@ -82,6 +84,10 @@ private data class ChatRoute(
 /** Busca na conta; [channelId] já abre com o filtro daquela conversa. */
 @Serializable
 private data class SearchRoute(val accountId: String, val channelId: String? = null)
+
+/** Perfil de [userId], um usuário da conta [accountId]. */
+@Serializable
+private data class ProfileRoute(val accountId: String, val userId: String)
 
 /** Troca rápida entre as conversas de todas as contas; [accountId] e [channelId] são a conversa de onde veio, se houve. */
 @Serializable
@@ -207,6 +213,30 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                         }
                     } else {
                         null
+                    },
+                    onOpenProfile = { userId -> navController.navigate(ProfileRoute(route.accountId, userId)) { launchSingleTop = true } },
+                )
+            }
+        }
+        composable<ProfileRoute> { entry ->
+            val route = entry.toRoute<ProfileRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                // A sessão entra na chave: o perfil lido por uma sessão nunca aparece em outra.
+                val vm = viewModel(key = "profile/${route.accountId}/${route.userId}/${accountSession.hashCode()}") {
+                    ProfileViewModel(accountSession, route.userId)
+                }
+                ProfileScreen(
+                    session = accountSession,
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onOpenChat = { channelId ->
+                        val chat = ChatRoute(route.accountId, channelId)
+                        // Veio desta conversa (o título da conversa direta leva ao perfil): volta a ela em vez de empilhar outra igual.
+                        if (!navController.popBackStack(chat, inclusive = false)) navController.navigate(chat)
                     },
                 )
             }

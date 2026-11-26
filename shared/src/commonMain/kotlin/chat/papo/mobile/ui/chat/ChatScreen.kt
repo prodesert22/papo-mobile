@@ -201,6 +201,7 @@ import chat.papo.mobile.resources.presence_away
 import chat.papo.mobile.resources.presence_busy
 import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
+import chat.papo.mobile.resources.profile_open
 import chat.papo.mobile.resources.switcher_title
 import chat.papo.mobile.ui.components.AppBadge
 import chat.papo.mobile.ui.components.AuthorAvatar
@@ -237,6 +238,8 @@ fun ChatScreen(
     onSwitch: () -> Unit,
     /** Entra na chamada do canal de voz; null onde não há chamada. Só é oferecido em canal de voz. */
     onJoinCall: (() -> Unit)?,
+    /** Abre o perfil do usuário de id dado: o autor de uma mensagem ou, numa conversa direta, a outra pessoa. */
+    onOpenProfile: (String) -> Unit,
 ) {
     val chat = session.chat
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -270,6 +273,9 @@ fun ChatScreen(
     val channel = channels.firstOrNull { it.id == viewModel.channelId }
     val dmUser = dms.firstOrNull { it.id == viewModel.channelId }?.let { users[it.userId] }
     val title = channel?.name ?: dmUser?.displayName ?: ""
+    val profileLabel = stringResource(Res.string.profile_open)
+    // Numa conversa direta o título (avatar e nome) leva ao perfil da outra pessoa.
+    val openDmProfile = if (dmUser == null) Modifier else Modifier.clickable(onClickLabel = profileLabel) { onOpenProfile(dmUser.id) }
 
     val isVoice = channel?.type == ChannelType.Voice
     val isDm = dms.any { it.id == viewModel.channelId }
@@ -399,7 +405,7 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(openDmProfile, verticalAlignment = Alignment.CenterVertically) {
                         if (dmUser != null) {
                             UserAvatar(session, dmUser, size = 32.dp)
                             Spacer(Modifier.width(10.dp))
@@ -490,6 +496,8 @@ fun ChatScreen(
                         val newDay = older == null || older.createdAt?.dayKey() != message.createdAt?.dayKey()
                         val compact = older != null && continuesGroup(older, message)
                         val everyoneAuthor = authorCanEveryone(permissions, message.authorId, message.webhookId)
+                        // Só quem o app conhece tem perfil: mensagem de webhook e autor removido não levam a nada.
+                        val profileId = message.authorId?.takeIf { message.webhookId == null && it in users }
                         Column {
                             if (newDay && (older != null || state.reachedStart)) DaySeparator(message)
                             MessageItem(
@@ -519,6 +527,7 @@ fun ChatScreen(
                                 onOpenImage = { viewing = it },
                                 onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
                                 onPlay = { playing = PlayingVideo(it.key) },
+                                onOpenAuthor = profileId?.let { id -> { onOpenProfile(id) } },
                             )
                         }
                     }

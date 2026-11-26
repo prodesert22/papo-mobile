@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
@@ -116,6 +117,7 @@ import chat.papo.mobile.resources.msg_pinned
 import chat.papo.mobile.resources.msg_quick_react
 import chat.papo.mobile.resources.msg_reactors_label
 import chat.papo.mobile.resources.msg_reply
+import chat.papo.mobile.resources.profile_open
 import chat.papo.mobile.ui.components.AppBadge
 import chat.papo.mobile.ui.components.AuthorAvatar
 import chat.papo.mobile.ui.components.formatBytes
@@ -324,6 +326,8 @@ fun EmojiImage(
  * [addressedToMe] marca a mensagem dirigida a quem usa a conta, que a menciona, responde a ela ou é um `@everyone`
  * de quem pode usá-lo (a própria também, como no web): fundo dourado e uma barra no começo da linha.
  * [highlightEveryone] vale quando o autor pode usar `@everyone` e põe esse trecho do texto em destaque.
+ * [onOpenAuthor] abre o perfil de quem escreveu: o toque no avatar ou no nome (o toque longo continua abrindo as ações
+ * da mensagem). É nulo onde não há perfil, em mensagem de webhook e de autor que o app não conhece.
  * Mensagem de webhook leva o selo "APP" ao lado do nome e o avatar do webhook, quando ele tem um.
  * [highlighted] é o destaque passageiro (a mensagem que se responde ou edita, ou a que se
  * acabou de abrir) e tem o fundo no lugar do dourado, que continua na barra. Toda mensagem [pinned] leva o
@@ -355,11 +359,21 @@ fun MessageItem(
     onOpenImage: (AttachmentDto) -> Unit,
     onShowReactors: (ReactionSummaryDto) -> Unit,
     onPlay: (PlayableMedia) -> Unit,
+    onOpenAuthor: (() -> Unit)? = null,
 ) {
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
         ?: author?.displayName
         ?: stringResource(Res.string.chat_unknown_user)
     val isWebhook = message.webhookId != null
+    val openLabel = stringResource(Res.string.profile_open)
+    // O toque abre o perfil; o toque longo segue como o da linha, e o duplo e a deslizada ficam com o resto dela.
+    val openAuthor = if (onOpenAuthor == null) {
+        Modifier
+    } else {
+        Modifier.combinedClickable(onClickLabel = openLabel, role = Role.Button, onClick = onOpenAuthor, onLongClick = onLongPress)
+    }
+    // Recortado antes do toque: a ondulação acompanha o círculo do avatar.
+    val openAvatar = Modifier.clip(CircleShape).then(openAuthor)
     val replyLabel = stringResource(Res.string.msg_reply)
     val reactLabel = stringResource(Res.string.msg_quick_react, EmojiPickerModel.DEFAULT_REACTIONS.first())
     val papoColors = LocalPapoColors.current
@@ -386,7 +400,7 @@ fun MessageItem(
         ) {
             Box(Modifier.width(40.dp)) {
                 if (!compact) {
-                    AuthorAvatar(session, author, message.webhookId, message.externalAuthor?.avatarUrl, authorName, size = 40.dp)
+                    AuthorAvatar(session, author, message.webhookId, message.externalAuthor?.avatarUrl, authorName, openAvatar, size = 40.dp)
                 }
             }
             Spacer(Modifier.width(10.dp))
@@ -403,7 +417,7 @@ fun MessageItem(
                             color = parseHexColor(author?.roleColor) ?: MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
+                            modifier = Modifier.weight(1f, fill = false).then(openAuthor),
                         )
                         // O selo e a hora têm tamanho fixo: só o nome encolhe quando falta lugar.
                         if (isWebhook) {

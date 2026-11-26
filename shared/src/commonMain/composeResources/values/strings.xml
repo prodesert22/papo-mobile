@@ -241,6 +241,15 @@
     <string name="chat_app_badge">APP</string>
     <string name="chat_app_badge_description">Aplicativo</string>
 
+    <!-- Perfil -->
+    <string name="profile_open">Ver perfil</string>
+    <string name="profile_message">Mensagem</string>
+    <string name="profile_copy_username">Copiar @usuário</string>
+    <string name="profile_about">Sobre</string>
+    <string name="profile_roles">Cargos</string>
+    <string name="profile_member_since">Membro desde %1$s</string>
+    <string name="profile_not_found">Este perfil não foi encontrado. A conta pode ter sido removida.</string>
+
     <!-- Busca -->
     <string name="search_title">Buscar mensagens</string>
     <string name="search_submit">Buscar</string>
