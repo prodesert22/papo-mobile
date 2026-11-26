@@ -33,6 +33,10 @@ data class UserProfile(
     /** Quando a conta foi criada; null se o servidor não mandou ou mandou algo ilegível. */
     val memberSince: Instant?,
     val roles: List<RoleSummaryDto>,
+    /** Frase de digitação própria; só o próprio perfil a mostra ao editar. */
+    val typing: String? = null,
+    /** O status guardado no servidor (`away` ou `busy`); null é disponível. Vale enquanto a pessoa está online. */
+    val status: String? = null,
 ) {
     val displayName: String get() = nickname?.takeIf { it.isNotBlank() } ?: username
 }
@@ -51,6 +55,8 @@ fun UserProfileDto.toProfile() = UserProfile(
     statusMessage = statusMessage.trimmedOrNull(),
     memberSince = parseInstant(createdAt),
     roles = roles,
+    typing = typing.trimmedOrNull(),
+    status = status?.takeIf { it == "away" || it == "busy" },
 )
 
 /** Nome, @usuário e recado que o alto do perfil mostra. */
@@ -115,6 +121,14 @@ class ProfileCache(
             loading.getOrPut(userId) { scope.async { read(userId) } }
         }
         return pending.await().getOrThrow()
+    }
+
+    /**
+     * Esquece o que se leu de [userId]: a próxima leitura vai ao servidor. É para depois de a própria conta mudar o perfil,
+     * já que descrição e banner não têm evento e só a validade os renovaria. Uma leitura em andamento não é afetada.
+     */
+    suspend fun invalidate(userId: String) {
+        mutex.withLock { entries.remove(userId) }
     }
 
     /** O erro volta dentro do `Result`: um `async` que falha cancelaria o escopo da sessão, e quem o pediu já o recebe. */

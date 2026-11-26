@@ -118,6 +118,32 @@ class ProfileCacheTest {
     }
 
     @Test
+    fun invalidarFazAProximaLeituraIrAoServidorSoDaquelePerfil() = runTest {
+        val server = Server(sha)
+        val profiles = profiles(server)
+        profiles.get("u2")
+        profiles.get("u3")
+
+        profiles.invalidate("u2")
+        server.nickname = "Ana Souza"
+
+        assertEquals("Ana Souza", profiles.get("u2").nickname)
+        assertEquals("Ana Lima", profiles.get("u3").nickname)
+        assertEquals(listOf("/users/u2/profile", "/users/u3/profile", "/users/u2/profile"), server.requests.toList())
+    }
+
+    @Test
+    fun invalidarUmPerfilQueNaoFoiLidoNaoFazNada() = runTest {
+        val server = Server(sha)
+        val profiles = profiles(server)
+
+        profiles.invalidate("u9")
+        profiles.get("u9")
+
+        assertEquals(listOf("/users/u9/profile"), server.requests.toList())
+    }
+
+    @Test
     fun cadaUsuarioTemASuaLeitura() = runTest {
         val server = Server(sha)
         val profiles = profiles(server)
