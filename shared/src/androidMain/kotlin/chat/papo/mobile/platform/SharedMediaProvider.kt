@@ -1,8 +1,10 @@
 package chat.papo.mobile.platform
 
+import android.content.ClipData
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -17,6 +19,9 @@ import kotlin.concurrent.thread
 object SharedMedia {
     val store = SharedMediaStore()
 
+    /** `tipo/subtipo` sem parâmetros: o que o sistema aceita como tipo de um `ACTION_SEND`. */
+    private val MIME_TYPE = Regex("[A-Za-z0-9][A-Za-z0-9.+_-]*/[A-Za-z0-9][A-Za-z0-9.+_-]*")
+
     fun authority(context: Context): String = "${context.packageName}.shared"
 
     /**
@@ -25,6 +30,18 @@ object SharedMedia {
      */
     fun uri(context: Context, token: String, name: String): Uri =
         Uri.Builder().scheme("content").authority(authority(context)).appendPath(token).appendPath(name.ifBlank { "arquivo" }).build()
+
+    /** O tipo do `ACTION_SEND` para [mimeType], que vem do servidor: só vale o que tem a forma de um tipo; o resto segue como arquivo qualquer. */
+    fun sendType(mimeType: String): String = mimeType.takeIf(MIME_TYPE::matches) ?: "application/octet-stream"
+
+    /** A intenção de enviar [uri], do tipo [type] (de [sendType]), com a leitura concedida a quem a receber. */
+    fun sendIntent(uri: Uri, name: String, type: String): Intent = Intent(Intent.ACTION_SEND).apply {
+        this.type = type
+        putExtra(Intent.EXTRA_STREAM, uri)
+        // O `ClipData` leva a concessão de leitura pelo seletor até o aplicativo escolhido.
+        clipData = ClipData.newRawUri(name, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
 }
 
 /**

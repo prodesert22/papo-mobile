@@ -232,5 +232,7 @@ class ViewerItemsTest {
         assertNull(ViewingMedia.Saver.restore(listOf("m1", "attachment:a", "attachment:a", "não", 0L)))
         assertNull(ViewingMedia.Saver.restore(listOf("m1", "attachment:a", "attachment:a", false, "0")))
         assertNull(ViewingMedia.Saver.restore(listOf(1, "attachment:a", "attachment:a", false, 0L)))
+        assertNull(ViewingMedia.Saver.restore(listOf("m1", 2, "attachment:a", false, 0L)))
+        assertNull(ViewingMedia.Saver.restore(listOf("m1", "attachment:a", 3, false, 0L)))
     }
 }

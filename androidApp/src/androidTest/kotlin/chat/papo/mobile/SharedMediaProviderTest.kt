@@ -2,8 +2,10 @@ package chat.papo.mobile
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.core.content.IntentCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import chat.papo.mobile.platform.SharedMedia
@@ -70,11 +72,28 @@ class SharedMediaProviderTest {
         }
         // Quem pergunta o nome depois de ler ainda o recebe: o aplicativo de destino costuma fazer nessa ordem.
         read(uri)
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)!!.use { cursor ->
+        // Só os dois campos de arquivo abrível existem: o que mais se pedir (como o caminho `_data`) não é servido.
+        resolver.query(uri, arrayOf("_data", OpenableColumns.DISPLAY_NAME), null, null, null)!!.use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals(1, cursor.columnCount)
             assertEquals("viagem.png", cursor.getString(0))
         }
+    }
+
+    @Test
+    fun aIntencaoDeEnviarLevaOEnderecoOTipoEALeituraConcedidaAteOSeletor() {
+        val uri = share(payload(10))
+        val send = SharedMedia.sendIntent(uri, "foto.jpg", "image/jpeg")
+        assertEquals(Intent.ACTION_SEND, send.action)
+        assertEquals("image/jpeg", send.type)
+        assertEquals(uri, IntentCompat.getParcelableExtra(send, Intent.EXTRA_STREAM, Uri::class.java))
+        assertEquals(uri, send.clipData?.getItemAt(0)?.uri)
+        assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        assertEquals(0, send.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        // O seletor é quem a recebe do app, e a concessão precisa chegar nele para chegar ao aplicativo escolhido.
+        val chooser = Intent.createChooser(send, null)
+        assertTrue(chooser.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        assertEquals(uri, chooser.clipData?.getItemAt(0)?.uri)
     }
 
     @Test

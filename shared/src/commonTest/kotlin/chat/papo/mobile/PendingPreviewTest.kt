@@ -6,6 +6,9 @@ import chat.papo.mobile.media.PREVIEW_MAX_BYTES
 import chat.papo.mobile.media.readAtMost
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -75,6 +78,15 @@ class PendingPreviewTest {
     fun arquivoQueNaoAbreDeixaAFalhaPassarParaQuemChamou() = runTest {
         val file = OutgoingFile("sumiu.jpg", "image/jpeg", 10, open = { throw FileUnavailableException("sumiu.jpg") })
         assertFailsWith<FileUnavailableException> { file.readAtMost(500) }
+    }
+
+    @Test
+    fun cancelarALeituraNoMeioFechaOFluxoDoProvedor() = runTest {
+        val idle = ByteChannel() // o provedor abriu e ainda não entregou nada
+        val file = OutgoingFile("foto.jpg", "image/jpeg", null, open = { idle })
+        val reading = launch(start = CoroutineStart.UNDISPATCHED) { file.readAtMost(500) }
+        reading.cancelAndJoin()
+        assertNotNull(idle.closedCause)
     }
 
     @Test

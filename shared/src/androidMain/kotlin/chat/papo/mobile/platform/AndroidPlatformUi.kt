@@ -2,7 +2,6 @@ package chat.papo.mobile.platform
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -212,20 +211,12 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
     override suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage? = images.decode(bytes, maxPx, animate)
 
     override fun shareMedia(name: String, mimeType: String, bytes: ByteArray): Boolean {
-        // O tipo e o nome vêm do servidor: só passa o que tem a forma de um tipo, e o resto segue como arquivo qualquer.
-        val type = mimeType.takeIf(MIME_TYPE::matches) ?: "application/octet-stream"
+        val type = SharedMedia.sendType(mimeType)
         val token = SharedMedia.store.put(name, type, bytes)
         // O depósito só se limpa quando alguém o usa; sem isto os bytes de um compartilhamento esquecido ficariam na memória.
         Handler(Looper.getMainLooper()).postDelayed({ SharedMedia.store.purge() }, (SharedMediaStore.LIFETIME + 1.seconds).inWholeMilliseconds)
         val uri = SharedMedia.uri(app, token, name)
-        val send = Intent(Intent.ACTION_SEND).apply {
-            this.type = type
-            putExtra(Intent.EXTRA_STREAM, uri)
-            // O `ClipData` leva a concessão de leitura pelo seletor até o aplicativo escolhido.
-            clipData = ClipData.newRawUri(name, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        val chooser = Intent.createChooser(send, null)
+        val chooser = Intent.createChooser(SharedMedia.sendIntent(uri, name, type), null)
         if (host !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
             host.startActivity(chooser)
@@ -234,11 +225,6 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
             SharedMedia.store.discard(token)
             false
         }
-    }
-
-    private companion object {
-        /** `tipo/subtipo` sem parâmetros: o que o sistema aceita como tipo de um `ACTION_SEND`. */
-        val MIME_TYPE = Regex("[A-Za-z0-9][A-Za-z0-9.+_-]*/[A-Za-z0-9][A-Za-z0-9.+_-]*")
     }
 }
 

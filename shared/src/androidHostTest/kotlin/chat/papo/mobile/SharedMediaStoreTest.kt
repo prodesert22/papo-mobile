@@ -1,5 +1,6 @@
 package chat.papo.mobile
 
+import chat.papo.mobile.platform.SharedMedia
 import chat.papo.mobile.platform.SharedMediaStore
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -136,5 +137,23 @@ class SharedMediaStoreTest {
         store.purge()
         assertNull(store.info(old))
         assertNotNull(store.info(recent))
+    }
+}
+
+/** O tipo que o compartilhamento declara: ele vem do servidor, então só vale o que tem a forma de um tipo. */
+class SharedMediaSendTypeTest {
+    @Test
+    fun tipoComAFormaDeTipoSegueComoVeio() {
+        assertEquals("image/jpeg", SharedMedia.sendType("image/jpeg"))
+        assertEquals("image/svg+xml", SharedMedia.sendType("image/svg+xml"))
+        assertEquals("video/x-matroska", SharedMedia.sendType("video/x-matroska"))
+        assertEquals("IMAGE/PNG", SharedMedia.sendType("IMAGE/PNG"))
+    }
+
+    @Test
+    fun oQueNaoTemAFormaDeUmTipoViraArquivoQualquer() {
+        for (text in listOf("", "image", "image/", "/png", "image/*", "image/png; charset=x", " image/png", "image/png\n", "a/b/c", "../etc/passwd")) {
+            assertEquals("application/octet-stream", SharedMedia.sendType(text), text)
+        }
     }
 }
