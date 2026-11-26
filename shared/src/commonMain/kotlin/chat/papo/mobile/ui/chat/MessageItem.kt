@@ -4,7 +4,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,26 +12,19 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Reply
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,8 +43,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -97,22 +87,17 @@ import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.TextSpan
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.hidesDestination
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.core.formatTime
 import chat.papo.mobile.data.api.AttachmentDto
-import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.ReactionSummaryDto
-import chat.papo.mobile.media.PlayableMedia
-import chat.papo.mobile.media.playableAttachment
-import chat.papo.mobile.media.relayVideo
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_edited
 import chat.papo.mobile.resources.chat_reply_missing
 import chat.papo.mobile.resources.chat_reply_open
 import chat.papo.mobile.resources.chat_reply_unloaded
-import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.chat_unknown_user
-import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.resources.msg_pinned
 import chat.papo.mobile.resources.msg_quick_react
 import chat.papo.mobile.resources.msg_reactors_label
@@ -120,15 +105,12 @@ import chat.papo.mobile.resources.msg_reply
 import chat.papo.mobile.resources.profile_open
 import chat.papo.mobile.ui.components.AppBadge
 import chat.papo.mobile.ui.components.AuthorAvatar
-import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.parseHexColor
-import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.components.rememberMediaPainter
 import chat.papo.mobile.ui.components.rememberedPainter
-import chat.papo.mobile.ui.media.rememberAttachmentDownload
+import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import org.jetbrains.compose.resources.stringResource
-import kotlin.io.encoding.Base64
 
 /** Um pedaço do corpo da mensagem: um texto (parágrafos ou um item de lista) ou uma régua entre textos. */
 sealed interface MessagePart {
@@ -162,6 +144,10 @@ private const val MARKER_GAP = "\u00A0"
  *
  * O `@everyone` só sai em destaque, como uma menção, com [highlightEveryone]: ele vale quando o autor pode
  * usá-lo (`authorCanEveryone`). Sem isso é texto comum, como qualquer outro.
+ *
+ * Um link cujo texto esconde o destino (`[banco](https://outro.example)`, ver [hidesDestination]) não abre sozinho com
+ * [onConfirmLink]: o toque chama a função com o destino, para quem mostra pedir a confirmação. Sem ela, e para os links
+ * que mostram o próprio destino, o toque abre o link direto.
  */
 fun messageText(
     content: String,
@@ -172,6 +158,7 @@ fun messageText(
     emojiIds: Map<String, String> = emptyMap(),
     lists: ListMetrics = DefaultListMetrics,
     highlightEveryone: Boolean = false,
+    onConfirmLink: ((String) -> Unit)? = null,
 ): MessageText {
     val used = LinkedHashSet<String>()
 
@@ -193,7 +180,15 @@ fun messageText(
             val style = spanStyle(span, accent, codeBackground, muted)
             val plain = spanText(span, nameOf)
             when {
-                span.link != null -> withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(plain) }
+                span.link != null -> {
+                    val styles = TextLinkStyles(style)
+                    val annotation = if (onConfirmLink != null && span.hidesDestination()) {
+                        LinkAnnotation.Clickable(span.link, styles) { onConfirmLink(span.link) }
+                    } else {
+                        LinkAnnotation.Url(span.link, styles)
+                    }
+                    withLink(annotation) { append(plain) }
+                }
                 span.code || span.mentionUserId != null || span.everyone -> withStyle(style) { append(plain) }
                 else -> withStyle(style) { appendEmojis(plain) }
             }
@@ -332,10 +327,12 @@ fun EmojiImage(
  * [highlighted] é o destaque passageiro (a mensagem que se responde ou edita, ou a que se
  * acabou de abrir) e tem o fundo no lugar do dourado, que continua na barra. Toda mensagem [pinned] leva o
  * alfinete no fim da linha, também as agrupadas, que não têm cabeçalho.
+ *
+ * [videos] é de onde os cartões de vídeo da mensagem sabem qual toca na própria caixa e por onde abrem a tela cheia.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageItem(
+internal fun MessageItem(
     session: AccountSession,
     message: Message,
     author: User?,
@@ -358,7 +355,7 @@ fun MessageItem(
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
     onShowReactors: (ReactionSummaryDto) -> Unit,
-    onPlay: (PlayableMedia) -> Unit,
+    videos: VideoHost,
     onOpenAuthor: (() -> Unit)? = null,
 ) {
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
@@ -444,18 +441,11 @@ fun MessageItem(
                 }
                 message.attachments.forEach { attachment ->
                     Spacer(Modifier.height(6.dp))
-                    // Vídeo que o player abre vira cartão com ▶; os que ele recusa (bloqueado) ficam no cartão de arquivo.
-                    val video = playableAttachment(session.client.server, attachment)
-                    when {
-                        attachment.isImage && attachment.thumbnailId != null ->
-                            ImageAttachment(session, attachment, onOpen = { onOpenImage(attachment) })
-                        video != null -> VideoAttachment(session, attachment, video, onPlay)
-                        else -> FileAttachment(session, attachment)
-                    }
+                    MessageAttachment(session, message, attachment, onOpenImage, videos)
                 }
                 message.embeds.forEach { embed ->
                     Spacer(Modifier.height(6.dp))
-                    EmbedCard(session, embed, onPlay)
+                    EmbedCard(session, message.id, embed, users, emojiIds, unicodeEmojis, videos)
                 }
                 if (message.reactions.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
@@ -480,7 +470,7 @@ fun MessageItem(
 private val HighlightBarWidth = 3.dp
 
 /** Uma barra de [width] no começo da linha, na altura toda: à esquerda, ou à direita em idiomas da direita para a esquerda. */
-private fun Modifier.startBar(color: Color, width: Dp): Modifier = drawBehind {
+internal fun Modifier.startBar(color: Color, width: Dp): Modifier = drawBehind {
     val barWidth = width.toPx()
     val x = if (layoutDirection == LayoutDirection.Rtl) size.width - barWidth else 0f
     drawRect(color, Offset(x, 0f), Size(barWidth, size.height))
@@ -507,9 +497,12 @@ fun MessageBodyText(
     // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
     // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
     val relevantIds = if (':' in content) emojiIds else emptyMap()
+    // O link que o texto esconde só abre depois de o usuário ver o destino.
+    var pendingLink by remember { mutableStateOf<String?>(null) }
     val text = remember(content, users, accent, codeBackground, muted, relevantIds, lists, highlightEveryone) {
-        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds, lists, highlightEveryone)
+        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds, lists, highlightEveryone) { pendingLink = it }
     }
+    pendingLink?.let { LinkConfirmDialog(it, onDismiss = { pendingLink = null }) }
     // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
     val jumbo = remember(content, relevantIds, unicodeEmojis) {
         EmojiText.isEmojiOnly(content, relevantIds, unicodeEmojis)
@@ -615,150 +608,6 @@ private fun ReplyPreview(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-@Composable
-private fun ImageAttachment(session: AccountSession, attachment: AttachmentDto, onOpen: () -> Unit) {
-    var revealed by remember(attachment.id) { mutableStateOf(!attachment.isSensitive) }
-    val ratio = run {
-        val w = attachment.thumbnailWidth ?: 0
-        val h = attachment.thumbnailHeight ?: 0
-        if (w > 0 && h > 0) (w.toFloat() / h).coerceIn(0.5f, 2.5f) else 4f / 3f
-    }
-    val image by rememberMediaImage(session, if (revealed) "att-thumb/${attachment.id}" else null) {
-        session.api.attachmentThumbnail(attachment.id)
-    }
-    // A proporção vem dos metadados: a caixa já nasce do tamanho certo e a lista não pula ao carregar.
-    Box(
-        Modifier
-            .widthIn(max = 280.dp)
-            .heightIn(max = 320.dp)
-            .aspectRatio(ratio)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable { if (revealed) onOpen() else revealed = true },
-        contentAlignment = Alignment.Center,
-    ) {
-        val bitmap = image
-        when {
-            !revealed -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {
-                Icon(Icons.Filled.VisibilityOff, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(Res.string.chat_sensitive),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            bitmap != null -> Image(bitmap, attachment.fileName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        }
-    }
-}
-
-@Composable
-private fun FileAttachment(session: AccountSession, attachment: AttachmentDto) {
-    val download = rememberAttachmentDownload(session, attachment)
-    Row(
-        Modifier
-            .widthIn(max = 320.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(enabled = !download.downloading, onClickLabel = stringResource(Res.string.msg_download), onClick = download::start)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f, fill = false)) {
-            Text(attachment.fileName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-            Text(
-                formatBytes(attachment.sizeBytes),
-                style = MaterialTheme.typography.labelSmall,
-                color = if (download.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        if (download.downloading) {
-            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-        } else {
-            Icon(Icons.Filled.Download, contentDescription = stringResource(Res.string.msg_download), modifier = Modifier.size(20.dp))
-        }
-    }
-}
-
-/**
- * Cartão de um embed de link. Se ele traz um vídeo que o relay do servidor serve ([relayVideo]), a imagem (ou uma caixa
- * 16:9 sem imagem) leva o ▶ e tocar chama [onPlay]. Nada é pedido ao relay antes do toque: nem autoplay nem pré-carga,
- * porque cada vídeo aberto prende uma das poucas vagas do relay no servidor.
- */
-@Composable
-private fun EmbedCard(session: AccountSession, embed: EmbedDto, onPlay: (PlayableMedia) -> Unit) {
-    val video = relayVideo(session.client.server, embed)
-    val hasImage = embed.thumbnail != null || embed.image != null
-    val image by rememberMediaImage(session, if (hasImage) "embed/${embed.id}" else null) {
-        session.api.embedImageBase64(embed.id)?.let { Base64.decode(it) }
-    }
-    val accent = MaterialTheme.colorScheme.primary
-    Row(
-        Modifier
-            .widthIn(max = 340.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer),
-    ) {
-        Box(Modifier.width(3.dp).heightIn(min = 48.dp).background(MaterialTheme.colorScheme.outline))
-        Column(Modifier.padding(10.dp)) {
-            (embed.siteName ?: embed.provider)?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            embed.title?.takeIf { it.isNotBlank() }?.let { title ->
-                val text = if (embed.url != null) {
-                    buildAnnotatedString {
-                        withLink(LinkAnnotation.Url(embed.url, TextLinkStyles(SpanStyle(color = accent)))) { append(title) }
-                    }
-                } else {
-                    AnnotatedString(title)
-                }
-                Text(text, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            embed.description?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
-            }
-            if (video != null) {
-                Spacer(Modifier.height(8.dp))
-                EmbedVideoBox(image, onClick = { onPlay(video) })
-            } else {
-                image?.let { bitmap ->
-                    Spacer(Modifier.height(8.dp))
-                    Image(
-                        bitmap,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * A caixa do vídeo do embed: sempre 16:9, com a imagem do embed por baixo assim que ela chega (antes disso e sem imagem, o
- * fundo do cartão), para a lista não pular quando a imagem carrega. O ▶ fica por cima.
- */
-@Composable
-private fun EmbedVideoBox(image: ImageBitmap?, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-        PlayBadge()
     }
 }
 

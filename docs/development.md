@@ -45,7 +45,11 @@ points it at a folder of videos to seed (served with `Range`), `FAKE_VIDEO_KBPS`
 throttles them and `FAKE_VIDEO_401_ONCE=N` answers 401 to the N-th video request.
 A message with a `https://videos.example.com/...` link gets a video embed about a second
 later (`GET /embeds/{id}` and the `/embeds/{id}/video` relay, which serves a seeded video
-with `Range`), and `FAKE_RELAY_502=1` makes the relay answer 502.
+with `Range`), and `FAKE_RELAY_502=1` makes the relay answer 502. `FAKE_AUDIO_DIR` seeds the audio files
+of a folder in the `audio` channel, `FAKE_UPLOAD_KBPS` throttles uploads, and
+`FAKE_YOUTUBE_ID` sets the id of the seeded YouTube embed (an invented one by default, which
+YouTube answers as unavailable). The `embeds` and `galeria` channels hold link previews, GIFs,
+moderation states and messages with several images and videos.
 
 ## Release builds
 

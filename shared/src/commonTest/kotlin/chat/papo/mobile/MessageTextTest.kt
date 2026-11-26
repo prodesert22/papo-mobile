@@ -27,7 +27,12 @@ class MessageTextTest {
     // Recuo de 100 sp por nível e 10 sp por caractere do marcador (com o espaço).
     private val metrics = ListMetrics(step = 100.sp) { marker -> (marker.length * 10).sp }
 
-    private fun build(content: String, emojis: Map<String, String> = emptyMap(), everyone: Boolean = false) = messageText(
+    private fun build(
+        content: String,
+        emojis: Map<String, String> = emptyMap(),
+        everyone: Boolean = false,
+        onConfirmLink: ((String) -> Unit)? = null,
+    ) = messageText(
         content = content,
         nameOf = { if (it == id) "Ana" else null },
         accent = Color.Blue,
@@ -36,6 +41,7 @@ class MessageTextTest {
         emojiIds = emojis,
         lists = metrics,
         highlightEveryone = everyone,
+        onConfirmLink = onConfirmLink,
     )
 
     private fun MessageText.texts() = parts.map { (it as MessagePart.Text).text }
@@ -259,5 +265,38 @@ class MessageTextTest {
         val built = build("@everyone :party:", mapOf("party" to "e1"), everyone = true)
         assertEquals(setOf("e1"), built.emojiIds)
         assertTrue(built.hasImages)
+    }
+
+    // Links: o que esconde o destino pede confirmação; o resto abre direto.
+
+    private fun links(content: String, onConfirm: ((String) -> Unit)?) =
+        build(content, onConfirmLink = onConfirm).texts().single().let { it.getLinkAnnotations(0, it.length).map { range -> range.item } }
+
+    @Test
+    fun linkNomeadoComTextoDiferenteAbreAConfirmacaoComODestino() {
+        val asked = mutableListOf<String>()
+        val link = links("[banco](https://outro.example)") { asked += it }.single()
+        assertIs<LinkAnnotation.Clickable>(link)
+        assertEquals("https://outro.example", link.tag)
+        assertEquals(Color.Blue, link.styles?.style?.color)
+        assertEquals(TextDecoration.Underline, link.styles?.style?.textDecoration)
+        assertEquals(emptyList(), asked)
+        link.linkInteractionListener!!.onClick(link)
+        assertEquals(listOf("https://outro.example"), asked)
+    }
+
+    @Test
+    fun enderecoSoltoEWwwAbremDiretoSemPerguntar() {
+        val asked = mutableListOf<String>()
+        val found = links("https://a.test/x e www.b.test e [https://c.test](https://c.test)") { asked += it }
+        assertEquals(listOf("https://a.test/x", "https://www.b.test", "https://c.test"), found.map { (it as LinkAnnotation.Url).url })
+        assertEquals(emptyList(), asked)
+    }
+
+    @Test
+    fun semQuemConfirmeOLinkNomeadoAbreDireto() {
+        val link = links("[banco](https://outro.example)", null).single()
+        assertIs<LinkAnnotation.Url>(link)
+        assertEquals("https://outro.example", link.url)
     }
 }

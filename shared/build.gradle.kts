@@ -53,6 +53,7 @@ kotlin {
             implementation(libs.ktor.client.websockets)
             implementation(libs.ktor.serialization.json)
             implementation(libs.sqldelight.coroutines)
+            implementation(libs.zoomable)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -70,6 +71,7 @@ kotlin {
             implementation(libs.sqlcipher.android)
             implementation(libs.webrtc.android)
             implementation(libs.androidx.fragment)
+            implementation(libs.androidx.webkit)
             implementation(libs.androidx.sqlite)
             implementation(libs.accompanist.drawablepainter)
             implementation(libs.media3.exoplayer)

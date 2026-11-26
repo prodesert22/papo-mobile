@@ -24,6 +24,10 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   dos backups do aparelho.
 - Opcionalmente, bloqueie capturas de tela e esconda as conversas na lista de
   apps recentes.
+- O player do YouTube dentro do app é a única exceção: enquanto ele está aberto,
+  o componente web do celular guarda cookies e cache sem cifrar na pasta do app.
+  Eles são apagados quando o player fecha e quando o app trava; algumas bases
+  vazias com o nome do YouTube ficam até a próxima vez que o app abrir.
 
 ## Mensagens
 
@@ -33,7 +37,12 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - As mensagens aparecem assim que você as envia e saem uma de cada vez; a que
   falha fica com o motivo e um botão para reenviar, e nunca é reenviada sozinha.
 - Um rascunho para cada conversa, com a mensagem que você estava respondendo.
-- Anexos, respostas, edição e exclusão, reações, mensagens fixadas e menções. As
+- Anexe fotos e vídeos da galeria, ou qualquer arquivo, com prévia antes de
+  enviar; GIFs, figurinhas e imagens do teclado ou coladas também entram como
+  anexo. Até 10 arquivos, 100 MB cada e 105 MB somados; os arquivos sobem em
+  fluxo, com progresso e botão de cancelar, e uma foto JPEG que leva a sua
+  localização avisa antes de enviar.
+- Respostas, edição e exclusão, reações, mensagens fixadas e menções. As
   menções acham as pessoas por qualquer parte do nome, sem se importar com
   acentos, e as mensagens que mencionam você ou respondem a você ficam destacadas.
 - Toque numa resposta para ir à mensagem original, deslize uma mensagem para
@@ -47,11 +56,25 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   quem tem permissão.
 - Busca de mensagens no servidor, por texto e por conversa, autor, menção, link,
   anexos e data. O resultado abre na conversa, por mais antigo que seja.
-- Formatação Markdown com listas e divisórias, prévias de links, miniaturas de
-  imagem com visualizador em tela cheia, indicador de digitação e presença.
-  Mensagens da mesma pessoa em até 10 minutos aparecem sob um só nome.
-- Vídeos, anexados ou de links, tocam dentro do app enquanto baixam, em tela
-  cheia, com busca; os cartões mostram uma capa.
+- Formatação Markdown com listas e divisórias, links (inclusive endereços que
+  começam com `www.`), indicador de digitação e presença. Segure uma mensagem
+  para ver para onde vai cada link dela, e um link cujo texto esconde o endereço
+  pergunta antes de abrir. Mensagens da mesma pessoa em até 10 minutos aparecem
+  sob um só nome.
+- Prévias de links com tudo o que o servidor manda: cor, autor, título, campos e
+  rodapé. Links de GIF do Tenor, GIPHY e KLIPY se mexem na mensagem.
+- Um visualizador para as imagens, GIFs e vídeos de uma mensagem: deslize entre
+  eles, dê zoom de até 5x e salve ou compartilhe imagens e GIFs. GIFs anexados se
+  mexem na lista.
+- Vídeos, anexados ou de links, tocam na própria mensagem com um toque no botão
+  de play, ou em tela cheia com um toque em qualquer outro ponto, enquanto
+  baixam e com busca; os cartões mostram uma capa. Links do YouTube tocam dentro
+  do app do mesmo jeito, e nada é pedido ao YouTube antes do toque no play.
+- Áudios anexados, inclusive gravações de voz feitas no web, tocam na própria
+  mensagem com busca e velocidade de 1x, 1,5x e 2x, e uma barra no topo mantém o
+  áudio à mão quando a mensagem sai da tela.
+- Anexos removidos pela moderação do servidor mostram um aviso; os sensíveis
+  ficam escondidos até você tocar.
 - Emojis: seletor com busca com todos os emojis Unicode e os do servidor,
   sugestões ao digitar `:nome`, emojis do servidor dentro das mensagens e emojis
   maiores nas mensagens que só têm emojis. Os emojis do servidor em GIF e WebP se
@@ -94,9 +117,19 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   ler uma conversa nunca contate um terceiro.
 - Nas chamadas: sem o som da tela transmitida, sem volume por pessoa e sem
   escolha de fone Bluetooth.
-- GIFs anexados, imagens de prévia de links e emojis em APNG mostram só o primeiro
-  quadro.
-- Os vídeos pausam quando você sai do app e não continuam em segundo plano.
+- Emojis em APNG mostram só o primeiro quadro, e os GIFs ficam parados quando o
+  celular está com as animações removidas.
+- Vídeos e áudios pausam quando você sai do app e não continuam em segundo plano.
+  Um vídeo tocando na mensagem para, e perde o ponto, quando sai da tela.
+- O YouTube precisa do WebView do sistema Android 133 ou mais novo; com um mais
+  antigo, os vídeos do YouTube abrem fora do app. Aberto em tela cheia pelo
+  cartão, o vídeo do YouTube começa do início.
+- A prévia de link mostra uma imagem só e não mostra o ícone do rodapé, porque o
+  servidor não serve mais que isso.
+- Salvar e compartilhar no visualizador valem para imagens e GIFs; vídeos e
+  áudios se salvam com **Baixar**.
+- Sem câmera no menu de anexos. O aviso de localização vale só para fotos JPEG, e
+  o app não tira a localização. O que vem do teclado tem limite de 20 MB por item.
 - Mensagens que esperam para sair e arquivos anexados a um rascunho se perdem
   quando o app trava ou fecha.
 - A interface está em português.

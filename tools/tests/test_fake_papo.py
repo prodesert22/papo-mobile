@@ -1302,5 +1302,141 @@ class VideoInvalidoTest(unittest.TestCase):
         self.assertIn("FAKE_VIDEO_KBPS e FAKE_VIDEO_401_ONCE: valor ilegível", self.run_with(FAKE_VIDEO_401_ONCE="uma vez"))
 
 
+INVALID_INPUT = ("channel_id é obrigatório; content tem no máximo 8192 caracteres; a mensagem precisa de content ou attachment; "
+                 "nome do attachment inválido; reply_to deve referenciar uma mensagem do mesmo canal")
+
+
+def multipart(fields, files):
+    """(Content-Type, corpo) de um multipart: `fields` como texto e `files`, na ordem, como (nome, tipo declarado, bytes) do campo `attachments`."""
+    boundary = "b" + uuid.uuid4().hex
+    raw = b""
+    for name, value in fields.items():
+        raw += f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+    for filename, declared, data in files:
+        head = f'--{boundary}\r\nContent-Disposition: form-data; name="attachments"; filename="{filename}"\r\nContent-Type: {declared}\r\n\r\n'
+        raw += head.encode() + data + b"\r\n"
+    raw += f"--{boundary}--\r\n".encode()
+    return f"multipart/form-data; boundary={boundary}", raw
+
+
+class EnvioDeArquivosTest(FakeTestCase):
+    """`POST /messages` com os limites do servidor de verdade (`handlers/messages.go`, `services/attachments.go`, `middleware/bodylimit.go`)."""
+
+    def setUp(self):
+        super().setUp()
+        self.ana = self.login("ana")
+        self.papo = self.channel("papo", self.ana)["id"]
+
+    def enviar(self, files, content="oi"):
+        content_type, raw = multipart({"channel_id": self.papo, "content": content}, files)
+        return self.ana.call("POST", "/messages", raw=raw, content_type=content_type)
+
+    def enviar_em_pedacos(self, files, size=1500):
+        import http.client
+        content_type, raw = multipart({"channel_id": self.papo, "content": "em pedaços"}, files)
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            connection.request("POST", "/messages", body=iter([raw[i:i + size] for i in range(0, len(raw), size)]), encode_chunked=True,
+                               headers={"Content-Type": content_type, "Cookie": f"Auth={self.ana.auth()}", "Transfer-Encoding": "chunked"})
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            connection.close()
+
+    def test_corpo_em_pedacos_cria_a_mensagem_com_o_arquivo_inteiro(self):
+        data = bytes(range(256)) * 40  # 10240 bytes, todos os valores de byte
+        status, sent = self.enviar_em_pedacos([("video.bin", "application/octet-stream", data), ("nota.txt", "text/plain", b"segundo")])
+        self.assertEqual(201, status, sent)
+        self.assertEqual(["video.bin", "nota.txt"], [a["original_file_name"] for a in sent["attachments"]])
+        self.assertEqual([len(data), 7], [a["size_bytes"] for a in sent["attachments"]])
+        self.assertEqual(data, self.ana.fetch(f"/attachments/{sent['attachments'][0]['id']}")[2])
+
+    def test_corpo_em_pedacos_sem_arquivo_tambem_passa(self):
+        status, sent = self.enviar_em_pedacos([])
+        self.assertEqual((201, "em pedaços"), (status, sent["content"]))
+
+    def test_ate_dez_arquivos_passam_e_o_onze_e_400_com_o_motivo_do_servidor(self):
+        files = [(f"f{i}.txt", "text/plain", b"x") for i in range(11)]
+        status, sent = self.enviar(files[:10])
+        self.assertEqual((201, 10), (status, len(sent["attachments"])))
+        status, problem = self.enviar(files)
+        self.assertEqual(400, status)
+        self.assertEqual("máximo de 10 attachments por mensagem", problem["detail"])
+
+    def test_nome_que_sobra_vazio_ou_com_mais_de_128_caracteres_e_400(self):
+        for name in ("pasta/", "a\\b\\", "x" * 129, "😀" * 129):
+            status, problem = self.enviar([(name, "text/plain", b"x")])
+            self.assertEqual(400, status, name)
+            self.assertEqual(INVALID_INPUT, problem["detail"])
+        # 128 passam, contados em caracteres (pontos de código) e não em bytes; o servidor guarda o nome sem a pasta.
+        for name, stored in (("x" * 128, "x" * 128), ("😀" * 128, "😀" * 128), ("fotos/dia 1/a.png", "a.png")):
+            status, sent = self.enviar([(name, "text/plain", b"x")])
+            self.assertEqual(201, status, name)
+            self.assertEqual(stored, sent["attachments"][0]["original_file_name"])
+
+    def test_arquivo_de_mais_de_100_mib_e_400_depois_de_lido(self):
+        import http.client
+        content_type, raw = multipart({"channel_id": self.papo, "content": "grande"}, [("grande.bin", "application/octet-stream", bytes(100 * 1024 * 1024 + 1))])
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=120)  # ler e analisar 100 MiB leva bem mais que os 5 s dos outros
+        try:
+            connection.request("POST", "/messages", body=raw, headers={"Content-Type": content_type, "Cookie": f"Auth={self.ana.auth()}"})
+            response = connection.getresponse()
+            status, problem = response.status, json.loads(response.read())
+        finally:
+            connection.close()
+        self.assertEqual(400, status)
+        self.assertEqual("attachment excede o tamanho máximo de 100MB", problem["detail"])
+
+    def test_content_length_acima_de_110_mib_e_413_sem_ler_o_corpo(self):
+        content_type = "multipart/form-data; boundary=x"
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            # Só o cabeçalho: se o fake esperasse o corpo, a resposta nunca chegaria.
+            sock.sendall((f"POST /messages HTTP/1.1\r\nHost: x\r\nCookie: Auth={self.ana.auth()}\r\nContent-Type: {content_type}\r\n"
+                          f"Content-Length: {110 * 1024 * 1024 + 1}\r\n\r\n").encode())
+            answer = b""
+            while b"\r\n\r\n" not in answer or b"}" not in answer:
+                piece = sock.recv(4096)
+                if not piece:
+                    break
+                answer += piece
+        self.assertTrue(answer.startswith(b"HTTP/1.1 413"), answer[:60])
+        self.assertEqual("corpo da requisição excede o tamanho máximo permitido", json.loads(answer.partition(b"\r\n\r\n")[2])["detail"])
+
+    def test_sem_channel_id_e_400_como_no_servidor(self):
+        content_type, raw = multipart({"content": "sem canal"}, [])
+        status, problem = self.ana.call("POST", "/messages", raw=raw, content_type=content_type)
+        self.assertEqual((400, INVALID_INPUT), (status, problem["detail"]))
+
+
+class EnvioLentoTest(FakeTestCase):
+    env = {"FAKE_UPLOAD_KBPS": "64"}
+
+    def test_o_corpo_e_lido_no_ritmo_pedido(self):
+        ana = self.login("ana")
+        papo = self.channel("papo", ana)["id"]
+        content_type, raw = multipart({"channel_id": papo, "content": "devagar"}, [("a.bin", "application/octet-stream", bytes(64000))])
+        started = time.monotonic()
+        status, sent = ana.call("POST", "/messages", raw=raw, content_type=content_type)
+        elapsed = time.monotonic() - started
+        self.assertEqual(201, status, sent)
+        # 64000 bytes a 64 KB/s levam 0,98 s; só se confere o piso, porque dormir mais nunca faz o teste falhar.
+        self.assertGreaterEqual(elapsed, 0.8)
+
+    def test_o_envio_de_texto_sem_arquivo_nao_espera_pelo_ritmo(self):
+        ana = self.login("ana")
+        papo = self.channel("papo", ana)["id"]
+        started = time.monotonic()
+        self.assertEqual(201, ana.send(papo, "rápido")[0])
+        self.assertLess(time.monotonic() - started, 0.5)
+
+
+class EnvioInvalidoTest(unittest.TestCase):
+    def test_velocidade_de_envio_ilegivel_derruba_o_fake_com_mensagem(self):
+        done = subprocess.run([sys.executable, str(FAKE), "0"], env={**clean_env(), "FAKE_EMOJI_SMALL": "1", "FAKE_UPLOAD_KBPS": "rápido"},
+                              capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(0, done.returncode)
+        self.assertIn("FAKE_UPLOAD_KBPS: valor ilegível", done.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

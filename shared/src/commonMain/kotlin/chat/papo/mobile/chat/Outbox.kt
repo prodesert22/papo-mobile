@@ -1,6 +1,7 @@
 package chat.papo.mobile.chat
 
 import chat.papo.mobile.data.api.ApiException
+import chat.papo.mobile.data.api.FileUnavailableException
 import chat.papo.mobile.data.api.OutgoingFile
 import io.ktor.client.network.sockets.ConnectTimeoutException
 import kotlinx.coroutines.CancellationException
@@ -34,6 +35,12 @@ enum class SendFailure {
 
     /** A sessão não vale mais, nem depois de renovada uma vez. */
     Unauthorized,
+
+    /** O corpo passou do limite do servidor (413): são arquivos demais para uma mensagem só. */
+    TooLarge,
+
+    /** Um arquivo anexado não abriu ou deixou de ser lido: o provedor o perdeu ou revogou o acesso. */
+    FileUnavailable,
 }
 
 /** Em que ponto está uma mensagem que o usuário mandou e o servidor ainda não confirmou. */
@@ -43,7 +50,10 @@ sealed interface PendingStatus {
 
     data object Sending : PendingStatus
 
-    /** Sabidamente não criada no servidor. Reenviar não duplica. [detail] é o texto do servidor, só em [SendFailure.Rejected]. */
+    /**
+     * Sabidamente não criada no servidor. Reenviar não duplica. [detail] é o texto do servidor em
+     * [SendFailure.Rejected] e o nome do arquivo em [SendFailure.FileUnavailable]; nos outros motivos é null.
+     */
     data class Failed(val reason: SendFailure, val detail: String? = null) : PendingStatus
 
     /** O servidor pode ter criado a mensagem: não houve resposta que diga o contrário. Reenviar pode duplicar. */
@@ -52,7 +62,8 @@ sealed interface PendingStatus {
 
 /**
  * Uma mensagem em saída. [content] já vem aparado e com as menções no formato do servidor.
- * [progress] vai de 0 a 1 enquanto ela sai com anexos; null quando não há o que medir.
+ * [progress] vai de 0 a 1 enquanto ela sai com anexos; null quando não há o que medir (sem anexos,
+ * ou com algum de tamanho desconhecido: a tela mostra uma barra indeterminada).
  */
 data class PendingMessage(
     val localId: String,
@@ -76,8 +87,11 @@ data class PendingMessage(
  */
 fun classifySendFailure(error: Throwable, bodyDelivered: Boolean = true): PendingStatus = when {
     error is CancellationException -> throw error
+    // O corpo parou no meio porque o arquivo falhou: o servidor não recebeu a mensagem inteira, então não a criou.
+    error is FileUnavailableException -> PendingStatus.Failed(SendFailure.FileUnavailable, error.fileName)
     error is ApiException -> when (error.status) {
         401 -> PendingStatus.Failed(SendFailure.Unauthorized)
+        413 -> PendingStatus.Failed(SendFailure.TooLarge)
         429 -> PendingStatus.Failed(SendFailure.RateLimited)
         in 400..499 -> PendingStatus.Failed(SendFailure.Rejected, error.detail ?: error.title)
         // 5xx: o servidor pode ter criado a mensagem antes de falhar. O que não é erro HTTP de verdade também.
@@ -214,7 +228,8 @@ class Outbox(
     private suspend fun send(entry: PendingMessage) {
         val id = entry.localId
         val upload = UploadProgress()
-        update(id) { it.copy(status = PendingStatus.Sending, progress = if (it.files.isEmpty()) null else 0f) }
+        // Com todos os tamanhos conhecidos o corpo tem total e a barra começa em zero; senão ela fica indeterminada (null).
+        update(id) { it.copy(status = PendingStatus.Sending, progress = if (it.files.isEmpty() || it.files.any { f -> f.size == null }) null else 0f) }
         try {
             supervisorScope {
                 // O envio roda à parte para ser cancelado sozinho, sem levar a fila junto.

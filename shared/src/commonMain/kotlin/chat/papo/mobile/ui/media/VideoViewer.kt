@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -57,6 +58,7 @@ import androidx.compose.ui.window.DialogProperties
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.account.ServerUrl
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.safeLink
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackFailure
@@ -107,7 +109,13 @@ internal class PlayingVideo(val key: String, var positionMs: Long = 0L) {
  * (o relay do servidor), [attachment] é null e [pageUrl] é a página do embed, que o **Abrir no navegador** abre
  * (null se o embed não tem uma URL `http` ou `https`).
  */
-internal data class OpenVideo(val media: PlayableMedia, val attachment: AttachmentDto?, val pageUrl: String? = null) {
+internal data class OpenVideo(
+    val media: PlayableMedia,
+    val attachment: AttachmentDto?,
+    val pageUrl: String? = null,
+    /** A mensagem do [attachment], para gravá-lo como bloqueado se o servidor responder 410; null de um embed. */
+    val messageId: String? = null,
+) {
     /** Só há dois jeitos de chegar aqui: anexo (tem arquivo para baixar) ou embed (só o relay, sem arquivo). */
     val isEmbed: Boolean get() = attachment == null
 }
@@ -121,7 +129,7 @@ internal fun findOpenVideo(server: ServerUrl, messages: List<Message>, key: Stri
     for (message in messages) {
         for (attachment in message.attachments) {
             val media = playableAttachment(server, attachment) ?: continue
-            if (media.key == key) return OpenVideo(media, attachment)
+            if (media.key == key) return OpenVideo(media, attachment, messageId = message.id)
         }
         for (embed in message.embeds) {
             val media = relayVideo(server, embed) ?: continue
@@ -131,18 +139,8 @@ internal fun findOpenVideo(server: ServerUrl, messages: List<Message>, key: Stri
     return null
 }
 
-/** Uma página que abre fora do app: só `http` e `https`, com host e sem espaços (regra 6). Qualquer outra coisa vira null. */
-private val WEB_LINK = Regex("""https?://[^\s/?#]+\S*""", RegexOption.IGNORE_CASE)
-
-/**
- * O link da web de [url], ou null se não for um (ver [WEB_LINK]). O esquema sai em minúsculas: o Android só resolve
- * `https://` para o navegador, e `Https://` (como alguns teclados escrevem) não acha aplicativo nenhum.
- */
-internal fun webLink(url: String?): String? {
-    if (url == null || !WEB_LINK.matches(url)) return null
-    val schemeEnd = url.indexOf("://")
-    return url.substring(0, schemeEnd).lowercase() + url.substring(schemeEnd)
-}
+/** O link da web de [url], ou null se não for um: a regra é a de [safeLink] (só `http` e `https`, regra 6). */
+internal fun webLink(url: String?): String? = safeLink(url)
 
 /** O que o painel de falha oferece além de fechar. */
 internal data class FailureActions(val retry: Boolean, val download: Boolean, val browser: Boolean = false)
@@ -205,6 +203,14 @@ internal fun VideoViewer(
     // A barra de título acompanha os controles do player: some com eles e deixa o vídeo limpo.
     var controlsVisible by remember { mutableStateOf(true) }
     val resume = remember { Resume(startAtMs) }
+    // 410: o anexo foi bloqueado pela moderação. Gravá-lo troca o cartão pelo aviso e, sem o vídeo tocável, a tela se fecha.
+    LaunchedEffect(failure) {
+        val messageId = video.messageId
+        val attachment = video.attachment
+        if (failure == PlaybackFailure.Gone && messageId != null && attachment != null) {
+            session.chat.markBlocked(messageId, attachment.id)
+        }
+    }
     // Enquanto o vídeo está aberto as capas dos cartões esperam: o player e elas disputariam o limite de pedidos.
     DisposableEffect(session) {
         session.videoPosters.playerOpened()

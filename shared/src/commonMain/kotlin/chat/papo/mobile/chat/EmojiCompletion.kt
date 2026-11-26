@@ -58,4 +58,22 @@ object EmojiCompletion {
         val emoji = catalog.forShortcode(query.text)?.takeIf { query.text == query.text.lowercase() } ?: return null
         return replace(current, cursor, query, emoji.char)
     }
+
+    /**
+     * [closeShortcode] para o que o campo acabou de mudar, que só vale para uma tecla digitada: não no meio de uma composição
+     * do teclado ([composing]), não com uma seleção (o cursor tem de estar parado em [selectionStart]) e não enquanto o
+     * [catalog] ainda carrega (null).
+     */
+    fun closeTypedShortcode(
+        previous: String,
+        current: String,
+        selectionStart: Int,
+        selectionEnd: Int,
+        composing: Boolean,
+        catalog: UnicodeEmojiCatalog?,
+        serverNames: Set<String>,
+    ): EmojiEdit? {
+        if (catalog == null || composing || selectionStart != selectionEnd) return null
+        return closeShortcode(previous, current, selectionStart, catalog, serverNames)
+    }
 }

@@ -31,6 +31,10 @@ interface PlatformUi {
      * política de repetição (`retryDelay`) se esgotar; o texto e as ações do erro são da tela comum.
      * [onControlsVisible] diz quando os controles do player aparecem e somem, para a tela esconder
      * junto o que ela desenha por cima do vídeo.
+     *
+     * Com [onFullscreen] os controles ganham o botão de tela cheia, que o chama: é o player do cartão da mensagem, e quem
+     * o chama o tira dali e abre o vídeo no visualizador. Null (a tela cheia, que já é o visualizador) não tem o botão.
+     * Só vale quando o player nasce: a nulidade não muda durante a vida dele.
      */
     @Composable
     fun VideoPlayer(
@@ -41,6 +45,7 @@ interface PlatformUi {
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
         onControlsVisible: (Boolean) -> Unit = {},
+        onFullscreen: (() -> Unit)? = null,
     )
 
     /**
@@ -68,6 +73,54 @@ interface PlatformUi {
      * não altera [bytes] (o `ByteArray` do cache é compartilhado) e não deixa nada aberto se for cancelada.
      */
     suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage?
+
+    /**
+     * Devolve a ação que abre o seletor de fotos e vídeos do sistema, que dispensa a permissão de armazenamento.
+     * O seletor deixa escolher até [maxItems] itens, mas a tela confere o que volta: um sistema sem o seletor de
+     * fotos usa o de documentos, que ignora o limite, e o seletor pede ao menos dois itens mesmo com uma vaga só.
+     * Cada item escolhido chega descrito como um [OutgoingFile], com o nome, o tipo e o tamanho que o provedor
+     * informa e sem nada copiado; um item que o provedor já recusou chega com [OutgoingFile.unavailable].
+     */
+    @Composable
+    fun rememberMediaPicker(maxItems: Int, onPicked: (List<OutgoingFile>) -> Unit): () -> Unit
+
+    /**
+     * O player do YouTube embutido, que toca o vídeo [videoId] (um id já validado por `isYouTubeId`) assim que entra na
+     * composição. Só entra depois do toque do usuário no ▶, que é o consentimento: antes disso nada é pedido ao YouTube.
+     * Preenche [modifier] e mostra os controles do próprio YouTube; o dono é a composição, que o fecha (e apaga o que ele
+     * guardou) quando sai dela, e o app o fecha também ao travar.
+     *
+     * Com [fullscreenButton] o botão de tela cheia do YouTube leva o mesmo player para a tela cheia, sem recarregar (é o do
+     * cartão da mensagem); sem ele (a tela cheia do app) o botão não existe. Qualquer navegação que o player tente fora da
+     * página do vídeo não acontece nele: chama [onOpenExternally], que abre o vídeo no YouTube fora do app.
+     */
+    @Composable
+    fun YouTubePlayer(videoId: String, modifier: Modifier, fullscreenButton: Boolean, onOpenExternally: () -> Unit)
+
+    // 02 · trilha A · onda 2 (visualizador)
+
+    /**
+     * Abre a folha de compartilhamento do sistema com [bytes] como um arquivo chamado [name], do tipo [mimeType]. O
+     * conteúdo vai da memória para o aplicativo escolhido, sem arquivo em disco, e só para quem o sistema autorizar
+     * naquele compartilhamento: cada aplicativo lê uma vez, e o que não foi lido some em poucos minutos ou quando o app
+     * trava. Devolve false se não foi possível abrir a folha (nenhum aplicativo atende). Não altera [bytes], que pode ser
+     * o array do cache de mídia.
+     */
+    fun shareMedia(name: String, mimeType: String, bytes: ByteArray): Boolean
+
+    // 02 · trilha B · onda 3 (teclado)
+
+    /**
+     * O modificador que faz um campo de texto de `TextFieldState` receber, pelo teclado (GIF, figurinha, imagem) e ao colar,
+     * imagens e vídeos como anexos: cada um chega descrito como um [OutgoingFile], com o conteúdo já lido (até
+     * [RECEIVED_MEDIA_MAX_BYTES] cada), porque o acesso que o teclado dá ao conteúdo é temporário. Passa para [onMedia] só o
+     * que é imagem ou vídeo; o resto (texto colado) fica para o campo. Um item que não pôde ser lido, ou que passa do limite,
+     * chega com [OutgoingFile.unavailable]. Roda na thread principal, dentro da entrega do conteúdo.
+     */
+    fun receiveMedia(onMedia: (List<OutgoingFile>) -> Unit): Modifier
 }
+
+/** Tamanho máximo de cada imagem ou vídeo recebido pelo teclado ou colado: ele fica na memória até ser enviado ou tirado. */
+const val RECEIVED_MEDIA_MAX_BYTES = 20 * 1024 * 1024
 
 val LocalPlatformUi = staticCompositionLocalOf<PlatformUi> { error("PlatformUi não fornecido") }

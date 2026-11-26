@@ -1,9 +1,7 @@
 package chat.papo.mobile.ui.chat
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
@@ -38,7 +37,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -75,12 +73,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -90,12 +88,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
@@ -112,8 +106,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.NavigationEventInfo
@@ -126,6 +118,8 @@ import chat.papo.mobile.chat.EVERYONE_NAME
 import chat.papo.mobile.chat.EmojiCompletion
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiRef
+import chat.papo.mobile.chat.MAX_ATTACHMENTS
+import chat.papo.mobile.chat.Markdown
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.ServerEmoji
@@ -147,15 +141,14 @@ import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.suggestMentions
 import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
-import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.ReactionSummaryDto
+import chat.papo.mobile.media.AudioTrack
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
 import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.channels_join_call
-import chat.papo.mobile.resources.chat_attach
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_emoji
 import chat.papo.mobile.resources.msg_react_more
@@ -175,7 +168,6 @@ import chat.papo.mobile.resources.chat_pinned_no_match
 import chat.papo.mobile.resources.chat_placeholder
 import chat.papo.mobile.resources.chat_placeholder_dm
 import chat.papo.mobile.resources.chat_read_only
-import chat.papo.mobile.resources.chat_remove_attachment
 import chat.papo.mobile.resources.chat_reply_continue
 import chat.papo.mobile.resources.chat_reply_not_reached
 import chat.papo.mobile.resources.chat_replying_to
@@ -207,14 +199,19 @@ import chat.papo.mobile.resources.profile_open
 import chat.papo.mobile.resources.switcher_title
 import chat.papo.mobile.ui.components.AppBadge
 import chat.papo.mobile.ui.components.AuthorAvatar
+import chat.papo.mobile.ui.components.AudioBar
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
-import chat.papo.mobile.ui.components.formatBytes
-import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.components.text
-import chat.papo.mobile.ui.media.PlayingVideo
+import chat.papo.mobile.ui.media.InlineVideos
+import chat.papo.mobile.ui.media.MediaViewer
+import chat.papo.mobile.ui.media.PendingImageViewer
+import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.media.VideoViewer
+import chat.papo.mobile.ui.media.ViewingMedia
+import chat.papo.mobile.ui.media.YouTubeViewer
 import chat.papo.mobile.ui.media.findOpenVideo
+import chat.papo.mobile.ui.media.findOpenYouTube
 import chat.papo.mobile.ui.settings.ConfirmDialog
 import kotlinx.coroutines.delay
 import kotlin.math.max
@@ -240,6 +237,8 @@ fun ChatScreen(
     onSwitch: () -> Unit,
     /** Entra na chamada do canal de voz; null onde não há chamada. Só é oferecido em canal de voz. */
     onJoinCall: (() -> Unit)?,
+    /** Leva à mensagem do áudio que a barra de áudio mostra (é a conversa desta tela ou outra). */
+    onOpenAudio: (AudioTrack) -> Unit,
     /** Abre o perfil do usuário de id dado: o autor de uma mensagem ou, numa conversa direta, a outra pessoa. */
     onOpenProfile: (String) -> Unit,
     /** Abre a lista de membros do servidor. Só é oferecida em canal: numa conversa direta o título já leva ao perfil. */
@@ -285,18 +284,31 @@ fun ChatScreen(
     val isDm = dms.any { it.id == viewModel.channelId }
     val draft = viewModel.draft
     // O rascunho vai para o banco quando a tela sai de cena: outra tela por cima, app em segundo plano ou fim da conversa.
+    // O compositor avisa as mudanças do campo no quadro seguinte; a última tecla antes de sair não pode ficar de fora.
     LifecycleResumeEffect(session) {
-        onPauseOrDispose { session.drafts.flush() }
+        onPauseOrDispose {
+            viewModel.draftEdited()
+            session.drafts.flush()
+        }
     }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
     var reactingTo by remember { mutableStateOf<Message?>(null) }
     var selecting by remember { mutableStateOf<Message?>(null) }
     var columnPx by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
-    var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
+    // A mídia da mensagem aberta no visualizador: a mensagem e a página sobrevivem a girar o aparelho, e a mídia sai das mensagens de novo.
+    var viewing by rememberSaveable(stateSaver = ViewingMedia.Saver) { mutableStateOf<ViewingMedia?>(null) }
+    // A imagem de um anexo pendente aberta em tela cheia; o arquivo é do compositor, então girar o aparelho a fecha.
+    var previewing by remember { mutableStateOf<OutgoingFile?>(null) }
     var reactorsOf by remember { mutableStateOf<ReactorsRequest?>(null) }
-    // Um vídeo por vez. Gira o aparelho e a atividade se recria: a chave e o ponto sobrevivem, e a mídia sai das mensagens de novo.
-    var playing by rememberSaveable(stateSaver = PlayingVideo.Saver) { mutableStateOf<PlayingVideo?>(null) }
+    // Um vídeo por vez: o que toca no cartão da mensagem ou o que está em tela cheia (ver `InlineVideos`). Gira o aparelho e a
+    // atividade se recria: as chaves e os pontos sobrevivem, e a mídia sai das mensagens de novo. Os cartões abrem a tela
+    // cheia só por `VideoHost.openFullscreen`, que grava `videos.fullscreen` (`playing`): o visualizador abaixo lê dele.
+    val videosState = rememberSaveable(stateSaver = InlineVideos.Saver) { mutableStateOf(InlineVideos()) }
+    var videos by videosState
+    val videoHost = remember(videosState) { VideoHost(videosState) }
+    // Só a tela cheia importa aqui: o vídeo que toca no cartão recompõe o cartão, não a conversa.
+    val playing by remember(videosState) { derivedStateOf { videosState.value.fullscreen } }
     // Perder a leitura com uma folha ou diálogo aberto: eles agiriam sobre uma conversa que a pessoa já não vê.
     LaunchedEffect(access.readDenied) {
         if (access.readDenied) {
@@ -305,8 +317,9 @@ fun ChatScreen(
             selecting = null
             confirmDelete = null
             viewing = null
+            previewing = null
             reactorsOf = null
-            playing = null
+            videos = InlineVideos()
         }
     }
     val listState = rememberLazyListState()
@@ -469,6 +482,8 @@ fun ChatScreen(
     ) { padding ->
         // O espaço de baixo (teclado, gaveta de emoji ou barra de navegação) é do compositor.
         Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).onSizeChanged { columnPx = it.height }) {
+            // O áudio que toca com o cartão fora da tela (outra conversa, ou aqui, mais acima na lista).
+            AudioBar(onOpen = onOpenAudio)
             // Sem leitura não há lista nem compositor; o rascunho continua guardado para quando o acesso voltar.
             if (access.readDenied) {
                 NoAccessPane(Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)))
@@ -533,9 +548,9 @@ fun ChatScreen(
                                 // A folha só abre se tiver o que oferecer (copiar não existe numa mensagem só de anexo).
                                 onLongPress = { if (messageActionOffer(access, message, session.userId).any) actionsFor = message },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
-                                onOpenImage = { viewing = it },
+                                onOpenImage = { viewing = ViewingMedia.image(message.id, it) },
                                 onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
-                                onPlay = { playing = PlayingVideo(it.key) },
+                                videos = videoHost,
                                 onOpenAuthor = profileId?.let { id -> { onOpenProfile(id) } },
                             )
                         }
@@ -586,6 +601,7 @@ fun ChatScreen(
                             onClose = viewModel::dismissReplyNotReached,
                         )
                     }
+                    state.attachProblem?.let { problem -> NoticeBar(problem.text(), viewModel::dismissAttachProblem) }
                     state.error?.let { error -> NoticeBar(error.text(), viewModel::dismissError) }
                 }
                 // Num trecho antigo quem leva de volta ao fim é a `OlderHistoryBar`.
@@ -611,6 +627,7 @@ fun ChatScreen(
             Composer(
                 session = session,
                 state = state,
+                draftState = viewModel.draftState,
                 draft = draft,
                 users = users,
                 presence = presence,
@@ -626,9 +643,11 @@ fun ChatScreen(
                     stringResource(Res.string.chat_placeholder, if (isVoice) title else "#$title")
                 },
                 onDraftChange = viewModel::onDraftChange,
+                onDraftEdited = viewModel::draftEdited,
                 onPickMention = viewModel::pickMention,
                 onAddFiles = viewModel::addFiles,
                 onRemoveFile = viewModel::removeFile,
+                onPreviewFile = { previewing = it },
                 onCancelContext = viewModel::cancelContext,
                 onSubmit = viewModel::submit,
             )
@@ -702,17 +721,24 @@ fun ChatScreen(
             ReactorsSheet(session, message, users, request.first) { reactorsOf = null }
         }
     }
-    viewing?.let { ImageViewer(session, it) { viewing = null } }
+    viewing?.let { current ->
+        // Sem a mensagem (apagada, ou ainda carregando depois de girar) o visualizador não aparece.
+        byId[current.messageId]?.let { message -> MediaViewer(session, message, current) { viewing = null } }
+    }
+    previewing?.let { file -> PendingImageViewer(file) { previewing = null } }
     playing?.let { current ->
+        val youtube = remember(current, messages) { findOpenYouTube(messages, current.key) }
         val video = remember(current, messages) { findOpenVideo(session.client.server, messages, current.key) }
         // Sem o vídeo nas mensagens (apagado, ou ainda carregando depois de girar) o visualizador não aparece.
-        if (video != null) {
+        if (youtube != null) {
+            YouTubeViewer(video = youtube, onDismiss = { videos = videos.closeFullscreen() })
+        } else if (video != null) {
             VideoViewer(
                 session = session,
                 video = video,
                 startAtMs = current.positionMs,
                 onPosition = { current.positionMs = it },
-                onDismiss = { playing = null },
+                onDismiss = { videos = videos.closeFullscreen() },
             )
         }
     }
@@ -916,6 +942,7 @@ private fun TypingLine(users: List<User>) {
 private fun Composer(
     session: AccountSession,
     state: ChatUiState,
+    draftState: TextFieldState,
     draft: TextFieldValue,
     users: Map<String, User>,
     presence: Map<String, Presence>,
@@ -927,19 +954,24 @@ private fun Composer(
     availableHeightPx: Int,
     placeholder: String,
     onDraftChange: (TextFieldValue) -> Unit,
+    onDraftEdited: () -> Unit,
     onPickMention: (username: String, userId: String) -> Unit,
     onAddFiles: (List<OutgoingFile>) -> Unit,
     onRemoveFile: (OutgoingFile) -> Unit,
+    onPreviewFile: (OutgoingFile) -> Unit,
     onCancelContext: () -> Unit,
     onSubmit: () -> Unit,
 ) {
-    val pickFiles = LocalPlatformUi.current.rememberFilePicker(onAddFiles)
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
     val panelScope = rememberCoroutineScope()
     val panel = remember { EmojiPanelState(panelScope) }
+    // GIF, figurinha e imagem colada vão para os anexos, como os do clipe; na edição e sem permissão de anexar o campo não os pede.
+    val platform = LocalPlatformUi.current
+    val latestOnAddFiles by rememberUpdatedState(onAddFiles)
+    val receiveMedia = remember(platform) { platform.receiveMedia { latestOnAddFiles(it) } }
 
     // Quanto do teclado está na tela acima da barra de navegação, e a altura em que ele parou da última vez.
     val imeInsets = WindowInsets.ime
@@ -1017,15 +1049,20 @@ private fun Composer(
     }
     // Os `:nome:` de emojis do servidor aparecem como imagem no campo, mas o texto do rascunho continua `:nome:`.
     val draftEmojis = remember(serverEmojis.idByName) { DraftEmojis(serverEmojis.idByName) }
-    // `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos (nome de emoji do servidor fica como texto).
-    val onChange: (TextFieldValue) -> Unit = { typed ->
-        val value = draftEmojis.settle(draft, typed)
-        val edit = if (emojiCatalog != null && value.composition == null && value.selection.collapsed) {
-            EmojiCompletion.closeShortcode(draft.text, value.text, value.selection.start, emojiCatalog, serverEmojis.idByName.keys)
-        } else {
-            null
+    // Cada mudança do campo chega aqui depois de feita: `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos
+    // (nome de emoji do servidor fica como texto), e o rascunho é guardado. Uma mudança em andamento no teclado
+    // (composição) espera: o atalho só vale para uma tecla `:` digitada, nunca no meio de uma sugestão.
+    val latestOnDraftChange by rememberUpdatedState(onDraftChange)
+    val latestOnDraftEdited by rememberUpdatedState(onDraftEdited)
+    LaunchedEffect(draftState, emojiCatalog, serverEmojis.idByName) {
+        var previous = draftState.text.toString()
+        snapshotFlow { Triple(draftState.text.toString(), draftState.selection, draftState.composition) }.collect { (text, selection, composition) ->
+            val edit = EmojiCompletion.closeTypedShortcode(
+                previous, text, selection.start, selection.end, composition != null, emojiCatalog, serverEmojis.idByName.keys,
+            )
+            if (edit != null) latestOnDraftChange(TextFieldValue(edit.text, TextRange(edit.cursor))) else latestOnDraftEdited()
+            previous = draftState.text.toString()
         }
-        onDraftChange(if (edit != null) TextFieldValue(edit.text, TextRange(edit.cursor)) else value)
     }
     fun insertEmoji(ref: EmojiRef) {
         val text = when (ref) {
@@ -1121,45 +1158,18 @@ private fun Composer(
                 }
             }
 
-            if (state.files.isNotEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    state.files.forEach { file ->
-                        Row(
-                            Modifier.clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.width(140.dp)) {
-                                Text(file.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                                Text(
-                                    formatBytes(file.size),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            IconButton(onClick = { onRemoveFile(file) }) {
-                                Icon(Icons.Filled.Close, stringResource(Res.string.chat_remove_attachment), Modifier.size(16.dp))
-                            }
-                        }
-                    }
-                }
-            }
+            AttachmentTray(state.files, onRemoveFile, onPreviewFile)
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
                 if (canAttach) {
-                    IconButton(onClick = pickFiles, enabled = state.editing == null) {
-                        Icon(Icons.Filled.AttachFile, contentDescription = stringResource(Res.string.chat_attach))
-                    }
+                    AttachButton(enabled = state.editing == null, freeSlots = MAX_ATTACHMENTS - state.files.size, onFiles = onAddFiles)
                 } else {
                     // O campo ocuparia o lugar do clipe: a folga mantém o recuo de quando ele existe.
                     Spacer(Modifier.width(8.dp))
                 }
                 DraftTextField(
                     session = session,
-                    value = draft,
-                    onValueChange = onChange,
+                    state = draftState,
                     emojis = draftEmojis,
                     placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     enabled = !state.savingEdit,
@@ -1176,7 +1186,8 @@ private fun Composer(
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focus)
-                        .onFocusChanged { if (it.isFocused && panel.isOpen) panel.toKeyboard() },
+                        .onFocusChanged { if (it.isFocused && panel.isOpen) panel.toKeyboard() }
+                        .then(if (canAttach && state.editing == null) receiveMedia else Modifier),
                 )
                 IconButton(onClick = toggleEmoji, enabled = !state.savingEdit) {
                     if (panel.isOpen) {
@@ -1185,7 +1196,8 @@ private fun Composer(
                         Icon(Icons.Filled.EmojiEmotions, contentDescription = stringResource(Res.string.chat_emoji))
                     }
                 }
-                val canSend = !state.savingEdit && (draft.text.isNotBlank() || state.files.isNotEmpty())
+                // Um arquivo que o provedor já perdeu segura o envio até o usuário tirá-lo do compositor.
+                val canSend = !state.savingEdit && (draft.text.isNotBlank() || state.files.isNotEmpty()) && state.files.none { it.unavailable }
                 Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                     if (state.savingEdit) {
                         CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -1375,6 +1387,7 @@ private fun MessageActionsSheet(
     val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
     val recents by session.recentEmojis.items.collectAsStateWithLifecycle()
     val quick = remember(recents, serverEmojis) { EmojiPickerModel.quickReactions(recents, serverEmojis) }
+    val links = remember(message.content) { Markdown.linksIn(message.content) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 16.dp)) {
@@ -1421,6 +1434,16 @@ private fun MessageActionsSheet(
                     onSelectText()
                     onDismiss()
                 }
+            }
+            if (links.isNotEmpty()) {
+                MessageLinksSection(
+                    links,
+                    onCopy = {
+                        clipboard.setText(AnnotatedString(it))
+                        onDismiss()
+                    },
+                    onOpened = onDismiss,
+                )
             }
             if (offer.pin) {
                 SheetAction(Icons.Filled.PushPin, stringResource(if (pinned) Res.string.msg_unpin else Res.string.msg_pin)) {
@@ -1511,40 +1534,6 @@ private fun PinnedSheet(session: AccountSession, pinned: List<Message>, users: M
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-/** Imagem original em tela cheia, com zoom por pinça. */
-@Composable
-private fun ImageViewer(session: AccountSession, attachment: AttachmentDto, onDismiss: () -> Unit) {
-    val image by rememberMediaImage(session, "att/${attachment.id}") { session.api.attachment(attachment.id) }
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            val bitmap = image
-            if (bitmap == null) {
-                CircularProgressIndicator(color = Color.White)
-            } else {
-                Image(
-                    bitmap,
-                    contentDescription = attachment.fileName,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                scale = (scale * zoom).coerceIn(1f, 5f)
-                                offset = if (scale == 1f) Offset.Zero else offset + pan
-                            }
-                        }
-                        .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-                )
-            }
-            IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
-                Icon(Icons.Filled.Close, contentDescription = stringResource(Res.string.action_close), tint = Color.White)
             }
         }
     }

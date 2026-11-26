@@ -2,6 +2,7 @@ package chat.papo.mobile.security
 
 import chat.papo.mobile.core.crypto.Crypto
 import chat.papo.mobile.core.crypto.KeyRing
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -47,6 +48,10 @@ enum class LockChange { Done, Cancelled, Unavailable, Failed }
 /**
  * Controla o ciclo bloqueado/desbloqueado do app. Desbloquear é recuperar a
  * chave mestra do [MasterKeyStore]; bloquear fecha a sessão e zera a chave.
+ *
+ * [onSessionClosed] roda sempre que uma sessão fecha (o app trava ou os dados são apagados), antes de ela fechar: é onde
+ * se apaga o que ficou fora da sessão e fora da cifra, como os dados do WebView do player do YouTube ([WebPlayerData]).
+ * Uma falha dele não impede de bloquear.
  */
 class AppLock(
     private val keyStore: MasterKeyStore,
@@ -56,6 +61,7 @@ class AppLock(
     private val scope: CoroutineScope,
     private val openSession: suspend (KeyRing) -> UnlockedSession,
     private val timeSource: TimeSource = TimeSource.Monotonic,
+    private val onSessionClosed: () -> Unit = {},
 ) {
     private val mutex = Mutex()
     private var keyRing: KeyRing? = null
@@ -175,6 +181,13 @@ class AppLock(
     }
 
     private suspend fun closeSession(session: UnlockedSession) {
+        try {
+            onSessionClosed()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Limpar o que ficou fora da sessão não pode impedir o bloqueio: a sessão e as chaves fecham do mesmo jeito.
+        }
         runCatching { session.close() }
         keyRing?.destroy()
         keyRing = null

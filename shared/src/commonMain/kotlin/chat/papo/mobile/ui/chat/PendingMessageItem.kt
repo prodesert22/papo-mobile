@@ -60,10 +60,12 @@ import chat.papo.mobile.resources.chat_unknown_user
 import chat.papo.mobile.resources.outbox_cancel_send
 import chat.papo.mobile.resources.outbox_copy
 import chat.papo.mobile.resources.outbox_discard
+import chat.papo.mobile.resources.outbox_failed_file_unavailable
 import chat.papo.mobile.resources.outbox_failed_not_sent
 import chat.papo.mobile.resources.outbox_failed_rate_limited
 import chat.papo.mobile.resources.outbox_failed_rejected
 import chat.papo.mobile.resources.outbox_failed_rejected_detail
+import chat.papo.mobile.resources.outbox_failed_too_large
 import chat.papo.mobile.resources.outbox_failed_unauthorized
 import chat.papo.mobile.resources.outbox_queued
 import chat.papo.mobile.resources.outbox_resend
@@ -192,10 +194,12 @@ private fun PendingMessageItem(
                     FileChip(file)
                 }
             }
-            val progress = pending.progress
-            if (pending.status == PendingStatus.Sending && progress != null) {
+            if (pending.status == PendingStatus.Sending && pending.files.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
-                LinearProgressIndicator(progress = { progress }, modifier = Modifier.widthIn(max = 280.dp).fillMaxWidth())
+                val bar = Modifier.widthIn(max = 280.dp).fillMaxWidth()
+                val progress = pending.progress
+                // Sem progresso mesmo enviando arquivos: o tamanho de algum não é conhecido, e a barra não tem total.
+                if (progress != null) LinearProgressIndicator(progress = { progress }, modifier = bar) else LinearProgressIndicator(modifier = bar)
             }
             Spacer(Modifier.height(2.dp))
             StatusLine(pending)
@@ -231,6 +235,8 @@ private fun statusText(pending: PendingMessage): String = when (val status = pen
             ?: stringResource(Res.string.outbox_failed_rejected)
         SendFailure.NotSent -> stringResource(Res.string.outbox_failed_not_sent)
         SendFailure.Unauthorized -> stringResource(Res.string.outbox_failed_unauthorized)
+        SendFailure.TooLarge -> stringResource(Res.string.outbox_failed_too_large)
+        SendFailure.FileUnavailable -> stringResource(Res.string.outbox_failed_file_unavailable, status.detail.orEmpty())
     }
     PendingStatus.Uncertain -> stringResource(Res.string.outbox_uncertain)
 }
@@ -272,7 +278,7 @@ private fun FileChip(file: OutgoingFile) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f, fill = false)) {
             Text(file.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-            Text(formatBytes(file.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            file.size?.let { Text(formatBytes(it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }

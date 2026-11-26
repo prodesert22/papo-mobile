@@ -148,7 +148,7 @@ class VideoPosters(
     private val pending = MutableStateFlow<Set<String>>(emptySet())
     private val players = MutableStateFlow(0)
 
-    /** Um visualizador de vídeo abriu: as capas esperam até todos fecharem. */
+    /** Um player de vídeo abriu (a tela cheia ou o do cartão): as capas esperam até todos fecharem. */
     fun playerOpened() = players.update { it + 1 }
 
     fun playerClosed() = players.update { (it - 1).coerceAtLeast(0) }

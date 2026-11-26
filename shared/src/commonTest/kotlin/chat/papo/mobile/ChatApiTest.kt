@@ -11,6 +11,7 @@ import chat.papo.mobile.data.api.ChannelPermissionEntryDto
 import chat.papo.mobile.data.api.ChannelPermissionsDto
 import chat.papo.mobile.data.api.ChatApi
 import chat.papo.mobile.data.api.MemoryCookieStore
+import chat.papo.mobile.data.api.FileUnavailableException
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.api.ReactionRequest
@@ -25,15 +26,29 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.cancel
+import io.ktor.utils.io.readAvailable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.TimeZone
+import kotlinx.io.Buffer
+import kotlinx.io.IOException
+import kotlinx.io.RawSource
+import kotlinx.io.buffered
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.concurrent.Volatile
 
 class ChatApiTest {
     private val message = """{"id":"m1","channel_id":"c1","author_id":"u1","content":"oi","created_at":"2026-01-01T00:00:00Z"}"""
@@ -59,8 +74,8 @@ class ChatApiTest {
         val seen = mutableListOf<Recorded>()
         val api = api(seen) { json(message, HttpStatusCode.Created) }
         val files = listOf(
-            OutgoingFile("foto.png", "image/png", 3) { byteArrayOf(1, 2, 3) },
-            OutgoingFile("nota \"final\".txt", "text/plain", 2) { "ab".encodeToByteArray() },
+            bytesFile("foto.png", "image/png", byteArrayOf(1, 2, 3)),
+            bytesFile("nota \"final\".txt", "text/plain", "ab".encodeToByteArray()),
         )
 
         val sent = api.sendMessage("c1", "olá, mundo", replyTo = "m0", files = files)
@@ -85,7 +100,7 @@ class ChatApiTest {
     fun mensagemSoComAnexoNaoMandaContentNemReplyTo() = runTest {
         val seen = mutableListOf<Recorded>()
         val api = api(seen) { json(message, HttpStatusCode.Created) }
-        api.sendMessage("c1", "", replyTo = null, files = listOf(OutgoingFile("a.bin", "application/octet-stream", 1) { byteArrayOf(9) }))
+        api.sendMessage("c1", "", replyTo = null, files = listOf(bytesFile("a.bin", "application/octet-stream", byteArrayOf(9))))
         val recorded = seen.single()
         assertNull(recorded.part("content"))
         assertNull(recorded.part("reply_to"))
@@ -100,7 +115,7 @@ class ChatApiTest {
 
         api.sendMessage(
             "c1", "oi", replyTo = null,
-            files = listOf(OutgoingFile("a.bin", "application/octet-stream", 50_000) { ByteArray(50_000) }),
+            files = listOf(bytesFile("a.bin", "application/octet-stream", ByteArray(50_000))),
             onProgress = { sent, total -> reported += sent to total },
         )
 
@@ -109,6 +124,200 @@ class ChatApiTest {
         assertTrue(total != null && total > 50_000) // o corpo leva o arquivo e os campos do multipart
         assertEquals(total to total, reported.last().first to reported.last().second) // o último aviso é o corpo inteiro
         assertEquals(reported.map { it.first }.sorted(), reported.map { it.first }) // só cresce
+    }
+
+    private fun apiOn(engine: MockEngine) = ChatApi(PapoClient(engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt")))
+
+    private fun ByteArray.indexOfBytes(part: ByteArray): Int {
+        for (start in 0..size - part.size) if ((part.indices).all { this[start + it] == part[it] }) return start
+        return -1
+    }
+
+    @Test
+    fun oArquivoSaiByteAByteNoCorpoEOTamanhoDeclaradoFechaComOCorpo() = runTest {
+        val content = ByteArray(300) { it.toByte() } // todos os valores de byte, para não passar por texto
+        var declared: Long? = null
+        var body = ByteArray(0)
+        val engine = MockEngine { request ->
+            declared = request.body.contentLength
+            body = request.body.toByteArray()
+            json(message, HttpStatusCode.Created)
+        }
+
+        apiOn(engine).sendMessage("c1", "oi", replyTo = null, files = listOf(bytesFile("a.bin", "application/octet-stream", content)))
+
+        assertTrue(body.indexOfBytes(content) > 0)
+        assertEquals(body.size.toLong(), declared) // o tamanho do arquivo entra na conta do Content-Length
+    }
+
+    @Test
+    fun arquivoSemTamanhoFazOCorpoSairEmPedacosSemTotal() = runTest {
+        var declared: Long? = -1
+        var body = ByteArray(0)
+        val engine = MockEngine { request ->
+            declared = request.body.contentLength
+            body = request.body.toByteArray()
+            json(message, HttpStatusCode.Created)
+        }
+        val content = "sem tamanho".encodeToByteArray()
+        val file = OutgoingFile("a.txt", "text/plain", size = null, open = { ByteReadChannel(content) })
+        val totals = mutableListOf<Long?>()
+
+        apiOn(engine).sendMessage("c1", "", replyTo = null, files = listOf(file), onProgress = { _, total -> totals += total })
+
+        assertNull(declared)
+        assertTrue(body.indexOfBytes(content) > 0)
+        assertTrue(totals.all { it == null })
+    }
+
+    @Test
+    fun repetirDepoisDe401AbreOArquivoDeNovoERecomecaOCorpoDoZero() = runTest {
+        var opens = 0
+        val bodies = mutableListOf<ByteArray>()
+        val cookies = mutableListOf<String?>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/auth/refresh" -> respond(
+                    """{"connection":{"id":"c1"}}""",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType to listOf("application/json"), HttpHeaders.SetCookie to listOf("Auth=novo; Path=/")),
+                )
+                else -> {
+                    cookies += request.headers[HttpHeaders.Cookie]
+                    bodies += request.body.toByteArray()
+                    if (bodies.size == 1) {
+                        json("""{"type":"t","title":"Não autorizado","status":401,"detail":"Token expirado"}""", HttpStatusCode.Unauthorized)
+                    } else {
+                        json(message, HttpStatusCode.Created)
+                    }
+                }
+            }
+        }
+        val content = byteArrayOf(7, 8, 9)
+        val file = OutgoingFile("a.bin", "application/octet-stream", 3, open = { opens++; ByteReadChannel(content) })
+
+        val sent = apiOn(engine).sendMessage("c1", "oi", replyTo = null, files = listOf(file))
+
+        assertEquals("m1", sent.id)
+        assertEquals(2, opens) // a repetição lê o arquivo do zero, não reaproveita o que já saiu
+        assertEquals(listOf<String?>("Auth=jwt", "Auth=novo"), cookies)
+        assertTrue(bodies.all { it.indexOfBytes(content) > 0 })
+    }
+
+    @Test
+    fun arquivoQueNaoAbreViraFileUnavailableComONomeEACausa() = runTest {
+        val engine = MockEngine { request ->
+            request.body.toByteArray()
+            json(message, HttpStatusCode.Created)
+        }
+        val gone = IOException("sumiu")
+        val file = OutgoingFile("foto.jpg", "image/jpeg", 10, open = { throw gone })
+
+        val failure = assertFailsWith<FileUnavailableException> { apiOn(engine).sendMessage("c1", "oi", replyTo = null, files = listOf(file)) }
+
+        assertEquals("foto.jpg", failure.fileName)
+        assertEquals(gone, failure.cause)
+    }
+
+    @Test
+    fun arquivoQueFalhaNoMeioDaLeituraTambemViraFileUnavailable() = runTest {
+        val engine = MockEngine { request ->
+            request.body.toByteArray()
+            json(message, HttpStatusCode.Created)
+        }
+        val lost = FileUnavailableException("video.mp4", IOException("o provedor fechou"))
+        val source = FailingSource(ByteArray(5000), failAfter = 2000, error = lost)
+        val file = OutgoingFile("video.mp4", "video/mp4", 5000, open = { ByteReadChannel(source.buffered()) })
+
+        val failure = assertFailsWith<FileUnavailableException> { apiOn(engine).sendMessage("c1", "oi", replyTo = null, files = listOf(file)) }
+
+        assertEquals("video.mp4", failure.fileName)
+        assertTrue(source.closed) // o fluxo que o envio abriu é fechado mesmo quando a leitura falha no meio
+    }
+
+    @Test
+    fun falharAoFecharOFluxoNaoMudaOResultadoDoEnvio() = runTest {
+        val source = ClosingSource("conteúdo".encodeToByteArray(), failToClose = true)
+        val engine = MockEngine { request ->
+            request.body.toByteArray()
+            json(message, HttpStatusCode.Created)
+        }
+        val file = OutgoingFile("a.txt", "text/plain", 9, open = { ByteReadChannel(source.buffered()) })
+
+        val sent = apiOn(engine).sendMessage("c1", "oi", replyTo = null, files = listOf(file))
+
+        assertEquals("m1", sent.id)
+        assertTrue(source.closed)
+    }
+
+    @Test
+    fun oEnvioFechaOFluxoDeCadaArquivoQueAbriuMesmoSeORestoDoCorpoNaoFoiLido() = runTest {
+        val first = GeneratedSource(1L shl 20) // grande o bastante para o motor parar de ler com o arquivo ainda no meio
+        val second = ClosingSource(ByteArray(100))
+        val engine = MockEngine { request ->
+            // A rede cai logo no começo do corpo: só o primeiro arquivo chega a ser aberto, e lido só em parte
+            // (o escritor para quando o canal enche, então o segundo nem começa).
+            val channel = ByteChannel()
+            val content = request.body as OutgoingContent.WriteChannelContent
+            coroutineScope {
+                launch(Dispatchers.Default) { runCatching { content.writeTo(channel) } }
+                channel.readAvailable(ByteArray(64))
+                channel.cancel(IOException("rede caiu"))
+            }
+            throw IOException("rede caiu")
+        }
+        val files = listOf(
+            OutgoingFile("a.bin", "application/octet-stream", 1L shl 20, open = { ByteReadChannel(first.buffered()) }),
+            OutgoingFile("b.bin", "application/octet-stream", 100, open = { ByteReadChannel(second.buffered()) }),
+        )
+
+        assertFailsWith<IOException> { apiOn(engine).sendMessage("c1", "oi", replyTo = null, files = files) }
+
+        assertTrue(first.closed)
+        assertFalse(second.closed) // nunca foi aberto: não há o que fechar
+    }
+
+    @Test
+    fun umArquivoGrandeNuncaViraByteArrayESaiAoRitmoDoMotor() = runTest {
+        val size = 200L * 1024 * 1024
+        val source = GeneratedSource(size)
+        var declared: Long? = null
+        var consumed = 0L
+        var producedAtFirstByte = -1L
+        var peakAhead = 0L
+        val engine = MockEngine { request ->
+            declared = request.body.contentLength
+            val channel = ByteChannel()
+            val content = request.body as? OutgoingContent.WriteChannelContent
+                ?: error("o corpo multipart sai por um canal de escrita, não de um `ByteArray` pronto: ${request.body::class}")
+            coroutineScope {
+                launch(Dispatchers.Default) {
+                    content.writeTo(channel)
+                    channel.flushAndClose()
+                }
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = channel.readAvailable(buffer)
+                    if (read < 0) break
+                    if (producedAtFirstByte < 0) producedAtFirstByte = source.produced
+                    consumed += read
+                    peakAhead = maxOf(peakAhead, source.produced - consumed)
+                }
+            }
+            json(message, HttpStatusCode.Created)
+        }
+        val file = OutgoingFile("grande.bin", "application/octet-stream", size, open = { ByteReadChannel(source.buffered()) })
+
+        apiOn(engine).sendMessage("c1", "", replyTo = null, files = listOf(file))
+
+        assertEquals(size, source.produced)
+        assertTrue(source.closed) // lido até o fim, e o envio ainda fecha o fluxo que abriu
+        assertEquals(consumed, declared) // o Content-Length conhecido de antemão é o corpo inteiro
+        assertTrue(consumed > size)
+        // Se o arquivo tivesse sido lido de uma vez, o gerador já teria produzido os 200 MiB quando o primeiro byte saísse.
+        val limit = 8L * 1024 * 1024
+        assertTrue(producedAtFirstByte in 0 until limit, "produzido até o primeiro byte: $producedAtFirstByte")
+        assertTrue(peakAhead < limit, "o gerador chegou a ficar $peakAhead bytes na frente de quem consome")
     }
 
     @Test
@@ -399,5 +608,73 @@ class ChatApiTest {
         assertEquals(parseInstant("2026-09-18T14:05:07.032154Z"), parseInstant("2026-09-18T10:05:07.032154-04:00"))
         assertNull(parseInstant("ontem"))
         assertNull(parseInstant(null))
+    }
+}
+
+/** Fonte que entrega [data] até [failAfter] bytes e depois lança [error], como um arquivo que some no meio da leitura. */
+private class FailingSource(private val data: ByteArray, private val failAfter: Int, private val error: Throwable) : RawSource {
+    private var position = 0
+
+    @Volatile
+    var closed = false
+        private set
+
+    override fun readAtMostTo(sink: Buffer, byteCount: Long): Long {
+        if (position >= failAfter) throw error
+        val count = minOf(byteCount, (failAfter - position).toLong(), 1024L).toInt()
+        sink.write(data, position, position + count)
+        position += count
+        return count.toLong()
+    }
+
+    override fun close() {
+        closed = true
+    }
+}
+
+/** [data] inteiro, só para saber se o envio fechou o fluxo; com [failToClose], fechar lança, como um provedor que já caiu. */
+private class ClosingSource(private val data: ByteArray, private val failToClose: Boolean = false) : RawSource {
+    private var position = 0
+
+    @Volatile
+    var closed = false
+        private set
+
+    override fun readAtMostTo(sink: Buffer, byteCount: Long): Long {
+        if (position >= data.size) return -1
+        val count = minOf(byteCount, (data.size - position).toLong(), 1024L).toInt()
+        sink.write(data, position, position + count)
+        position += count
+        return count.toLong()
+    }
+
+    override fun close() {
+        closed = true
+        if (failToClose) throw IOException("provedor caiu ao fechar")
+    }
+}
+
+/** [size] bytes gerados sob demanda, num bloco reaproveitado: nada de um arquivo inteiro na memória. [produced] diz quanto já saiu. */
+private class GeneratedSource(private val size: Long) : RawSource {
+    private val block = ByteArray(64 * 1024)
+
+    @Volatile
+    var produced = 0L
+        private set
+
+    @Volatile
+    var closed = false
+        private set
+
+    override fun readAtMostTo(sink: Buffer, byteCount: Long): Long {
+        if (produced >= size) return -1
+        val count = minOf(byteCount, size - produced, block.size.toLong()).toInt()
+        sink.write(block, 0, count)
+        produced += count
+        return count.toLong()
+    }
+
+    override fun close() {
+        closed = true
     }
 }
