@@ -1081,42 +1081,32 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if method == "POST" and path == "/messages":
             ctype = self.headers.get("Content-Type", "")
-            length = int(self.headers.get("Content-Length") or 0)
             control = send_control()
-            body = b""
-            while len(body) < length:
-                piece = self.rfile.read(min(16384, length - len(body)))
-                if not piece:
-                    break
-                body += piece
-                if control["rate"] > 0:
-                    time.sleep(len(piece) / (control["rate"] * 1024))
-            if len(body) < length:
-                # O cliente desistiu no meio do envio: como um servidor de verdade, não cria mensagem de um corpo cortado.
-                self.close_connection = True
-                return
-            time.sleep(control["delay"])
-            parsed = BytesParser().parsebytes(b"Content-Type: " + ctype.encode() + b"\r\n\r\n" + body)
-            fields, attachments = {}, []
-            for part in parsed.get_payload():
-                name = part.get_param("name", header="content-disposition")
-                data = part.get_payload(decode=True)
-                if name == "attachments":
-                    aid = str(uuid.uuid4())
-                    mime = sniffed_mime(part.get_content_type(), part.get_filename())
-                    FILES[aid] = (mime, data)
-                    image = mime.startswith("image/")
-                    attachments.append({"id": aid, "mime_type": mime, "original_file_name": part.get_filename() or "arquivo", "size_bytes": len(data),
-                                        "thumbnail_id": aid if image else None, "thumbnail_width": 96 if image else None,
-                                        "thumbnail_height": 64 if image else None, "moderation_status": "clean"})
-                else:
-                    fields[name] = data.decode()
-            cid = fields["channel_id"]
-            # Em DM o anexo não pede `send_attachment`; em canal, sim (e o envio pede `send_messages`).
-            if not has_channel_flag(cid, me, "send_messages") or (attachments and cid not in DMS and not has_role_flag(me, "send_attachment")):
-                for attachment in attachments:
-                    FILES.pop(attachment["id"], None)
-                return self.forbidden("usuário não tem permissão para enviar esta mensagem")
+            try:
+                body = read_upload(self, control["rate"] or UPLOAD["kbps"])
+                if body is None:
+                    # O cliente desistiu no meio do envio: como um servidor de verdade, não cria mensagem de um corpo cortado.
+                    self.close_connection = True
+                    return
+                time.sleep(control["delay"])
+                fields, files = parse_upload(ctype, body)
+                check_upload_form(files)
+                cid = fields["channel_id"]
+                # Em DM o anexo não pede `send_attachment`; em canal, sim (e o envio pede `send_messages`).
+                if not has_channel_flag(cid, me, "send_messages") or (files and cid not in DMS and not has_role_flag(me, "send_attachment")):
+                    return self.forbidden("usuário não tem permissão para enviar esta mensagem")
+                check_upload_sizes(files)
+            except UploadRejected as rejected:
+                return self.problem(rejected.status, rejected.title, rejected.detail)
+            attachments = []
+            for name, data, mime in files:
+                aid = str(uuid.uuid4())
+                mime = sniffed_mime(mime, name)
+                FILES[aid] = (mime, data)
+                image = mime.startswith("image/")
+                attachments.append({"id": aid, "mime_type": mime, "original_file_name": sanitized_file_name(name) or "arquivo", "size_bytes": len(data),
+                                    "thumbnail_id": aid if image else None, "thumbnail_width": 96 if image else None,
+                                    "thumbnail_height": 64 if image else None, "moderation_status": "clean"})
             if control["status"] >= 400 and not control["create"]:
                 return self.problem(control["status"], "Erro simulado", "Resposta simulada por FAKE_SEND_STATUS")
             m = new_message(fields["channel_id"], me, fields.get("content", ""), fields.get("reply_to"), attachments)
@@ -1413,9 +1403,142 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(404, "Não encontrado", "Rota inexistente")
 
 
+# Limites do `POST /messages` no servidor de verdade (`handlers/messages.go`, `services/attachments.go`, `middleware/bodylimit.go`);
+# a OpenAPI não os traz. O fake os aplica como ele, para o app mostrar o que o servidor diria.
+UPLOAD = {"kbps": 0.0}          # FAKE_UPLOAD_KBPS
+UPLOAD_BODY_LIMIT = 110 << 20   # MaxUploadBodySize: acima disso, 413 sem ler (Content-Length) ou 400 no meio da leitura (em pedaços)
+UPLOAD_FILE_LIMIT = 100 * 1024 * 1024
+UPLOAD_MAX_FILES = 10
+UPLOAD_NAME_LIMIT = 128
+NOT_MULTIPART = "corpo da requisição deve ser multipart/form-data válido"
+# O 400 de entrada inválida do servidor lista todas as causas possíveis, sem dizer qual foi (ErrInvalidInput).
+INVALID_INPUT = ("channel_id é obrigatório; content tem no máximo 8192 caracteres; a mensagem precisa de content ou attachment; "
+                 "nome do attachment inválido; reply_to deve referenciar uma mensagem do mesmo canal")
+
+
+class UploadRejected(Exception):
+    """Um envio que o servidor de verdade recusaria com 400 ou 413, no formato de `problem()`."""
+
+    def __init__(self, status, title, detail):
+        super().__init__(detail)
+        self.status, self.title, self.detail = status, title, detail
+
+
+def read_upload(handler, kbps):
+    """O corpo de `POST /messages`, lido como o servidor o faz: com `Content-Length` (acima de 110 MiB o 413 sai sem ler nada) ou em
+    pedaços (`Transfer-Encoding: chunked`, o que o app manda quando algum arquivo não tem tamanho; acima de 110 MiB a leitura é
+    cortada e o servidor responde 400). `kbps` (> 0) limita a leitura, para o envio de um arquivo grande ter o que mostrar.
+    Devolve None se o cliente desistiu no meio. Quando recusa, deixa a conexão marcada para fechar: sobra corpo por ler."""
+
+    def pace(count):
+        if kbps > 0:
+            time.sleep(count / (kbps * 1024))
+
+    def refuse(status, title, detail):
+        handler.close_connection = True
+        raise UploadRejected(status, title, detail)
+
+    if "chunked" in handler.headers.get("Transfer-Encoding", "").lower():
+        body = bytearray()
+        while True:
+            line = handler.rfile.readline(65537)
+            if not line:
+                return None
+            try:
+                size = int(line.split(b";")[0].strip() or b"0", 16)
+            except ValueError:
+                refuse(400, "Parâmetro inválido", NOT_MULTIPART)
+            if size == 0:
+                while handler.rfile.readline(65537) not in (b"\r\n", b"\n", b""):  # os campos finais, se houver
+                    pass
+                return bytes(body)
+            if len(body) + size > UPLOAD_BODY_LIMIT:
+                refuse(400, "Parâmetro inválido", NOT_MULTIPART)
+            remaining = size
+            while remaining:
+                piece = handler.rfile.read(min(16384, remaining))
+                if not piece:
+                    return None
+                body += piece
+                remaining -= len(piece)
+                pace(len(piece))
+            handler.rfile.readline()  # o CRLF depois do pedaço
+    length = int(handler.headers.get("Content-Length") or 0)
+    if length > UPLOAD_BODY_LIMIT:
+        refuse(413, "Payload muito grande", "corpo da requisição excede o tamanho máximo permitido")
+    body = bytearray()  # `bytes +=` copiaria o corpo inteiro a cada pedaço: com 100 MiB, minutos
+    while len(body) < length:
+        piece = handler.rfile.read(min(16384, length - len(body)))
+        if not piece:
+            return None
+        body += piece
+        pace(len(piece))
+    return bytes(body)
+
+
+def part_file_name(part):
+    """O `filename` do cabeçalho da parte, em UTF-8. O analisador de e-mail lê o cabeçalho como ASCII e troca cada byte de um nome
+    acentuado por um caractere à parte (ou por `?` em `get_filename`), então o nome é lido do cabeçalho cru."""
+    for name, value in part.raw_items():
+        found = re.search(r'filename="([^"]*)"', value) if name.lower() == "content-disposition" else None
+        if found:
+            return found.group(1).encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    return part.get_filename() or ""
+
+
+def parse_upload(content_type, body):
+    """(campos, arquivos) de um corpo multipart: os campos como texto e cada arquivo como (nome, bytes, tipo declarado)."""
+    parsed = BytesParser().parsebytes(b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + body)
+    if not parsed.is_multipart():
+        raise UploadRejected(400, "Parâmetro inválido", NOT_MULTIPART)
+    fields, files = {}, []
+    for part in parsed.get_payload():
+        name = part.get_param("name", header="content-disposition")
+        data = part.get_payload(decode=True)
+        if name == "attachments":
+            files.append((part_file_name(part), data, part.get_content_type()))
+        else:
+            fields[name] = data.decode()
+    if "channel_id" not in fields:
+        raise UploadRejected(400, "Parâmetro inválido", INVALID_INPUT)
+    return fields, files
+
+
+def sanitized_file_name(name):
+    """`SanitizeFileName` do servidor: sem pasta (`/` e `\\`), sem caracteres de controle e sem espaços nas pontas."""
+    name = (name or "")[max((name or "").rfind("/"), (name or "").rfind("\\")) + 1:]
+    return "".join(c for c in name if unicodedata.category(c) != "Cc").strip()
+
+
+def check_upload_form(files):
+    """O que o servidor confere antes de tudo: até 10 arquivos e, em cada um, um nome que sobra depois da limpeza, com até 128 caracteres."""
+    if len(files) > UPLOAD_MAX_FILES:
+        raise UploadRejected(400, "Parâmetro inválido", "máximo de 10 attachments por mensagem")
+    for name, _, _ in files:
+        cleaned = sanitized_file_name(name)
+        if not cleaned or len(cleaned) > UPLOAD_NAME_LIMIT:
+            raise UploadRejected(400, "Parâmetro inválido", INVALID_INPUT)
+
+
+def check_upload_sizes(files):
+    """O servidor só vê o tamanho de cada arquivo ao gravá-lo, depois de conferir a permissão: acima de 100 MiB é 400."""
+    if any(len(data) > UPLOAD_FILE_LIMIT for _, data, _ in files):
+        raise UploadRejected(400, "Parâmetro inválido", "attachment excede o tamanho máximo de 100MB")
+
+
 def seed_track_a():
     """Sementes da trilha A do item 2 (galeria, envio, visualizador, áudio). Cada trilha escreve só na sua função, para os
-    ramos mesclarem sem conflito; o `__main__` chama as duas depois do resto das sementes."""
+    ramos mesclarem sem conflito; o `__main__` chama as duas depois do resto das sementes.
+
+    Onda 1 (galeria e envio): não semeia mensagens, mas lê `FAKE_UPLOAD_KBPS=N`, que lê o corpo de `POST /messages` a N KB/s (o mesmo
+    que `FAKE_SEND_RATE`, que tem prioridade quando os dois estão ligados): um vídeo grande mostra a barra de envio e dá tempo de
+    cancelar no meio. O envio aceita corpo `Content-Length` e `chunked` e recusa como o servidor de verdade: 413 se o corpo declarado passa
+    de 110 MiB, e 400 com mais de 10 arquivos, nome vazio ou com mais de 128 caracteres, arquivo acima de 100 MiB ou corpo em pedaços
+    acima de 110 MiB. Valor ilegível derruba o fake na partida."""
+    try:
+        UPLOAD["kbps"] = float(os.environ.get("FAKE_UPLOAD_KBPS") or 0)
+    except ValueError as error:
+        raise SystemExit("FAKE_UPLOAD_KBPS: valor ilegível (%s)" % error)
 
 
 def seed_track_b():
