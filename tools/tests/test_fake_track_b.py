@@ -151,6 +151,41 @@ class EmbedsSementesTest(FakeTestCase):
     def test_sem_moderacao_ao_vivo_por_padrao(self):
         self.assertFalse([c for c in self.messages if c.startswith("moderação ao vivo")])
 
+    def test_embed_do_youtube_traz_a_pagina_do_player_sem_mime_type_e_a_miniatura(self):
+        embed = self.embed_of("Vídeo do YouTube: https://www.youtube.com/watch?v=aB3dE5gH7jK")
+        self.assertEqual(("oembed", "link", "YouTube"), (embed["fetch_method"], embed["source_type"], embed["provider"]))
+        # Como o servidor: o player só em `video.url`, sem `mime_type`, e nada em `embed_url`.
+        self.assertEqual({"url": "https://www.youtube.com/embed/aB3dE5gH7jK"}, {k: v for k, v in embed["video"].items() if v is not None})
+        self.assertIsNone(embed.get("embed_url"))
+        self.assertEqual((480, 270), (embed["thumbnail"]["width"], embed["thumbnail"]["height"]))
+        self.assertEqual((480, 270), png_size(self.media_of(embed)[1]))
+        # O relay do servidor não serve o YouTube (o app nunca o chama para ele).
+        self.assertEqual(404, self.ana.fetch(f"/embeds/{embed['id']}/video")[0])
+
+    def test_embed_com_endereco_de_player_quase_certo_traz_um_host_que_nao_e_o_youtube(self):
+        embed = self.embed_of("Parece do YouTube, mas o endereço do player é de outro site")
+        self.assertEqual("https://youtube.com.evil.example.com/embed/aB3dE5gH7jK", embed["video"]["url"])
+        self.assertIsNone(embed["video"].get("mime_type"))
+
+
+class YouTubeComIdProprioTest(FakeTestCase):
+    env = {"FAKE_YOUTUBE_ID": "Zz9_-Aa1Bb2"}
+
+    def test_o_id_do_ambiente_vai_para_o_player_e_para_o_link(self):
+        ana = self.login("ana")
+        _, body = ana.call("GET", f"/channels/{self.channel('embeds', ana)['id']}/messages?limit=100")
+        message = next(m for m in body["messages"] if m["content"].startswith("Vídeo do YouTube"))
+        self.assertTrue(message["content"].endswith("watch?v=Zz9_-Aa1Bb2"))
+        self.assertEqual("https://www.youtube.com/embed/Zz9_-Aa1Bb2", message["embeds"][0]["video"]["url"])
+
+
+class YouTubeInvalidoTest(unittest.TestCase):
+    def test_id_que_nao_tem_onze_caracteres_derruba_o_fake_com_mensagem(self):
+        done = subprocess.run([sys.executable, str(FAKE), "0"], env={**clean_env(), "FAKE_EMOJI_SMALL": "1", "FAKE_YOUTUBE_ID": "curto"},
+                              capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(0, done.returncode)
+        self.assertIn("FAKE_YOUTUBE_ID", done.stderr)
+
 
 class ModeracaoAoVivoTest(FakeTestCase):
     env = {"FAKE_MODERATION": "2"}
