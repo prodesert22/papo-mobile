@@ -5,8 +5,8 @@
   banner from the gallery. Pictures are cropped and shrunk on the phone, lose
   the location they carry, and the result of each change is shown. You can
   remove your banner.
-- Choose Available, Away or Busy from your own profile or from the account
-  settings.
+- Choose Available, Away or Busy from the profile editor or from your own
+  profile, with a disc in the color of each status.
 - Block people from their profile and manage the list in the account settings.
   Blocking removes the direct conversation and stops direct messages in both
   directions; channel messages stay visible. The new conversation list hides the

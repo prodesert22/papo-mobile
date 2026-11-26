@@ -20,6 +20,7 @@ import chat.papo.mobile.resources.profile_status_available
 import chat.papo.mobile.resources.profile_status_away
 import chat.papo.mobile.resources.profile_status_busy
 import chat.papo.mobile.resources.profile_status_title
+import chat.papo.mobile.ui.components.StatusDisc
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -40,6 +41,7 @@ fun OwnStatusPicker(viewModel: OwnStatusViewModel, modifier: Modifier = Modifier
                     onClick = { viewModel.choose(status) },
                     enabled = !state.saving,
                     label = { Text(stringResource(status.label())) },
+                    leadingIcon = { StatusDisc(status.presence()) },
                 )
             }
         }
@@ -52,6 +54,13 @@ fun OwnStatusPicker(viewModel: OwnStatusViewModel, modifier: Modifier = Modifier
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
     }
+}
+
+/** O valor de presença que o disco colore: disponível é `online`. */
+private fun OwnStatus.presence() = when (this) {
+    OwnStatus.Available -> "online"
+    OwnStatus.Away -> "away"
+    OwnStatus.Busy -> "busy"
 }
 
 private fun OwnStatus.label() = when (this) {

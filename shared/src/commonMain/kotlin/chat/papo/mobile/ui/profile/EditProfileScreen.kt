@@ -46,6 +46,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
@@ -138,6 +139,10 @@ fun EditProfileScreen(session: AccountSession, viewModel: EditProfileViewModel, 
                     OutlinedButton(onClick = viewModel::reload) { Text(stringResource(Res.string.action_retry)) }
                 }
                 is EditLoad.Ready -> {
+                    // A sessão entra na chave: o estado de uma conta nunca aparece na tela de outra.
+                    val statusModel = viewModel<OwnStatusViewModel>(key = "own-status/${session.accountId}/${session.hashCode()}") { OwnStatusViewModel(session) }
+                    OwnStatusPicker(statusModel)
+                    Spacer(Modifier.height(20.dp))
                     BannerSection(session, load.profile.id, load.profile.bannerSha, state, viewModel, pickBanner)
                     Spacer(Modifier.height(20.dp))
                     AvatarSection(session, users[session.userId], load.profile.displayName, state, viewModel, pickAvatar)
