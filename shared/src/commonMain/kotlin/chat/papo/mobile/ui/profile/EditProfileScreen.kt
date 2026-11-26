@@ -30,6 +30,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -82,7 +83,6 @@ import chat.papo.mobile.resources.profile_edit_pick_banner
 import chat.papo.mobile.resources.profile_edit_reload
 import chat.papo.mobile.resources.profile_edit_remove_banner
 import chat.papo.mobile.resources.profile_edit_save
-import chat.papo.mobile.resources.profile_edit_saving
 import chat.papo.mobile.resources.profile_edit_status_message
 import chat.papo.mobile.resources.profile_edit_step_avatar
 import chat.papo.mobile.resources.profile_edit_step_banner
@@ -132,6 +132,16 @@ fun EditProfileScreen(session: AccountSession, viewModel: EditProfileViewModel, 
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(Res.string.action_back))
                     }
                 },
+                // "Salvar" fica ao lado do título, sempre à vista, como nos outros apps de perfil.
+                actions = {
+                    TextButton(onClick = viewModel::save, enabled = state.canSave, modifier = Modifier.padding(end = 8.dp)) {
+                        if (state.saving) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(stringResource(Res.string.profile_edit_save), style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                },
             )
         },
     ) { padding ->
@@ -150,14 +160,13 @@ fun EditProfileScreen(session: AccountSession, viewModel: EditProfileViewModel, 
                     Column(Modifier.padding(horizontal = 20.dp)) {
                         ImageNotes(stringResource(Res.string.profile_edit_banner_help), state.refusals[ProfileImageKind.Banner]?.text())
                         ImageNotes(stringResource(Res.string.profile_edit_avatar_help), state.refusals[ProfileImageKind.Avatar]?.text())
+                        SaveResults(state, viewModel)
                         Spacer(Modifier.height(20.dp))
                         // A sessão entra na chave: o estado de uma conta nunca aparece na tela de outra.
                         val statusModel = viewModel<OwnStatusViewModel>(key = "own-status/${session.accountId}/${session.hashCode()}") { OwnStatusViewModel(session) }
                         OwnStatusPicker(statusModel)
                         Spacer(Modifier.height(20.dp))
                         TextFields(state, viewModel)
-                        Spacer(Modifier.height(20.dp))
-                        SaveArea(state, viewModel)
                     }
                 }
             }
@@ -319,18 +328,9 @@ private fun Field(
     )
 }
 
-/** "Salvar", o resultado de cada pedido e, depois de uma resposta incerta, "Recarregar perfil" (um GET, nunca um novo envio). */
+/** O resultado de cada pedido de "Salvar" e, depois de uma resposta incerta, "Recarregar perfil" (um GET, nunca um novo envio). */
 @Composable
-private fun SaveArea(state: EditProfileState, viewModel: EditProfileViewModel) {
-    Button(onClick = viewModel::save, enabled = state.canSave, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-        if (state.saving) {
-            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.profile_edit_saving))
-        } else {
-            Text(stringResource(Res.string.profile_edit_save))
-        }
-    }
+private fun SaveResults(state: EditProfileState, viewModel: EditProfileViewModel) {
     SaveStep.entries.forEach { step ->
         val outcome = state.outcomes[step] ?: return@forEach
         Spacer(Modifier.height(10.dp))

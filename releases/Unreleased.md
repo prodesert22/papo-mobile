@@ -3,7 +3,8 @@
 - Edit your own profile from your profile or from the account settings:
   nickname, status message, description and typing phrase, plus your avatar and
   banner from the gallery. The editor is laid out like a profile card: the banner
-  and the avatar show in place, each with a pencil button to change it. Pictures are cropped and shrunk on the phone, lose
+  and the avatar show in place, each with a pencil button to change it, and the
+  Save button sits next to the title, where it stays in view. Pictures are cropped and shrunk on the phone, lose
   the location they carry, and the result of each change is shown. You can
   remove your banner.
 - Choose Available, Away or Busy from the profile editor or from your own
