@@ -240,6 +240,9 @@ class ChatViewModel(
     /** A tela desta conversa voltou a ser a visível. */
     fun onVisible() = chat.setViewing(channelId)
 
+    /** Esta conversa deixou de ser a visível (estacionada, ou fora da tela); a que a substituiu, se já foi marcada, fica. */
+    fun onHidden() = chat.clearViewing(channelId)
+
     /**
      * Termina o destaque. Com [id], só vale se o destaque ainda é dessa mensagem: a tela chama isto ao cancelar o efeito
      * do destaque anterior, e sem a conferência esse aviso atrasado apagaria o destaque que acabou de começar.
@@ -498,7 +501,7 @@ class ChatViewModel(
     fun hidePinned() = _state.update { it.copy(pinnedList = null) }
 
     override fun onCleared() {
-        chat.setViewing(null)
+        chat.clearViewing(channelId)
     }
 
     private fun launch(block: suspend () -> Unit) {

@@ -348,6 +348,25 @@ class ChatStoreTest {
     }
 
     @Test
+    fun conversaQueSaiDaTelaSoLimpaAVistaSeAindaEraAdela() = runTest {
+        val f = Fixture(this, Backend(0) { msg(it) })
+        f.store.sync()
+        runCurrent()
+
+        f.store.setViewing("d1")
+        // Outra conversa que saiu da tela (a anterior do painel, liberada depois) não tira a que está à vista.
+        f.store.clearViewing("c1")
+        f.store.handle(WsEvent.MessageCreated("x1", "d1", "u2", content = "oi", createdAt = ts(1)))
+        runCurrent()
+        assertEquals(2, f.store.dms.value.single().unreadCount)
+
+        f.store.clearViewing("d1")
+        f.store.handle(WsEvent.MessageCreated("x2", "d1", "u2", content = "aí?", createdAt = ts(2)))
+        runCurrent()
+        assertEquals(3, f.store.dms.value.single().unreadCount)
+    }
+
+    @Test
     fun digitacaoPresencaEVoz() = runTest {
         val f = Fixture(this, Backend(0) { msg(it) })
         f.store.handle(WsEvent.Typing("c1", "u2", true))

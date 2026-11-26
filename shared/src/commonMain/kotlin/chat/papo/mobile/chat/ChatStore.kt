@@ -163,6 +163,11 @@ class ChatStore(
         viewing = channelId
     }
 
+    /** [channelId] deixou de estar na tela. Só vale se ele ainda é o que está: outro, já marcado depois, fica. */
+    fun clearViewing(channelId: String) {
+        if (viewing == channelId) viewing = null
+    }
+
     suspend fun runSync() {
         try {
             sync()
