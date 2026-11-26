@@ -53,7 +53,10 @@ release notes in [releases/](../releases/) describe each version's changes.
   suggestions as you type `:name`, the server's emoji shown inside messages,
   and larger emoji in messages that have nothing else. The server's emoji in
   GIF and WebP move in messages, reactions and the picker; they stay on their
-  first frame in the suggestions, and when the phone has animations removed.
+  first frame in the suggestions, and when the phone has animations removed. In
+  the message box the server's emoji show as images too, and the text stays
+  `:name:`: that is what is sent, saved and copied, and each emoji counts as one
+  character when you move the cursor, delete or select.
 
 ## Voice, camera and screen sharing
 

@@ -67,7 +67,6 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -976,8 +975,11 @@ private fun Composer(
     val emojiSuggestions = remember(emojiQuery?.text, emojiCatalog, serverEmojis) {
         if (emojiQuery == null) emptyList() else emojiSuggestions(emojiQuery.text, emojiCatalog, serverEmojis)
     }
+    // Os `:nome:` de emojis do servidor aparecem como imagem no campo, mas o texto do rascunho continua `:nome:`.
+    val draftEmojis = remember(serverEmojis.idByName) { DraftEmojis(serverEmojis.idByName) }
     // `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos (nome de emoji do servidor fica como texto).
-    val onChange: (TextFieldValue) -> Unit = { value ->
+    val onChange: (TextFieldValue) -> Unit = { typed ->
+        val value = draftEmojis.settle(draft, typed)
         val edit = if (emojiCatalog != null && value.composition == null && value.selection.collapsed) {
             EmojiCompletion.closeShortcode(draft.text, value.text, value.selection.start, emojiCatalog, serverEmojis.idByName.keys)
         } else {
@@ -1114,12 +1116,13 @@ private fun Composer(
                     // O campo ocuparia o lugar do clipe: a folga mantém o recuo de quando ele existe.
                     Spacer(Modifier.width(8.dp))
                 }
-                TextField(
+                DraftTextField(
+                    session = session,
                     value = draft,
                     onValueChange = onChange,
+                    emojis = draftEmojis,
                     placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     enabled = !state.savingEdit,
-                    maxLines = 6,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     shape = RoundedCornerShape(22.dp),
                     colors = TextFieldDefaults.colors(

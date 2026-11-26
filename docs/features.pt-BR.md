@@ -54,7 +54,10 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   sugestões ao digitar `:nome`, emojis do servidor dentro das mensagens e emojis
   maiores nas mensagens que só têm emojis. Os emojis do servidor em GIF e WebP se
   mexem nas mensagens, nas reações e no seletor; ficam no primeiro quadro nas
-  sugestões, e quando o celular está com as animações removidas.
+  sugestões, e quando o celular está com as animações removidas. No campo de
+  mensagem os emojis do servidor também aparecem como imagem, e o texto continua
+  `:nome:`: é o que se envia, se guarda e se copia, e cada emoji conta como um
+  caractere ao mover o cursor, apagar ou selecionar.
 
 ## Voz, câmera e transmissão de tela
 

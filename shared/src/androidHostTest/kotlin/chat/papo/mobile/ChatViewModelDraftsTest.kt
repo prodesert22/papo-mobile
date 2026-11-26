@@ -11,6 +11,7 @@ import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.db.account.MetaQueries
 import chat.papo.mobile.ui.chat.ChatViewModel
+import chat.papo.mobile.ui.chat.DraftEmojis
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -135,6 +136,41 @@ class ChatViewModelDraftsTest {
         session.chat.outbox.first { it.isEmpty() }
 
         assertEquals("oi ${mention(bia)}.", posted.single().field("content"))
+    }
+
+    // Emoji do servidor no compositor: o campo mostra a imagem, o texto do rascunho segue sendo `:nome:`
+
+    @Test
+    fun emojiDoServidorSegueComoNomeNoRascunhoGuardadoENoCorpoEnviado() = runTest {
+        val session = session()
+        val vm = ChatViewModel(session, "c1")
+        vm.loaded()
+        val emojis = DraftEmojis(mapOf("party" to "e1", "ok" to "e2"))
+
+        vm.onDraftChange(emojis.settle(vm.draft, TextFieldValue("oi :party::ok:", TextRange(14))))
+        session.drafts.flush()
+        runCurrent()
+        assertEquals(Draft("oi :party::ok:"), stored("c1"))
+
+        vm.submit()
+        session.chat.outbox.first { it.isEmpty() }
+        assertEquals("oi :party::ok:", posted.single().field("content"))
+    }
+
+    @Test
+    fun apagarLogoDepoisDoEmojiTiraOEmojiInteiroDoCorpoEnviado() = runTest {
+        val session = session()
+        val vm = ChatViewModel(session, "c1")
+        vm.loaded()
+        val emojis = DraftEmojis(mapOf("party" to "e1", "ok" to "e2"))
+        vm.onDraftChange(TextFieldValue("oi :party::ok:", TextRange(14)))
+
+        // O teclado apagou o `:` do fim; o compositor entrega o texto acertado ao view model.
+        vm.onDraftChange(emojis.settle(vm.draft, TextFieldValue("oi :party::ok", TextRange(13))))
+        vm.submit()
+        session.chat.outbox.first { it.isEmpty() }
+
+        assertEquals("oi :party:", posted.single().field("content"))
     }
 
     // Rascunho

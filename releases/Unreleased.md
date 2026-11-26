@@ -5,3 +5,6 @@
   reactions and the emoji picker, larger when a message has only emoji. They
   stop while the app is in the background, and stay on their first frame in the
   suggestions after `:` and when Android has animations removed.
+- The server's emoji now show as images in the message box, moving like they do
+  in messages, and count as one character when you move the cursor, delete or
+  select.
