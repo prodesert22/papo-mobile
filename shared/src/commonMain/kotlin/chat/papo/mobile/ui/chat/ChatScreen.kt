@@ -202,6 +202,8 @@ import chat.papo.mobile.resources.presence_busy
 import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.switcher_title
+import chat.papo.mobile.ui.components.AppBadge
+import chat.papo.mobile.ui.components.AuthorAvatar
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.formatBytes
@@ -1469,14 +1471,18 @@ private fun PinnedSheet(session: AccountSession, pinned: List<Message>, users: M
             LazyColumn(Modifier.heightIn(max = 420.dp)) {
                 items(shown, key = { it.id }) { message ->
                     val author = message.authorId?.let { users[it] }
+                    val name = message.externalAuthor?.name ?: author?.displayName ?: stringResource(Res.string.chat_unknown_user)
                     Row(Modifier.padding(vertical = 8.dp)) {
-                        UserAvatar(session, author, size = 32.dp)
+                        AuthorAvatar(session, author, message.webhookId, message.externalAuthor?.avatarUrl, name, size = 32.dp)
                         Spacer(Modifier.width(10.dp))
                         Column {
-                            Text(
-                                message.externalAuthor?.name ?: author?.displayName ?: stringResource(Res.string.chat_unknown_user),
-                                style = MaterialTheme.typography.titleSmall,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f, fill = false))
+                                if (message.webhookId != null) {
+                                    Spacer(Modifier.width(6.dp))
+                                    AppBadge()
+                                }
+                            }
                             Text(
                                 renderMentions(message.content) { users[it]?.displayName }
                                     .ifBlank { message.attachments.firstOrNull()?.fileName.orEmpty() },

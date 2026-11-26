@@ -130,6 +130,8 @@ import chat.papo.mobile.resources.search_submit
 import chat.papo.mobile.resources.search_title
 import chat.papo.mobile.resources.search_truncated
 import chat.papo.mobile.ui.chat.UserPickerDialog
+import chat.papo.mobile.ui.components.AppBadge
+import chat.papo.mobile.ui.components.AuthorAvatar
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.text
 import kotlinx.datetime.LocalDate
@@ -641,7 +643,7 @@ private fun ResultRow(session: AccountSession, hit: SearchHit, directory: Direct
         ?: hit.authorUsername?.takeIf { it.isNotBlank() }
         ?: stringResource(Res.string.chat_unknown_user)
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        UserAvatar(session, author, size = 36.dp, fallbackName = authorName)
+        AuthorAvatar(session, author, hit.webhookId, hit.externalAuthor?.avatarUrl, authorName, size = 36.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -653,6 +655,10 @@ private fun ResultRow(session: AccountSession, hit: SearchHit, directory: Direct
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                if (hit.webhookId != null) {
+                    Spacer(Modifier.width(6.dp))
+                    AppBadge()
+                }
                 Spacer(Modifier.width(8.dp))
                 Text(
                     hit.createdAt?.formatDateTime().orEmpty(),

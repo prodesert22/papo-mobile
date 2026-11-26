@@ -238,6 +238,8 @@
     <string name="reactors_title">Reações</string>
     <string name="reactors_empty">Ninguém reagiu com este emoji.</string>
     <string name="reactors_load_more">Carregar mais</string>
+    <string name="chat_app_badge">APP</string>
+    <string name="chat_app_badge_description">Aplicativo</string>
 
     <!-- Busca -->
     <string name="search_title">Buscar mensagens</string>

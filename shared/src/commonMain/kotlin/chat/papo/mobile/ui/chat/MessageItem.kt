@@ -116,7 +116,8 @@ import chat.papo.mobile.resources.msg_pinned
 import chat.papo.mobile.resources.msg_quick_react
 import chat.papo.mobile.resources.msg_reactors_label
 import chat.papo.mobile.resources.msg_reply
-import chat.papo.mobile.ui.components.UserAvatar
+import chat.papo.mobile.ui.components.AppBadge
+import chat.papo.mobile.ui.components.AuthorAvatar
 import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.parseHexColor
 import chat.papo.mobile.ui.components.rememberMediaImage
@@ -323,6 +324,7 @@ fun EmojiImage(
  * [addressedToMe] marca a mensagem dirigida a quem usa a conta, que a menciona, responde a ela ou é um `@everyone`
  * de quem pode usá-lo (a própria também, como no web): fundo dourado e uma barra no começo da linha.
  * [highlightEveryone] vale quando o autor pode usar `@everyone` e põe esse trecho do texto em destaque.
+ * Mensagem de webhook leva o selo "APP" ao lado do nome e o avatar do webhook, quando ele tem um.
  * [highlighted] é o destaque passageiro (a mensagem que se responde ou edita, ou a que se
  * acabou de abrir) e tem o fundo no lugar do dourado, que continua na barra. Toda mensagem [pinned] leva o
  * alfinete no fim da linha, também as agrupadas, que não têm cabeçalho.
@@ -357,6 +359,7 @@ fun MessageItem(
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
         ?: author?.displayName
         ?: stringResource(Res.string.chat_unknown_user)
+    val isWebhook = message.webhookId != null
     val replyLabel = stringResource(Res.string.msg_reply)
     val reactLabel = stringResource(Res.string.msg_quick_react, EmojiPickerModel.DEFAULT_REACTIONS.first())
     val papoColors = LocalPapoColors.current
@@ -382,7 +385,9 @@ fun MessageItem(
                 .padding(start = 12.dp, end = 12.dp, top = if (compact) 1.dp else 8.dp, bottom = 1.dp),
         ) {
             Box(Modifier.width(40.dp)) {
-                if (!compact) UserAvatar(session, author, size = 40.dp, fallbackName = authorName)
+                if (!compact) {
+                    AuthorAvatar(session, author, message.webhookId, message.externalAuthor?.avatarUrl, authorName, size = 40.dp)
+                }
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
@@ -400,6 +405,11 @@ fun MessageItem(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
                         )
+                        // O selo e a hora têm tamanho fixo: só o nome encolhe quando falta lugar.
+                        if (isWebhook) {
+                            Spacer(Modifier.width(6.dp))
+                            AppBadge()
+                        }
                         Spacer(Modifier.width(8.dp))
                         Text(
                             message.createdAt?.formatTime().orEmpty(),

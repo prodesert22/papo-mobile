@@ -67,6 +67,8 @@ data class SearchHit(
     val channelName: String,
     val authorId: String?,
     val authorUsername: String?,
+    /** Webhook que enviou a mensagem; nulo nas mensagens de gente. */
+    val webhookId: String?,
     val externalAuthor: ExternalAuthorDto?,
     val content: String,
     val createdAt: Instant?,
@@ -79,6 +81,7 @@ fun SearchResultDto.toHit() = SearchHit(
     channelName = channelName.orEmpty(),
     authorId = authorId,
     authorUsername = authorUsername,
+    webhookId = webhookId,
     externalAuthor = externalAuthor,
     content = content.orEmpty(),
     createdAt = parseInstant(createdAt),
