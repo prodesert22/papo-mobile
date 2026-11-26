@@ -31,6 +31,10 @@ interface PlatformUi {
      * política de repetição (`retryDelay`) se esgotar; o texto e as ações do erro são da tela comum.
      * [onControlsVisible] diz quando os controles do player aparecem e somem, para a tela esconder
      * junto o que ela desenha por cima do vídeo.
+     *
+     * Com [onFullscreen] os controles ganham o botão de tela cheia, que o chama: é o player do cartão da mensagem, e quem
+     * o chama o tira dali e abre o vídeo no visualizador. Null (a tela cheia, que já é o visualizador) não tem o botão.
+     * Só vale quando o player nasce: a nulidade não muda durante a vida dele.
      */
     @Composable
     fun VideoPlayer(
@@ -41,6 +45,7 @@ interface PlatformUi {
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
         onControlsVisible: (Boolean) -> Unit = {},
+        onFullscreen: (() -> Unit)? = null,
     )
 
     /**

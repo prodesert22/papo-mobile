@@ -329,6 +329,7 @@
     <string name="attachment_blocked">Removido pela moderação</string>
     <!-- 02 · trilha A · onda 2 (visualizador) -->
     <!-- 02 · trilha B · onda 2 (vídeo no cartão, YouTube) -->
+    <string name="video_open_fullscreen">Abrir em tela cheia</string>
     <!-- 02 · trilha A · onda 3 (áudio) -->
     <!-- 02 · trilha B · onda 3 (links, teclado) -->
 </resources>

@@ -88,7 +88,6 @@ import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.core.formatTime
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.ReactionSummaryDto
-import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_edited
 import chat.papo.mobile.resources.chat_reply_missing
@@ -103,6 +102,7 @@ import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.parseHexColor
 import chat.papo.mobile.ui.components.rememberMediaPainter
 import chat.papo.mobile.ui.components.rememberedPainter
+import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import org.jetbrains.compose.resources.stringResource
 
@@ -305,10 +305,12 @@ fun EmojiImage(
  * [highlighted] é o destaque passageiro (a mensagem que se responde ou edita, ou a que se
  * acabou de abrir) e tem o fundo no lugar do dourado, que continua na barra. Toda mensagem [pinned] leva o
  * alfinete no fim da linha, também as agrupadas, que não têm cabeçalho.
+ *
+ * [videos] é de onde os cartões de vídeo da mensagem sabem qual toca na própria caixa e por onde abrem a tela cheia.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageItem(
+internal fun MessageItem(
     session: AccountSession,
     message: Message,
     author: User?,
@@ -331,7 +333,7 @@ fun MessageItem(
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
     onShowReactors: (ReactionSummaryDto) -> Unit,
-    onPlay: (PlayableMedia) -> Unit,
+    videos: VideoHost,
 ) {
     val authorName = message.externalAuthor?.name?.takeIf { it.isNotBlank() }
         ?: author?.displayName
@@ -399,11 +401,11 @@ fun MessageItem(
                 }
                 message.attachments.forEach { attachment ->
                     Spacer(Modifier.height(6.dp))
-                    MessageAttachment(session, message.id, attachment, onOpenImage, onPlay)
+                    MessageAttachment(session, message.id, attachment, onOpenImage, videos)
                 }
                 message.embeds.forEach { embed ->
                     Spacer(Modifier.height(6.dp))
-                    EmbedCard(session, embed, users, emojiIds, unicodeEmojis, onPlay)
+                    EmbedCard(session, message.id, embed, users, emojiIds, unicodeEmojis, videos)
                 }
                 if (message.reactions.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))

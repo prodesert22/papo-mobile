@@ -90,7 +90,8 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
         onControlsVisible: (Boolean) -> Unit,
-    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure, onControlsVisible)
+        onFullscreen: (() -> Unit)?,
+    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure, onControlsVisible, onFullscreen)
 
     @Composable
     override fun HideSystemBars() = HideSystemBarsInDialog()

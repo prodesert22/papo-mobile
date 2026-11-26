@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.ModerationView
-import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.aspectOrNull
 import chat.papo.mobile.media.guardGone
 import chat.papo.mobile.media.moderationView
@@ -55,11 +54,12 @@ import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.rememberMediaPainter
 import chat.papo.mobile.ui.components.rememberedPainter
+import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.media.rememberAttachmentDownload
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * Um anexo da mensagem [messageId]: imagem com miniatura (um GIF anima), vídeo que o player abre (cartão com ▶) ou, para
+ * Um anexo da mensagem [messageId]: imagem com miniatura (um GIF anima), vídeo que o player toca (cartão com ▶) ou, para
  * o resto, o cartão de arquivo com **Baixar**. Um anexo que a moderação bloqueou ([ModerationView.Blocked]) vira o aviso e
  * nada é pedido ao servidor.
  */
@@ -69,7 +69,7 @@ internal fun MessageAttachment(
     messageId: String,
     attachment: AttachmentDto,
     onOpenImage: (AttachmentDto) -> Unit,
-    onPlay: (PlayableMedia) -> Unit,
+    videos: VideoHost,
 ) {
     if (moderationView(attachment.moderationStatus) == ModerationView.Blocked) {
         BlockedAttachment()
@@ -78,7 +78,7 @@ internal fun MessageAttachment(
     val video = playableAttachment(session.client.server, attachment)
     when {
         attachment.isImage && attachment.thumbnailId != null -> ImageAttachment(session, messageId, attachment, onOpen = { onOpenImage(attachment) })
-        video != null -> VideoAttachment(session, messageId, attachment, video, onPlay)
+        video != null -> VideoAttachment(session, messageId, attachment, video, videos)
         else -> FileAttachment(session, attachment)
     }
 }
