@@ -1,8 +1,13 @@
 package chat.papo.mobile.chat
 
+import chat.papo.mobile.account.ServerUrl
 import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.EmbedFieldDto
+import chat.papo.mobile.media.ImageKind
 import chat.papo.mobile.media.aspectOrNull
+import chat.papo.mobile.media.hasImage
+import chat.papo.mobile.media.relayVideo
+import chat.papo.mobile.media.sniffImage
 
 /**
  * O link que um embed ou o texto dele pode abrir: só `http` e `https`, com host e sem espaços (regra 6). Qualquer outra
@@ -61,3 +66,67 @@ fun embedMediaAspect(embed: EmbedDto): Float? {
  * embed segue como um cartão comum.
  */
 fun isGifEmbed(embed: EmbedDto): Boolean = embed.fetchMethod == "gif" && embed.thumbnail != null
+
+/**
+ * A imagem do [embed] abre no visualizador de mídia ao toque? O cartão decide por aqui e o visualizador monta as páginas por
+ * aqui ([chat.papo.mobile.ui.media.viewerItems]), então um não mostra o que o outro não abre. Precisa de uma imagem que o
+ * servidor sirva. A do GIF abre sempre. A de um embed com vídeo não: o cartão tem o gesto do vídeo (o ▶ toca na caixa, o
+ * resto abre a tela cheia), seja o do relay do servidor ([relayVideo]) ou o do YouTube ([youTubeId]), e a imagem ali é só a capa.
+ */
+internal fun hasViewableImage(server: ServerUrl, embed: EmbedDto): Boolean =
+    embed.hasImage() && (isGifEmbed(embed) || (youTubeId(embed) == null && relayVideo(server, embed) == null))
+
+/** O nome e o tipo com que a imagem de um embed sai de **Salvar** e **Compartilhar**. */
+data class EmbedImageFile(val fileName: String, val mimeType: String)
+
+/**
+ * O nome e o tipo da imagem de [embed] cujos bytes são [bytes], para **Salvar** e **Compartilhar**. O servidor não expõe a URL
+ * de origem de uma imagem, então o nome sai do título do embed (ou do site, ou do provedor) com a extensão do tipo; sem
+ * nenhum deles é `imagem.<extensão>`, como o nome genérico de [nameFor]. O tipo vem dos bytes ([sniffImage]): o `mime_type`
+ * que o servidor informa só vale se os bytes não são de um formato que o app reconhece, e sem ele (ou sem ser de imagem) o
+ * arquivo sai como binário genérico, sem extensão.
+ */
+fun embedImageFile(embed: EmbedDto, bytes: ByteArray): EmbedImageFile {
+    val (mimeType, extension) = imageTypeOf(embed, bytes)
+    val base = listOf(embed.title, embed.siteName, embed.provider).firstNotNullOfOrNull(::cleanTitle) ?: "imagem"
+    return EmbedImageFile(nameFor(extension?.let { "$base.$it" } ?: base, mimeType), mimeType)
+}
+
+/** O MIME e a extensão da imagem: os dos bytes e, se eles não se reconhecem, os do `mime_type` servido (ver [embedImageFile]). */
+private fun imageTypeOf(embed: EmbedDto, bytes: ByteArray): Pair<String, String?> {
+    val sniffed = when (sniffImage(bytes)) {
+        ImageKind.Gif -> "image/gif"
+        ImageKind.Png, ImageKind.Apng -> "image/png"
+        ImageKind.Webp, ImageKind.WebpAnimated -> "image/webp"
+        ImageKind.Jpeg -> "image/jpeg"
+        ImageKind.Heif -> "image/heif"
+        ImageKind.Unknown -> null
+    }
+    val declared = (embed.thumbnail ?: embed.image)?.mimeType?.substringBefore(';')?.trim()?.lowercase()
+    val mimeType = sniffed ?: declared?.takeIf { it.startsWith("image/") && it.length > "image/".length } ?: "application/octet-stream"
+    return mimeType to IMAGE_EXTENSIONS[mimeType]
+}
+
+/**
+ * [text] como parte de um nome de arquivo: as marcas de pasta e de caminho, os controles e as quebras viram espaço, os
+ * espaços em sequência viram um, e pontos e espaços das pontas saem. Sem nada que sobre, null.
+ */
+private fun cleanTitle(text: String?): String? =
+    text.orEmpty()
+        .map { if (it in RESERVED_IN_NAMES || it.isISOControl() || it.isWhitespace()) ' ' else it }
+        .joinToString("")
+        .split(' ')
+        .filter { it.isNotEmpty() }
+        .joinToString(" ")
+        .trim('.', ' ')
+        .takeIf { it.isNotEmpty() }
+
+private const val RESERVED_IN_NAMES = "/\\:*?\"<>|"
+
+private val IMAGE_EXTENSIONS = mapOf(
+    "image/gif" to "gif",
+    "image/png" to "png",
+    "image/webp" to "webp",
+    "image/jpeg" to "jpg",
+    "image/heif" to "heic",
+)

@@ -20,21 +20,19 @@ interface PlatformUi {
     fun VideoView(track: VideoTrackHandle, modifier: Modifier, fill: Boolean)
 
     /**
-     * Toca [media] com os controles do sistema, a partir de [startAtMs]. Os pedidos saem pelo
-     * `http` de [client], que deve ser o da conta dona da mensagem: dele vêm o cookie `Auth` e a
-     * renovação única da sessão. Nada vai para o disco. O player nasce com esta composição e é
-     * liberado quando ela sai (travar o app também a tira). Fora da tela ele pausa e não retoma
-     * sozinho.
+     * Toca [media] a partir de [startAtMs] e desenha só a superfície do vídeo, inteiro dentro de [modifier] e sobre preto: os
+     * controles são da tela comum, que lê e comanda o player pelo [state]. Os pedidos saem pelo `http` de [client], que deve
+     * ser o da conta dona da mensagem: dele vêm o cookie `Auth` e a renovação única da sessão. Nada vai para o disco. O player
+     * nasce com esta composição e é liberado quando ela sai (travar o app também a tira). Fora da tela ele pausa e não
+     * retoma sozinho.
      *
-     * [onPosition] recebe a posição atual em milissegundos, para a tela guardá-la e voltar ao
-     * mesmo ponto depois de girar o aparelho. [onFailure] recebe o motivo uma vez, depois de a
-     * política de repetição (`retryDelay`) se esgotar; o texto e as ações do erro são da tela comum.
-     * [onControlsVisible] diz quando os controles do player aparecem e somem, para a tela esconder
-     * junto o que ela desenha por cima do vídeo.
+     * Enquanto o player está na composição, [state] diz se ele toca, carrega ou terminou, o ponto, a duração e o trecho já
+     * baixado, e executa tocar, pausar e buscar; ao sair, o [state] volta ao de um player novo. Um [state] acompanha um player
+     * por vez. O player não toca no vídeo: o toque é de quem está por cima dele.
      *
-     * Com [onFullscreen] os controles ganham o botão de tela cheia, que o chama: é o player do cartão da mensagem, e quem
-     * o chama o tira dali e abre o vídeo no visualizador. Null (a tela cheia, que já é o visualizador) não tem o botão.
-     * Só vale quando o player nasce: a nulidade não muda durante a vida dele.
+     * [onPosition] recebe a posição atual em milissegundos, para a tela guardá-la e voltar ao mesmo ponto depois de girar o
+     * aparelho. [onFailure] recebe o motivo uma vez, depois de a política de repetição (`retryDelay`) se esgotar; o texto e as
+     * ações do erro são da tela comum. [startAtMs] só vale quando o player nasce.
      */
     @Composable
     fun VideoPlayer(
@@ -42,10 +40,9 @@ interface PlatformUi {
         media: PlayableMedia,
         startAtMs: Long,
         modifier: Modifier,
+        state: VideoPlayerState,
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
-        onControlsVisible: (Boolean) -> Unit = {},
-        onFullscreen: (() -> Unit)? = null,
     )
 
     /**

@@ -1993,6 +1993,27 @@ def seed_track_b():
     seed_embed(new_message(cid, uid("bia"), "imagem 1200x630 sem medidas no embed"), image_bytes=frame_png(1200, 630), site_name="exemplo.com",
                url="https://exemplo.com/sem-medidas", title="Sem largura nem altura", thumbnail={"mime_type": "image/png"})
 
+    # Uma mensagem com um anexo e vários embeds, para o visualizador percorrer: o anexo e depois uma página por embed com imagem
+    # (comum, custom só com `image`, GIF e custom com `thumbnail` e `image`, de que o servidor só serve a thumbnail). Ficam de
+    # fora do visualizador o embed com vídeo (o cartão tem o gesto do vídeo) e o que não tem imagem.
+    multi = new_message(cid, uid("bia"), "vários embeds com imagem e um anexo",
+                        attachments=[media_attachment("anexo.png", "image/png", frame_png(640, 360, (90, 140, 60)), 640, 360)])
+    for number, (width, height, hue) in enumerate([(1200, 630, (35, 120, 200)), (600, 900, (200, 90, 35))], start=1):
+        seed_embed(multi, image_bytes=frame_png(width, height, hue), site_name="exemplo.com", url="https://exemplo.com/galeria/%d" % number,
+                   title="Imagem %d da galeria" % number, thumbnail={"mime_type": "image/png", "width": width, "height": height})
+    seed_embed(multi, image_bytes=frame_png(512, 512, (120, 60, 180)), source_type="custom", fetch_method="manual", title="Só com image",
+               image={"mime_type": "image/png", "width": 512, "height": 512})
+    seed_embed(multi, image_bytes=gif, fetch_method="gif", provider="Tenor", url=tenor, title="Gato dançando",
+               thumbnail={"mime_type": "image/gif", "width": 320, "height": 180, "size_bytes": len(gif)})
+    seed_embed(multi, image_bytes=frame_png(800, 450, (46, 204, 113)), source_type="custom", fetch_method="manual",
+               title="Com thumbnail e image", description="O servidor serve só a thumbnail (verde); a image (600x600) não chega ao app.",
+               thumbnail={"mime_type": "image/png", "width": 800, "height": 450}, image={"mime_type": "image/png", "width": 600, "height": 600})
+    clip, clip_mime = embed_seed("https://videos.example.com/galeria.mp4")
+    seed_embed(multi, image_bytes=frame_png(1200, 630, (200, 40, 60)), seed=clip, site_name="exemplo.com", url="https://exemplo.com/galeria/video",
+               title="Embed com vídeo (fora do visualizador)", thumbnail={"mime_type": "image/png", "width": 1200, "height": 630},
+               video={"url": "https://videos.example.com/galeria.mp4", "mime_type": clip_mime, "width": 1280, "height": 720})
+    seed_embed(multi, source_type="custom", fetch_method="manual", title="Sem imagem (fora do visualizador)", description="Só texto.")
+
     # YouTube: o servidor entrega a página do player em `video.url`, sem `mime_type`, e a miniatura em `GET /embeds/{id}`. O id é
     # inventado (o player real responde "vídeo indisponível"); FAKE_YOUTUBE_ID põe um id de verdade para ver um vídeo tocar.
     youtube_id = os.environ.get("FAKE_YOUTUBE_ID", "aB3dE5gH7jK")

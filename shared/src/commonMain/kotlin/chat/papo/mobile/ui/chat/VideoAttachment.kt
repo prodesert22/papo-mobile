@@ -60,6 +60,7 @@ import chat.papo.mobile.resources.video_poster_loading
 import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.media.VideoHost
+import chat.papo.mobile.ui.media.cardKey
 import chat.papo.mobile.ui.media.rememberAttachmentDownload
 import org.jetbrains.compose.resources.stringResource
 
@@ -127,8 +128,10 @@ internal fun VideoAttachment(
                     if (bitmap != null) {
                         Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }, contentScale = ContentScale.Fit)
                     }
-                    // O anel entra e sai com um fade: some junto com o início do fade da capa, sem um vazio entre os dois.
-                    val progress by animateFloatAsState(if (making && bitmap == null) 1f else 0f, tween(durationMillis = 250), label = "posterProgress")
+                    // O anel entra e sai com um fade: some junto com o início do fade da capa, sem um vazio entre os dois. Com o
+                    // vídeo tocando no cartão ele cede ao indicador de carregamento do player (a extração espera o player).
+                    val playerOpen = videos.inline(cardKey(messageId, media.key)) != null
+                    val progress by animateFloatAsState(if (making && bitmap == null && !playerOpen) 1f else 0f, tween(durationMillis = 250), label = "posterProgress")
                     if (progress > 0f) {
                         val loading = stringResource(Res.string.video_poster_loading)
                         CircularProgressIndicator(

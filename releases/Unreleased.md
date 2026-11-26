@@ -1,8 +1,12 @@
 - Videos, attached or from a link, now play in the message itself when you tap
-  the play button in the middle; tapping anywhere else on the video still opens
-  it full screen. The player in the message has a full-screen button that
-  continues from the same point. Only one video plays at a time in a
-  conversation, and a video that scrolls off the screen stops.
+  the play button in the middle, clean, without controls; tapping the playing
+  video opens it full screen from the same point, and tapping anywhere else on
+  a video that is not playing opens it full screen too. Only one video plays at
+  a time in a conversation, and a video that scrolls off the screen stops.
+- The full-screen video player has new controls in the app's style: a large
+  play and pause button, back and forward 10 seconds, a gold progress bar that
+  shows how much has loaded and seeks when you let go, and controls and title
+  that hide on their own while the video plays and come back with a tap.
 - YouTube links show the video's image with a play button. Tapping it plays the
   video inside the app, in the message; tapping elsewhere on the card opens it
   full screen, and **Abrir no YouTube** opens it outside the app. Nothing is
@@ -24,11 +28,14 @@
   an icon and a link, a linked title, the description with formatting (cut at
   six lines, with **Mostrar mais**), fields in a grid, and the footer.
 - GIF links (Tenor, GIPHY, KLIPY) play in the message as an animated GIF with
-  the provider and title, and preview images that are GIFs move too.
+  the provider and title, and preview images that are GIFs move too. Tapping the
+  GIF opens it in the viewer; the provider and title open its page.
 - Attached GIFs move in the message list and in the viewer, with a GIF badge.
 - A message's images, GIFs and videos open in a viewer you can swipe through,
   with a counter, pinch and double-tap zoom up to 5x, and **Salvar** and
-  **Compartilhar** for images and GIFs. Sharing hands the file to the other app
+  **Compartilhar** for images and GIFs. Link preview images open there too,
+  after the attachments, so a message with several previews can be swiped
+  through. Sharing hands the file to the other app
   from memory, without writing it to the phone.
 - GIFs, stickers and images from the keyboard, or pasted, come into the message
   as attachments, like files picked with the paperclip.

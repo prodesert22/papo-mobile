@@ -1,5 +1,8 @@
 package chat.papo.mobile.ui.chat
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -34,6 +37,8 @@ import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.video_open_fullscreen
 import chat.papo.mobile.resources.video_play
 import chat.papo.mobile.ui.components.LocalPlatformUi
+import chat.papo.mobile.ui.components.VideoPlayerState
+import chat.papo.mobile.ui.media.LoadingBadge
 import chat.papo.mobile.ui.media.PlayingVideo
 import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.media.cardKey
@@ -45,7 +50,8 @@ import org.jetbrains.compose.resources.stringResource
  *
  * - **na capa** ([cover]): o ▶ do meio é um botão e toca o vídeo ali mesmo ([VideoHost.playInline]); tocar em qualquer
  *   outro ponto abre a tela cheia ([VideoHost.openFullscreen]);
- * - **tocando no cartão**: o [player], no lugar da capa e na mesma caixa (a lista não pula);
+ * - **tocando no cartão**: o [player], no lugar da capa e na mesma caixa (a lista não pula). Os controles são do player: o de
+ *   vídeo do servidor não tem nenhum e abre a tela cheia com um toque ([ServerVideoBox]); o do YouTube tem os do próprio YouTube;
  * - **com falha**: a capa com o motivo curto por cima; tocar abre a tela cheia, que tem o painel completo. Quem avisa é o
  *   [player], por `onFailure`; o do YouTube não avisa (o player dele mostra o próprio erro).
  *
@@ -90,9 +96,9 @@ internal fun VideoBox(
 }
 
 /**
- * A caixa de um vídeo do servidor ([media]: um anexo ou o relay de um embed): o player da plataforma, com os controles
- * dele e o botão de tela cheia, que leva o ponto atual. Enquanto ele toca as capas dos outros vídeos esperam, como na tela
- * cheia. Ver [VideoBox].
+ * A caixa de um vídeo do servidor ([media]: um anexo ou o relay de um embed): o player da plataforma, só com a imagem e sem
+ * controle nenhum. Um toque em qualquer ponto do vídeo abre a tela cheia a partir do ponto em que ele está. Enquanto ele toca
+ * as capas dos outros vídeos esperam, como na tela cheia. Ver [VideoBox].
  */
 @Composable
 internal fun ServerVideoBox(
@@ -108,12 +114,16 @@ internal fun ServerVideoBox(
         mediaKey = media.key,
         host = host,
         embed = embed,
-        player = { video, onFailure -> InlineVideoPlayer(session, media, video, host, onFailure) },
+        player = { video, onFailure -> InlineVideoPlayer(session, media, video, host, onFailure, cover) },
         cover = cover,
     )
 }
 
-/** O player no lugar da capa: da posição em que o vídeo está, com o botão de tela cheia que o leva para o visualizador. */
+/**
+ * O player no lugar da capa, da posição em que o vídeo está. Fica sem controles: o vídeo toca limpo e um toque em qualquer
+ * ponto o leva para o visualizador, do ponto atual, tirando o player daqui. A capa continua por cima até o primeiro quadro (sem
+ * ela o ▶ daria num vazio preto), com o indicador de carregamento do tema, que volta se o vídeo trava esperando dados.
+ */
 @Composable
 private fun InlineVideoPlayer(
     session: AccountSession,
@@ -121,21 +131,37 @@ private fun InlineVideoPlayer(
     video: PlayingVideo,
     host: VideoHost,
     onFailure: (PlaybackFailure) -> Unit,
+    cover: @Composable BoxScope.() -> Unit,
 ) {
     // Enquanto ele toca as capas esperam: o player e elas disputariam o limite de pedidos do servidor.
     DisposableEffect(session) {
         session.videoPosters.playerOpened()
         onDispose { session.videoPosters.playerClosed() }
     }
-    LocalPlatformUi.current.VideoPlayer(
-        client = session.client,
-        media = media,
-        startAtMs = video.positionMs,
-        modifier = Modifier.fillMaxSize(),
-        onPosition = { video.positionMs = it },
-        onFailure = onFailure,
-        onFullscreen = { host.openFullscreen(media.key, video.positionMs) },
-    )
+    val player = remember { VideoPlayerState() }
+    Box(Modifier.fillMaxSize()) {
+        LocalPlatformUi.current.VideoPlayer(
+            client = session.client,
+            media = media,
+            startAtMs = video.positionMs,
+            modifier = Modifier.fillMaxSize(),
+            state = player,
+            onPosition = { video.positionMs = it },
+            onFailure = onFailure,
+        )
+        AnimatedVisibility(visible = !player.hasPicture, modifier = Modifier.fillMaxSize(), enter = EnterTransition.None, exit = fadeOut()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center, content = cover)
+        }
+        if (player.loading) LoadingBadge(Modifier.align(Alignment.Center).size(56.dp))
+        // Por cima de tudo, para que o toque seja daqui e não do player; o gesto de rolar a lista passa por ele.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clickable(role = Role.Button, onClickLabel = stringResource(Res.string.video_open_fullscreen)) {
+                    host.openFullscreen(media.key, player.resumePositionMs)
+                },
+        )
+    }
 }
 
 /** O motivo curto da falha sobre a capa, legível sobre qualquer imagem nos dois temas. */

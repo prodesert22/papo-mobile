@@ -91,6 +91,7 @@ import chat.papo.mobile.chat.hidesDestination
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.core.formatTime
 import chat.papo.mobile.data.api.AttachmentDto
+import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.ReactionSummaryDto
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_edited
@@ -329,6 +330,7 @@ fun EmojiImage(
  * alfinete no fim da linha, também as agrupadas, que não têm cabeçalho.
  *
  * [videos] é de onde os cartões de vídeo da mensagem sabem qual toca na própria caixa e por onde abrem a tela cheia.
+ * [onOpenImage] abre no visualizador a imagem de um anexo, e [onOpenEmbedImage] a de um embed.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -354,6 +356,7 @@ internal fun MessageItem(
     onLongPress: () -> Unit,
     onReact: (ReactionSummaryDto) -> Unit,
     onOpenImage: (AttachmentDto) -> Unit,
+    onOpenEmbedImage: (EmbedDto) -> Unit,
     onShowReactors: (ReactionSummaryDto) -> Unit,
     videos: VideoHost,
     onOpenAuthor: (() -> Unit)? = null,
@@ -445,7 +448,7 @@ internal fun MessageItem(
                 }
                 message.embeds.forEach { embed ->
                     Spacer(Modifier.height(6.dp))
-                    EmbedCard(session, message.id, embed, users, emojiIds, unicodeEmojis, videos)
+                    EmbedCard(session, message.id, embed, users, emojiIds, unicodeEmojis, videos, onOpenEmbedImage)
                 }
                 if (message.reactions.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))

@@ -1,7 +1,11 @@
 package chat.papo.mobile
 
+import chat.papo.mobile.account.ServerUrl
+import chat.papo.mobile.chat.EmbedImageFile
+import chat.papo.mobile.chat.embedImageFile
 import chat.papo.mobile.chat.embedMediaAspect
 import chat.papo.mobile.chat.fieldRows
+import chat.papo.mobile.chat.hasViewableImage
 import chat.papo.mobile.chat.isGifEmbed
 import chat.papo.mobile.chat.safeLink
 import chat.papo.mobile.data.api.EmbedDto
@@ -222,5 +226,149 @@ class EmbedsTest {
         assertFalse(isGifEmbed(embed(thumbnail = media(498, 280))))
         // Sem a thumbnail não há o que animar: segue como cartão comum.
         assertFalse(isGifEmbed(embed(fetchMethod = "gif")))
+    }
+
+    // hasViewableImage
+
+    private val server = ServerUrl("https://papo.test")
+
+    private val relayMedia = EmbedMediaDto(url = "https://videos.example.com/a.mp4", mimeType = "video/mp4", width = 1280, height = 720)
+
+    private val youTubeVideo = EmbedMediaDto(url = "https://www.youtube.com/embed/aB3dE5gH7jK")
+
+    private fun viewable(embed: EmbedDto) = hasViewableImage(server, embed)
+
+    @Test
+    fun semImagemNaoHaOQueAbrir() {
+        assertFalse(viewable(embed()))
+        assertFalse(viewable(embed(fetchMethod = "gif")))
+        // Um embed só com vídeo também não: a imagem é que decide.
+        assertFalse(viewable(embed(video = relayMedia)))
+    }
+
+    @Test
+    fun aImagemDeUmEmbedComumOuCustomizadoAbre() {
+        assertTrue(viewable(embed(thumbnail = media(1200, 630))))
+        assertTrue(viewable(embed(image = media(800, 450), fetchMethod = "manual")))
+        assertTrue(viewable(embed(thumbnail = media(null, null))))
+    }
+
+    @Test
+    fun aImagemDoGifAbreMesmoComVideo() {
+        assertTrue(viewable(embed(thumbnail = media(320, 180), fetchMethod = "gif")))
+        // O cartão de GIF não tem o gesto do vídeo: a imagem abre, qualquer que seja o resto.
+        assertTrue(viewable(embed(thumbnail = media(320, 180), fetchMethod = "gif", video = relayMedia)))
+        // `gif` sem thumbnail só com `image` é um cartão comum.
+        assertTrue(viewable(embed(image = media(320, 180), fetchMethod = "gif")))
+    }
+
+    @Test
+    fun aImagemDeUmEmbedComVideoDoRelayOuDoYouTubeFicaComOGestoDoVideo() {
+        assertFalse(viewable(embed(thumbnail = media(1200, 630), video = relayMedia)))
+        assertFalse(viewable(embed(image = media(1200, 630), video = relayMedia)))
+        assertFalse(viewable(embed(thumbnail = media(480, 270), video = youTubeVideo, fetchMethod = "oembed")))
+        // O campo antigo `embed_url` também diz que é o YouTube.
+        assertFalse(viewable(embed(thumbnail = media(480, 270)).copy(embedUrl = "https://www.youtube.com/embed/aB3dE5gH7jK")))
+    }
+
+    @Test
+    fun videoQueOCartaoNaoTocaDeixaAImagemAbrir() {
+        // `http://`, MIME fora do relay e uma página que só parece ser a do YouTube: o cartão mostra só a imagem.
+        assertTrue(viewable(embed(thumbnail = media(1200, 630), video = relayMedia.copy(url = "http://videos.example.com/a.mp4"))))
+        assertTrue(viewable(embed(thumbnail = media(1200, 630), video = relayMedia.copy(mimeType = "video/x-msvideo"))))
+        assertTrue(viewable(embed(thumbnail = media(480, 270), video = EmbedMediaDto(url = "https://youtube.com.evil.example.com/embed/aB3dE5gH7jK"))))
+    }
+
+    // embedImageFile
+
+    private fun bytes(vararg values: Int) = ByteArray(values.size) { values[it].toByte() }
+
+    private val gif = "GIF89a".encodeToByteArray() + ByteArray(10)
+
+    private val jpeg = bytes(0xFF, 0xD8, 0xFF, 0xE0) + ByteArray(10)
+
+    private val png = bytes(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + ByteArray(20)
+
+    private val webp = "RIFF".encodeToByteArray() + ByteArray(4) + "WEBP".encodeToByteArray() + "VP8 ".encodeToByteArray() + ByteArray(10)
+
+    /** Um WebP estendido (`VP8X`) com o bit de animação ligado. */
+    private val animatedWebp = "RIFF".encodeToByteArray() + ByteArray(4) + "WEBP".encodeToByteArray() + "VP8X".encodeToByteArray() +
+        bytes(10, 0, 0, 0, 0x02, 0, 0, 0) + ByteArray(6)
+
+    private val heif = ByteArray(4) + "ftypheic".encodeToByteArray() + ByteArray(10)
+
+    private fun titled(title: String?, site: String? = null, provider: String? = null, mime: String? = "image/png") =
+        EmbedDto(id = "e1", title = title, siteName = site, provider = provider, thumbnail = EmbedMediaDto(mimeType = mime))
+
+    @Test
+    fun oNomeSaiDoTituloComAExtensaoDosBytes() {
+        val embed = titled("Build 42 passou")
+        assertEquals(EmbedImageFile("Build 42 passou.gif", "image/gif"), embedImageFile(embed, gif))
+        assertEquals(EmbedImageFile("Build 42 passou.jpg", "image/jpeg"), embedImageFile(embed, jpeg))
+        assertEquals(EmbedImageFile("Build 42 passou.png", "image/png"), embedImageFile(embed, png))
+        assertEquals(EmbedImageFile("Build 42 passou.webp", "image/webp"), embedImageFile(embed, webp))
+        assertEquals(EmbedImageFile("Build 42 passou.webp", "image/webp"), embedImageFile(embed, animatedWebp))
+        assertEquals(EmbedImageFile("Build 42 passou.heic", "image/heif"), embedImageFile(embed, heif))
+    }
+
+    @Test
+    fun umPngAnimadoSaiComoPng() {
+        val chunk = { type: String, size: Int -> bytes(0, 0, 0, size) + type.encodeToByteArray() + ByteArray(size) + ByteArray(4) }
+        val apng = png.copyOf(8) + chunk("IHDR", 13) + chunk("acTL", 8) + chunk("IDAT", 4)
+        assertEquals(EmbedImageFile("Quadro.png", "image/png"), embedImageFile(titled("Quadro"), apng))
+    }
+
+    @Test
+    fun osBytesVencemOMimeTypeQueOServidorInformou() {
+        // O servidor disse GIF, os bytes são de um JPEG: vale o que está no arquivo.
+        assertEquals(EmbedImageFile("Foto.jpg", "image/jpeg"), embedImageFile(titled("Foto", mime = "image/gif"), jpeg))
+    }
+
+    @Test
+    fun comBytesQueNaoSaoReconhecidosValeOMimeTypeDaImagemQueOServidorServe() {
+        val unknown = ByteArray(16) { 7 }
+        assertEquals("Foto.png", embedImageFile(titled("Foto", mime = "image/png"), unknown).fileName)
+        assertEquals("image/png", embedImageFile(titled("Foto", mime = "IMAGE/PNG; charset=binary"), unknown).mimeType)
+        // O tipo da `thumbnail` é o do arquivo servido; sem ela, o da `image`.
+        val onlyImage = EmbedDto(id = "e1", title = "Foto", image = EmbedMediaDto(mimeType = "image/webp"))
+        assertEquals("Foto.webp", embedImageFile(onlyImage, unknown).fileName)
+        val both = EmbedDto(id = "e1", title = "Foto", thumbnail = EmbedMediaDto(mimeType = "image/png"), image = EmbedMediaDto(mimeType = "image/webp"))
+        assertEquals("Foto.png", embedImageFile(both, unknown).fileName)
+        // Um tipo de imagem sem extensão conhecida mantém o tipo e o nome sem extensão.
+        assertEquals(EmbedImageFile("Foto", "image/avif"), embedImageFile(titled("Foto", mime = "image/avif"), unknown))
+    }
+
+    @Test
+    fun semFormatoNemTipoDeImagemSaiComoBinarioGenerico() {
+        val unknown = ByteArray(16) { 7 }
+        for (mime in listOf(null, "", "text/html", "video/mp4", "image/")) {
+            assertEquals(EmbedImageFile("Foto", "application/octet-stream"), embedImageFile(titled("Foto", mime = mime), unknown), "mime=$mime")
+        }
+        // Sem nenhuma mídia no embed o resultado é o mesmo.
+        assertEquals("Foto", embedImageFile(EmbedDto(id = "e1", title = "Foto"), unknown).fileName)
+    }
+
+    @Test
+    fun semTituloOSiteEOProvedorDaoONomeEDepoisImagem() {
+        assertEquals("exemplo.com.png", embedImageFile(titled(null, site = "exemplo.com", provider = "Outro"), png).fileName)
+        assertEquals("exemplo.com.png", embedImageFile(titled("   ", site = "exemplo.com"), png).fileName)
+        assertEquals("Tenor.gif", embedImageFile(titled(null, provider = "Tenor"), gif).fileName)
+        assertEquals("imagem.gif", embedImageFile(titled(null), gif).fileName)
+        assertEquals("imagem.gif", embedImageFile(titled("///", site = "..."), gif).fileName)
+    }
+
+    @Test
+    fun oNomeNuncaLevaPastaCaractereReservadoControleNemPontosDasPontas() {
+        assertEquals("AC DC ao vivo.png", embedImageFile(titled("AC/DC: ao vivo?"), png).fileName)
+        assertEquals("a b.png", embedImageFile(titled("..\\../a\n\tb\u0000"), png).fileName)
+        assertEquals("um dois tres.png", embedImageFile(titled("  um   dois\u00A0tres  "), png).fileName)
+        assertEquals("saida.png", embedImageFile(titled("<saida>|\""), png).fileName)
+    }
+
+    @Test
+    fun umTituloLongoEhCortadoSemPerderAExtensao() {
+        val file = embedImageFile(titled("t".repeat(256)), jpeg)
+        assertEquals(128, file.fileName.length)
+        assertTrue(file.fileName.endsWith(".jpg"))
     }
 }
