@@ -13,11 +13,14 @@ import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -63,6 +66,15 @@ class AccountManager(
 
     val accounts: StateFlow<List<Account>> = store.observe().stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    private val pendingLabels = MutableStateFlow<Map<String, String>>(emptyMap())
+    private val pendingColors = MutableStateFlow<Map<String, Int?>>(emptyMap())
+    private val appearanceWake = Channel<Unit>(Channel.CONFLATED)
+    private val appearanceWriter = Mutex()
+
+    init {
+        scope.launch { for (wake in appearanceWake) writePendingAppearance() }
+    }
+
     private val _activeId = MutableStateFlow(prefs.getString(PREF_ACTIVE))
     val activeId: StateFlow<String?> = _activeId.asStateFlow()
 
@@ -103,8 +115,34 @@ class AccountManager(
     /** Começa o login em um servidor já consultado. */
     fun begin(probe: ServerProbe): PendingAccount = PendingAccount(probe)
 
-    suspend fun setAppearance(accountId: String, label: String?, color: Int?) =
-        store.setAppearance(accountId, label, color)
+    /**
+     * Guarda o rótulo e volta na hora; um único escritor, que vive no escopo do gerenciador e não no da tela,
+     * grava o valor mais novo de cada conta. Assim sair da tela logo depois de digitar não perde o fim do
+     * texto, e duas gravações nunca terminam fora de ordem.
+     */
+    fun setLabel(accountId: String, label: String) {
+        pendingLabels.update { it + (accountId to label) }
+        appearanceWake.trySend(Unit)
+    }
+
+    /** Guarda só a cor, pelo mesmo escritor: o rótulo, digitado e ainda não gravado ou não, não é tocado. */
+    fun setColor(accountId: String, color: Int?) {
+        pendingColors.update { it + (accountId to color) }
+        appearanceWake.trySend(Unit)
+    }
+
+    /** Grava já o que ainda espera o escritor (antes de fechar o registro). */
+    suspend fun flushAppearance() = writePendingAppearance()
+
+    private suspend fun writePendingAppearance() = appearanceWriter.withLock {
+        val labels = pendingLabels.getAndUpdate { emptyMap() }
+        val colors = pendingColors.getAndUpdate { emptyMap() }
+        // Uma gravação começada termina mesmo que o escopo seja cancelado: o que foi digitado não se perde.
+        withContext(NonCancellable) {
+            labels.forEach { (id, label) -> store.setLabel(id, label) }
+            colors.forEach { (id, color) -> store.setColor(id, color) }
+        }
+    }
 
     /** Atualiza nome/ícone do servidor e o nome do usuário a partir do backend. */
     suspend fun refreshInfo(accountId: String) {
@@ -117,6 +155,8 @@ class AccountManager(
 
     /** Sai da conta no servidor (melhor esforço) e apaga tudo o que é dela no aparelho. */
     suspend fun remove(accountId: String) = mutex.withLock {
+        pendingLabels.update { it - accountId }
+        pendingColors.update { it - accountId }
         val session = sessions.value[accountId]
         if (session != null) {
             runCatching { session.auth.logout() }

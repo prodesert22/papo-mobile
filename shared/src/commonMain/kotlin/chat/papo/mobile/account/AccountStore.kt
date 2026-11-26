@@ -58,8 +58,12 @@ class AccountStore(db: RegistryDb, private val io: CoroutineDispatcher) {
         queries.updateServer(name, icon, id)
     }
 
-    suspend fun setAppearance(id: String, label: String?, color: Int?) = withContext(io) {
-        queries.updateAppearance(label?.trim()?.takeIf { it.isNotEmpty() }, color?.toLong(), id)
+    suspend fun setLabel(id: String, label: String?) = withContext(io) {
+        queries.updateLabel(label?.trim()?.takeIf { it.isNotEmpty() }, id)
+    }
+
+    suspend fun setColor(id: String, color: Int?) = withContext(io) {
+        queries.updateColor(color?.toLong(), id)
     }
 
     suspend fun delete(id: String) = withContext(io) { queries.delete(id) }

@@ -130,17 +130,17 @@ fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> 
                 }
             }
 
-            LabelField(account) { label -> scope.launch { session.accounts.setAppearance(account.id, label, account.color) } }
+            LabelField(account) { label -> session.accounts.setLabel(account.id, label) }
             Spacer(Modifier.height(20.dp))
             Text(stringResource(Res.string.account_color), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(10.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 ColorSwatch(null, selected = account.color == null, stringResource(Res.string.account_color_none)) {
-                    scope.launch { session.accounts.setAppearance(account.id, account.label, null) }
+                    session.accounts.setColor(account.id, null)
                 }
                 AccountColors.forEach { argb ->
                     ColorSwatch(Color(argb), selected = account.color == argb, label = null) {
-                        scope.launch { session.accounts.setAppearance(account.id, account.label, argb) }
+                        session.accounts.setColor(account.id, argb)
                     }
                 }
             }

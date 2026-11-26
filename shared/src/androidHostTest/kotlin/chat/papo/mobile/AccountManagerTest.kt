@@ -15,7 +15,11 @@ import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -192,7 +196,9 @@ class AccountManagerTest {
         val f = Fixture(this)
         val first = f.manager(this).also { it.load() }
         val ana = first.begin(first.probe("papo.test")).login("ana", "Senha@123")
-        first.setAppearance(ana.account.id, "  Trabalho ", 0xFF112233.toInt())
+        first.setLabel(ana.account.id, "  Trabalho ")
+        first.setColor(ana.account.id, 0xFF112233.toInt())
+        first.flushAppearance()
         first.close()
 
         val second = f.manager(this).also { it.load() }
@@ -228,5 +234,118 @@ class AccountManagerTest {
         val manager = f.manager(this)
         assertFailsWith<InvalidServerUrl> { manager.probe("ftp://x") }
         assertEquals(0, f.backend.engine.requestHistory.size)
+    }
+
+    @Test
+    fun rotuloDigitadoEmPartesFicaInteiroMesmoComATelaJaFechada() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val ui = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+
+        // Uma tecla por chamada, como a tela; o escopo dela é cancelado antes de a última gravação rodar.
+        ui.launch { manager.setLabel(ana.account.id, "T") }
+        runCurrent()
+        ui.launch { manager.setLabel(ana.account.id, "Trabalho") }
+        runCurrent()
+        ui.cancel()
+        runCurrent()
+
+        assertEquals("Trabalho", manager.accounts.value.single().label)
+    }
+
+    @Test
+    fun variasTeclasSeguidasGravamSoAUltimaNaOrdemCerta() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+
+        "Trabalho".indices.forEach { manager.setLabel(ana.account.id, "Trabalho".take(it + 1)) }
+        runCurrent()
+
+        assertEquals("Trabalho", manager.accounts.value.single().label)
+    }
+
+    @Test
+    fun trocarACorLogoAposDigitarNaoVoltaORotulo() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+
+        manager.setLabel(ana.account.id, "Trabalho")
+        manager.setColor(ana.account.id, 0xFF112233.toInt())
+        runCurrent()
+
+        val account = manager.accounts.value.single()
+        assertEquals("Trabalho", account.label)
+        assertEquals(0xFF112233.toInt(), account.color)
+    }
+
+    @Test
+    fun tirarACorNaoMudaORotuloENemOContrario() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        manager.setLabel(ana.account.id, "Casa")
+        manager.setColor(ana.account.id, 0xFF112233.toInt())
+        runCurrent()
+
+        manager.setColor(ana.account.id, null)
+        runCurrent()
+        assertEquals("Casa", manager.accounts.value.single().label)
+        assertNull(manager.accounts.value.single().color)
+
+        manager.setLabel(ana.account.id, "   ") // vazio de verdade: volta ao padrão
+        runCurrent()
+        assertNull(manager.accounts.value.single().label)
+    }
+
+    @Test
+    fun rotuloECorDeUmaContaNaoMudamOutra() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+
+        manager.setLabel(ana.account.id, "Ana")
+        manager.setLabel(bia.account.id, "Bia")
+        manager.setColor(bia.account.id, 0xFF445566.toInt())
+        runCurrent()
+
+        val byId = manager.accounts.value.associateBy { it.id }
+        assertEquals("Ana", byId.getValue(ana.account.id).label)
+        assertNull(byId.getValue(ana.account.id).color)
+        assertEquals("Bia", byId.getValue(bia.account.id).label)
+        assertEquals(0xFF445566.toInt(), byId.getValue(bia.account.id).color)
+    }
+
+    @Test
+    fun flushGravaOQueAindaEsperaOEscritor() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+
+        manager.setLabel(ana.account.id, "Trabalho")
+        manager.setColor(ana.account.id, 0xFF112233.toInt())
+        manager.flushAppearance() // sem o escritor ter rodado
+
+        val saved = f.store.get(ana.account.id)!!
+        assertEquals("Trabalho", saved.label)
+        assertEquals(0xFF112233.toInt(), saved.color)
+    }
+
+    @Test
+    fun contaRemovidaNaoGuardaRotuloPendente() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+
+        manager.setLabel(ana.account.id, "Trabalho")
+        manager.setColor(ana.account.id, 1)
+        manager.remove(ana.account.id)
+        manager.flushAppearance()
+        runCurrent()
+
+        assertNull(f.store.get(ana.account.id))
     }
 }
