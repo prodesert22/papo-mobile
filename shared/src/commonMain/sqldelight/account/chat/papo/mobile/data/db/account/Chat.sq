@@ -199,6 +199,10 @@ SELECT * FROM message WHERE id = ?;
 countMessagesIn:
 SELECT COUNT(*) FROM message WHERE id IN ?;
 
+-- Só a posição (instante e id) de várias mensagens, sem ler o conteúdo.
+selectMessagePositions:
+SELECT id, created_us FROM message WHERE id IN ?;
+
 oldestMessage:
 SELECT * FROM message WHERE channel_id = ? ORDER BY created_us ASC, id ASC LIMIT 1;
 
