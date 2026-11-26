@@ -107,6 +107,15 @@ têm recado e descrição; o banner vem de `GET /media/{sha}` (com sessão) e o 
 As mensagens de webhook trazem sempre o mesmo `webhook_id` para o mesmo webhook (derivado do nome). No `papo`: "Robô de Deploy"
 (sem avatar), "Monitor de Status" (duas mensagens seguidas, com avatar persistente em `/webhooks/{id}/avatar`, rota pública) e
 "Maria da Ponte", com um autor temporário cujo `avatar_url` é uma URL externa que o app nunca deve pedir.
+
+Editar o próprio perfil (sempre ligado; só o próprio usuário, senão 403). Cada rota valida como a OpenAPI diz e responde 400
+`application/problem+json` com o motivo em `detail`; o que foi gravado volta em `GET /users/{id}/profile` e na lista de usuários:
+`PUT /users/{id}` pede `nickname`, `status` (a frase de status) e `description` (limites 32, 64 e 512 em code points) e aceita `typing`
+(até 64; ausente ou nulo não muda); `PUT /users/{id}/avatar` e `/banner` pedem base64 e formato (GIF, JPEG, JPG, PNG, WEBP), conferem
+os bytes mágicos, no máximo 2 MiB e 512 px (avatar) ou 2048 px (banner); banner vazio remove, avatar vazio é recusado (a OpenAPI não
+documenta remover o avatar); `PUT /users/{id}/status` aceita `away`, `busy` ou nulo. Corpo acima de 4 MiB: 413. Eventos: `presence_update`
+(apelido, frase, digitação e status) depois do perfil e do status, `avatar_update` depois do avatar. O status escolhido pelo PUT vale na
+próxima conexão (`presence_sync`); o `status` semeado de `ana` e `caio` só aparece no perfil.
 """
 import base64
 import hashlib
@@ -978,10 +987,11 @@ def seed_webhooks():
 def profile_view(name):
     """O perfil de `name` como a OpenAPI (`UserProfile`) o descreve; sem avatar, `avatar_blob` e `avatar_format` não vão."""
     user, extra = USERS[name], PROFILES.get(name, {})
-    avatar = {"avatar_blob": base64.b64encode(extra["avatar"]).decode(), "avatar_format": "PNG"} if extra.get("avatar") else {}
+    avatar = ({"avatar_blob": base64.b64encode(extra["avatar"]).decode(), "avatar_format": extra.get("avatar_format", "PNG")}
+              if extra.get("avatar") else {})
     return {"id": user["id"], "username": name, "nickname": user.get("nickname"), **avatar,
             "banner_media": extra.get("banner"), "description": extra.get("description"), "status": extra.get("status"),
-            "status_message": extra.get("status_message"), "typing": None, "status_updated_at": None,
+            "status_message": extra.get("status_message"), "typing": extra.get("typing"), "status_updated_at": None,
             "created_at": user["created"], "roles": summary(name)["roles"]}
 
 
@@ -1001,7 +1011,7 @@ def serve_profiles(handler, path):
         avatar = PROFILES.get(name_of(found.group(1)) or "", {}).get("avatar")
         if avatar is None:
             return False   # quem não tem avatar segue a rota de sempre, que responde 404
-        handler.serve("image/png", avatar, 0)
+        handler.serve(PROFILES[name_of(found.group(1))].get("avatar_mime", "image/png"), avatar, 0)
         return True
     profile = re.fullmatch(r"/users/([^/]+)/profile", path)
     media = re.fullmatch(r"/media/([^/]+)", path)
@@ -1015,6 +1025,158 @@ def serve_profiles(handler, path):
         handler.serve(*MEDIA[media.group(1)], 0)
     else:
         handler.problem(404, "Recurso não encontrado", "usuário não encontrado" if profile else "mídia não encontrada")
+    return True
+
+
+# ── Editar o próprio perfil ──────────────────────────────────────────────────────────────────────
+# `PUT /users/{id}`, `/avatar`, `/banner` e `/status`, na forma da OpenAPI. Tudo sobre eles fica aqui; o resto do fake só chama
+# `serve_profile_writes` (de `chat_write`) e `presence_of` (do WebSocket).
+
+CHOSEN = {}   # nome do usuário -> "away" ou "busy": o status escolhido por `PUT /users/{id}/status` (vale na próxima conexão)
+PROFILE_LIMITS = {"nickname": 32, "status": 64, "description": 512, "typing": 64}   # code points, como o `utf8.RuneCountInString` do servidor
+IMAGE_FORMATS = {"GIF", "JPEG", "JPG", "PNG", "WEBP"}
+IMAGE_MIMES = {"GIF": "image/gif", "JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+IMAGE_MAX_BYTES = 2 * 1024 * 1024
+IMAGE_MAX_SIDE = {"avatar": 512, "banner": 2048}
+BODY_MAX_BYTES = 4 * 1024 * 1024   # `middleware/bodylimit.go`
+
+
+def presence_of(name):
+    """O status que o usuário mostra enquanto está online: o que escolheu (away, busy) ou online."""
+    return CHOSEN.get(name, "online")
+
+
+def emit_presence(name):
+    """O `presence_update` de `name` com o que o perfil guarda dele, para todos; offline se não há conexão aberta."""
+    with LOCK:
+        online = any(entry[0] == uid(name) for entry in SOCKETS)
+    extra = PROFILES.get(name, {})
+    emit({"type": "presence_update", "user_id": uid(name), "status": presence_of(name) if online else "offline",
+          "status_message": extra.get("status_message"), "typing": extra.get("typing"), "nickname": USERS[name].get("nickname")})
+
+
+def image_info(data):
+    """(formato, largura, altura) de uma imagem GIF, JPEG, PNG ou WEBP pelos bytes mágicos; None se não é nenhuma delas ou está cortada."""
+    try:
+        if data[:6] in (b"GIF87a", b"GIF89a"):
+            return "GIF", *struct.unpack("<HH", data[6:10])
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            return "PNG", *struct.unpack(">II", data[16:24])
+        if data[:2] == b"\xff\xd8":
+            at = 2
+            while at + 9 < len(data):
+                if data[at] != 0xFF:
+                    return None
+                marker, length = data[at + 1], struct.unpack(">H", data[at + 2:at + 4])[0]
+                if marker in range(0xC0, 0xD0) and marker not in (0xC4, 0xC8, 0xCC):   # SOF: altura e largura
+                    height, width = struct.unpack(">HH", data[at + 5:at + 9])
+                    return "JPEG", width, height
+                at += 2 + length
+            return None
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            chunk = data[12:16]
+            if chunk == b"VP8X":
+                return "WEBP", 1 + int.from_bytes(data[24:27], "little"), 1 + int.from_bytes(data[27:30], "little")
+            if chunk == b"VP8L":
+                bits = int.from_bytes(data[21:25], "little")
+                return "WEBP", 1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF)
+            if chunk == b"VP8 ":
+                width, height = struct.unpack("<HH", data[26:30])
+                return "WEBP", width & 0x3FFF, height & 0x3FFF
+    except struct.error:
+        return None
+    return None
+
+
+def check_image(field, encoded, declared, kind):
+    """Valida um avatar ou banner como o servidor: base64, formato declarado, bytes mágicos, tamanho e lado. Devolve
+    (bytes, formato, mime) ou o texto do 400."""
+    if not isinstance(encoded, str) or not isinstance(declared, str):
+        return "%s e %s_format devem ser texto" % (field, field)
+    if declared.upper() not in IMAGE_FORMATS:
+        return "%s_format deve ser GIF, JPEG, JPG, PNG ou WEBP" % field
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except ValueError:
+        return "%s não é base64 válido" % field
+    if len(data) > IMAGE_MAX_BYTES:
+        return "%s passa de 2MB" % field
+    info = image_info(data)
+    if info is None:
+        return "%s não é uma imagem GIF, JPEG, PNG ou WEBP" % field
+    kind_found, width, height = info
+    if max(width, height) > IMAGE_MAX_SIDE[field]:
+        return "%s passa de %dpx (tem %dx%d)" % (field, IMAGE_MAX_SIDE[field], width, height)
+    return data, kind_found, IMAGE_MIMES[kind_found]
+
+
+def update_profile_text(name, data):
+    """O corpo de `PUT /users/{id}`: devolve None se gravou ou o texto do 400."""
+    for field in ("nickname", "status", "description"):
+        if not isinstance(data.get(field), str):
+            return "%s é obrigatório" % field
+    if data.get("typing") is not None and not isinstance(data["typing"], str):
+        return "typing deve ser texto"
+    for field, limit in PROFILE_LIMITS.items():
+        value = data.get(field)
+        if isinstance(value, str) and len(value) > limit:
+            return "%s passa de %d caracteres (tem %d)" % (field, limit, len(value))
+    USERS[name]["nickname"] = data["nickname"] or None
+    extra = PROFILES.setdefault(name, {})
+    extra["status_message"] = data["status"] or None
+    extra["description"] = data["description"] or None
+    if data.get("typing") is not None:
+        extra["typing"] = data["typing"] or None
+    return None
+
+
+def serve_profile_writes(handler, method, path, me):
+    """Responde os PUT do próprio perfil; devolve False se `path` não é um deles."""
+    found = re.fullmatch(r"/users/([^/]+)(|/avatar|/banner|/status)", path)
+    if method != "PUT" or not found:
+        return False
+    target, part = found.groups()
+    if target != me:
+        handler.forbidden("só o próprio usuário pode alterar o perfil")
+        return True
+    if int(handler.headers.get("Content-Length") or 0) > BODY_MAX_BYTES:
+        handler.close_connection = True   # o corpo não é lido: a conexão não serve mais
+        handler.problem(413, "Corpo grande demais", "o corpo passa de 4MB")
+        return True
+    data, name = handler.body(), name_of(me)
+    extra = PROFILES.setdefault(name, {})
+    problem = None
+    if part == "":
+        problem = update_profile_text(name, data)
+        if problem is None:
+            emit_presence(name)
+    elif part == "/status":
+        value = data.get("status")
+        if value not in (None, "away", "busy"):
+            problem = "status deve ser away, busy ou null"
+        else:
+            extra["status"] = value
+            if value is None:
+                CHOSEN.pop(name, None)
+            else:
+                CHOSEN[name] = value
+            emit_presence(name)
+    elif part == "/banner" and data.get("banner") == "":
+        extra.pop("banner", None)   # vazio remove, sem evento (o banner não tem)
+    else:
+        field = part[1:]
+        checked = check_image(field, data.get(field), data.get(field + "_format"), field)
+        if isinstance(checked, str):
+            problem = checked
+        elif field == "avatar":
+            extra["avatar"], extra["avatar_format"], extra["avatar_mime"] = checked[0], checked[1], checked[2]
+            emit({"type": "avatar_update", "user_id": me})
+        else:
+            extra["banner"] = add_media(checked[0], checked[2])
+    if problem is None:
+        handler.send(200, {"response": "ok"})
+    else:
+        handler.problem(400, "Parâmetro inválido", problem)
     return True
 
 
@@ -1152,9 +1314,9 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             SOCKETS.append(entry)
             online = {s[0] for s in SOCKETS}
-        members = [{"user_id": u["id"], "status": "online" if u["id"] in online else "offline", "status_message": None, "user_voice": []} for u in USERS.values()]
+        members = [{"user_id": u["id"], "status": presence_of(n) if u["id"] in online else "offline", "status_message": None, "user_voice": []} for n, u in USERS.items()]
         emit({"type": "presence_sync", "members": members}, only={me})
-        emit({"type": "presence_update", "user_id": me, "status": "online", "status_message": None, "typing": None, "nickname": None})
+        emit({"type": "presence_update", "user_id": me, "status": presence_of(s["user"]), "status_message": None, "typing": None, "nickname": None})
         try:
             while True:
                 head = self.rfile.read(2)
@@ -1322,6 +1484,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def chat_write(self, method, url, me):
         path = url.path
+        if serve_profile_writes(self, method, path, me):
+            return
         if method == "POST" and path == "/messages":
             ctype = self.headers.get("Content-Type", "")
             control = send_control()
