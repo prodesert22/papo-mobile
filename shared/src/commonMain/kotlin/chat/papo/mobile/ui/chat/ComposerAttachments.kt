@@ -56,6 +56,7 @@ import chat.papo.mobile.chat.MAX_ATTACHMENTS
 import chat.papo.mobile.chat.MAX_ATTACHMENTS_TOTAL_MB
 import chat.papo.mobile.chat.MAX_ATTACHMENT_MB
 import chat.papo.mobile.chat.isGif
+import chat.papo.mobile.chat.isImage
 import chat.papo.mobile.chat.isVisualMedia
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.media.carriesLocation
@@ -64,6 +65,7 @@ import chat.papo.mobile.resources.attach_badge_gif
 import chat.papo.mobile.resources.attach_file
 import chat.papo.mobile.resources.attach_has_location
 import chat.papo.mobile.resources.attach_photo_video
+import chat.papo.mobile.resources.attach_preview_open
 import chat.papo.mobile.resources.attach_problem_file_too_large
 import chat.papo.mobile.resources.attach_problem_too_many
 import chat.papo.mobile.resources.attach_problem_total_too_large
@@ -117,9 +119,12 @@ internal fun AttachButton(enabled: Boolean, freeSlots: Int, onFiles: (List<Outgo
     }
 }
 
-/** Os arquivos escolhidos e ainda não enviados, numa fileira que rola: prévia de 72 dp para foto e vídeo, nome e tamanho para o resto. */
+/**
+ * Os arquivos escolhidos e ainda não enviados, numa fileira que rola: prévia de 72 dp para foto e vídeo, nome e tamanho
+ * para o resto. Tocar na prévia de uma imagem chama [onOpen], que a mostra inteira.
+ */
 @Composable
-internal fun AttachmentTray(files: List<OutgoingFile>, onRemove: (OutgoingFile) -> Unit) {
+internal fun AttachmentTray(files: List<OutgoingFile>, onRemove: (OutgoingFile) -> Unit, onOpen: (OutgoingFile) -> Unit) {
     if (files.isEmpty()) return
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -127,7 +132,11 @@ internal fun AttachmentTray(files: List<OutgoingFile>, onRemove: (OutgoingFile) 
     ) {
         files.forEach { file ->
             key(file) {
-                if (file.isVisualMedia() && !file.unavailable) PictureCard(file, onRemove = { onRemove(file) }) else FileCard(file, onRemove = { onRemove(file) })
+                if (file.isVisualMedia() && !file.unavailable) {
+                    PictureCard(file, onRemove = { onRemove(file) }, onOpen = { onOpen(file) })
+                } else {
+                    FileCard(file, onRemove = { onRemove(file) })
+                }
             }
         }
     }
@@ -143,12 +152,15 @@ internal fun AttachmentProblem.text(): String = when (this) {
 
 /** Foto ou vídeo: a prévia reduzida, com o selo GIF e o ✕ por cima, e, quando a foto traz a localização, o aviso ao lado. */
 @Composable
-private fun PictureCard(file: OutgoingFile, onRemove: () -> Unit) {
+private fun PictureCard(file: OutgoingFile, onRemove: () -> Unit, onOpen: () -> Unit) {
     val previewPx = with(LocalDensity.current) { PREVIEW_SIZE.roundToPx() }
     val image by rememberPreview(file, previewPx)
     val hasLocation by produceState(false, file) { value = withContext(Dispatchers.Default) { file.carriesLocation() } }
     Row(Modifier.height(PREVIEW_SIZE).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        Box(Modifier.size(PREVIEW_SIZE)) {
+        // O ✕ está dentro da caixa e recebe o toque antes dela; só a imagem tem o que mostrar inteiro (o vídeo segue como está).
+        val openLabel = stringResource(Res.string.attach_preview_open)
+        val open = if (file.isImage()) Modifier.clickable(role = Role.Button, onClickLabel = openLabel, onClick = onOpen) else Modifier
+        Box(Modifier.size(PREVIEW_SIZE).then(open)) {
             val picture = image
             if (picture != null) {
                 Image(picture.rememberedPainter(), contentDescription = file.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

@@ -1,9 +1,14 @@
 package chat.papo.mobile.platform
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.graphics.Paint
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Size
@@ -43,9 +48,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.FileNotFoundException
+import kotlin.time.Duration.Companion.seconds
 
 class AndroidPlatformUi(context: Context) : PlatformUi {
     private val app = context.applicationContext
+
+    // Quem abre a folha de compartilhamento: com a atividade ela entra na pilha do app, sem a atividade precisa de uma pilha nova.
+    private val host = context
     private val images = AndroidImages(app)
 
     // Paint não é seguro entre threads; as consultas são curtas, então um cadeado basta.
@@ -205,6 +214,23 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
     }
 
     override suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage? = images.decode(bytes, maxPx, animate)
+
+    override fun shareMedia(name: String, mimeType: String, bytes: ByteArray): Boolean {
+        val type = SharedMedia.sendType(mimeType)
+        val token = SharedMedia.store.put(name, type, bytes)
+        // O depósito só se limpa quando alguém o usa; sem isto os bytes de um compartilhamento esquecido ficariam na memória.
+        Handler(Looper.getMainLooper()).postDelayed({ SharedMedia.store.purge() }, (SharedMediaStore.LIFETIME + 1.seconds).inWholeMilliseconds)
+        val uri = SharedMedia.uri(app, token, name)
+        val chooser = Intent.createChooser(SharedMedia.sendIntent(uri, name, type), null)
+        if (host !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            host.startActivity(chooser)
+            true
+        } catch (e: ActivityNotFoundException) {
+            SharedMedia.store.discard(token)
+            false
+        }
+    }
 }
 
 /**

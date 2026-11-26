@@ -4,10 +4,12 @@ import android.content.Context
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.PlatformDeps
 import chat.papo.mobile.core.AppDispatchers
+import chat.papo.mobile.security.LockState
 import io.ktor.client.engine.okhttp.OkHttp
 import android.os.Process
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 /**
@@ -29,7 +31,7 @@ fun createAndroidGraph(context: Context, activities: ActivityHolder): AppGraph {
     val crypto = JcaCrypto()
     // O app ainda não criou nenhum WebView: o que um processo encerrado com o player do YouTube aberto deixou sai agora.
     YouTubeWebData.sweepLeftovers(app)
-    return AppGraph(
+    val graph = AppGraph(
         PlatformDeps(
             crypto = crypto,
             keyStore = AndroidMasterKeyStore(app, crypto, activities),
@@ -44,4 +46,7 @@ fun createAndroidGraph(context: Context, activities: ActivityHolder): AppGraph {
             webPlayerData = YouTubeWebData,
         ),
     )
+    // O que ficou para outros aplicativos lerem (Compartilhar) não sobrevive ao bloqueio nem ao apagamento dos dados locais.
+    graph.scope.launch { graph.lock.state.collect { if (it !is LockState.Unlocked) SharedMedia.store.clear() } }
+    return graph
 }

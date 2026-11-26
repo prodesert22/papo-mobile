@@ -96,6 +96,17 @@ interface PlatformUi {
      */
     @Composable
     fun YouTubePlayer(videoId: String, modifier: Modifier, fullscreenButton: Boolean, onOpenExternally: () -> Unit)
+
+    // 02 · trilha A · onda 2 (visualizador)
+
+    /**
+     * Abre a folha de compartilhamento do sistema com [bytes] como um arquivo chamado [name], do tipo [mimeType]. O
+     * conteúdo vai da memória para o aplicativo escolhido, sem arquivo em disco, e só para quem o sistema autorizar
+     * naquele compartilhamento: cada aplicativo lê uma vez, e o que não foi lido some em poucos minutos ou quando o app
+     * trava. Devolve false se não foi possível abrir a folha (nenhum aplicativo atende). Não altera [bytes], que pode ser
+     * o array do cache de mídia.
+     */
+    fun shareMedia(name: String, mimeType: String, bytes: ByteArray): Boolean
 }
 
 val LocalPlatformUi = staticCompositionLocalOf<PlatformUi> { error("PlatformUi não fornecido") }
