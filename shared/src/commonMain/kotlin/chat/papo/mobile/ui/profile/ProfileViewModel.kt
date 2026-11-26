@@ -62,7 +62,7 @@ class ProfileViewModel(private val session: AccountSession, val userId: String) 
         viewModelScope.launch {
             try {
                 val profile = session.profiles.get(userId)
-                _state.update { if (it.load is ProfileLoad.Loaded) it.copy(load = ProfileLoad.Loaded(profile)) else it }
+                _state.update { it.copy(load = ProfileLoad.Loaded(profile)) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -285,12 +285,8 @@ class EditProfileViewModel(
                 Planned(
                     SaveStep.Banner,
                     send = { session.api.updateBanner(me, UpdateBannerRequest("", "")) },
-                    afterSaved = {
-                        _state.update { state ->
-                            val loaded = state.load
-                            state.copy(banner = BannerChange.Keep, load = if (loaded is EditLoad.Ready) EditLoad.Ready(loaded.profile.copy(bannerSha = null)) else loaded)
-                        }
-                    },
+                    // Quem decide se ainda há banner é a leitura do perfil que vem depois de salvar.
+                    afterSaved = { _state.update { it.copy(banner = BannerChange.Keep) } },
                 ),
             )
         }

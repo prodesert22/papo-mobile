@@ -204,6 +204,24 @@ class EditProfileViewModelTest {
     }
 
     @Test
+    fun seALeituraDepoisDeSalvarFalharOQueFoiSalvoContinuaSalvo() = runTest {
+        val server = Server()
+        val vm = viewModel(server)
+        vm.ready()
+        vm.edit(ProfileField.Nickname, "Ana L.")
+
+        server.profileStatus = HttpStatusCode.InternalServerError
+        vm.save()
+        val done = vm.finished()
+
+        assertEquals(StepOutcome.Saved, done.outcomes[SaveStep.Text])
+        assertEquals("Ana L.", done.saved.nickname)
+        assertIs<EditLoad.Ready>(done.load)
+        assertFalse(done.canSave)
+        assertEquals(listOf("GET /users/u1/profile", "PUT /users/u1", "GET /users/u1/profile"), server.requests.toList())
+    }
+
+    @Test
     fun aFraseDeDigitacaoSoVaiQuandoMudou() = runTest {
         val server = Server()
         val vm = viewModel(server)

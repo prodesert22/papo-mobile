@@ -200,6 +200,25 @@ class OwnStatusViewModelTest {
     }
 
     @Test
+    fun umEventoQueNaoTrazAEscolhaNaoEncerraOSalvando() = runTest {
+        val server = Server().also { it.gate = CompletableDeferred() }
+        val session = session(server)
+        session.presenceOf("online")
+        val vm = OwnStatusViewModel(session)
+        vm.state.first { it.selected == OwnStatus.Available }
+
+        choose(vm, OwnStatus.Busy)
+        TestResources.waitUntil { server.bodies.isNotEmpty() }
+        session.presenceOf("away")
+        runCurrent()
+
+        assertTrue(vm.state.value.saving)
+        assertEquals(OwnStatus.Busy, vm.state.value.selected)
+        server.gate!!.complete(Unit)
+        vm.state.first { !it.saving }
+    }
+
+    @Test
     fun falhaVoltaAEscolhaAnteriorEDizPorqueSemRepetir() = runTest {
         val cases = mapOf(
             HttpStatusCode.InternalServerError to MutationResult.Uncertain,
