@@ -63,6 +63,33 @@ def start_fake(extra_env, stderr=subprocess.DEVNULL):
     raise AssertionError("o fake terminou ao subir, em cinco portas")
 
 
+def raw_call(port, method, path, token=None, headers=None, body=None):
+    """Chamada sem jar de cookies, com o `Auth` dado: (status, cabeçalhos, corpo). O corpo é JSON lido, se a resposta é JSON; senão bytes."""
+    request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", json.dumps(body).encode() if body is not None else None,
+                                     dict(headers or {}), method=method)
+    if body is not None:
+        request.add_header("Content-Type", "application/json")
+    if token is not None:
+        request.add_header("Cookie", f"Auth={token}")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            status, head, payload = response.status, response.headers, response.read()
+    except urllib.error.HTTPError as error:
+        with error:
+            status, head, payload = error.code, error.headers, error.read()
+    return status, head, (json.loads(payload) if "json" in head.get("Content-Type", "") else payload)
+
+
+def auth_cookie(headers):
+    """(valor, atributos) do único `Set-Cookie: Auth=...` da resposta."""
+    cookies = headers.get_all("Set-Cookie")
+    assert cookies is not None and len(cookies) == 1, cookies
+    pair, _, attributes = cookies[0].partition(";")
+    name, _, value = pair.partition("=")
+    assert name == "Auth", cookies
+    return value, attributes
+
+
 class Session:
     """Um usuário logado no fake: cookie `Auth` e chamadas JSON."""
 
@@ -73,6 +100,10 @@ class Session:
         status, body = self.call("POST", "/auth/login", {"username": username, "password": PASSWORDS[username]})
         assert status == 200, (username, status, body)
         self.id = body["user"]["id"]
+
+    def auth(self):
+        """O valor do cookie `Auth` que o jar guarda agora."""
+        return next(c.value for c in self.jar if c.name == "Auth")
 
     def call(self, method, path, body=None, raw=None, content_type="application/json"):
         data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
@@ -820,9 +851,24 @@ class SessaoVencidaTest(VideoTestCase):
         self.assertEqual(206, ana.fetch(f"/attachments/{clip}", {"Range": "bytes=0-9"})[0])
         status, _, _ = ana.fetch(f"/attachments/{clip}", {"Range": "bytes=10-19"})
         self.assertEqual(401, status)
-        # Depois do 401 o cliente renova (o fake mantém a sessão) e repete: o mesmo pedido agora passa.
+        # Depois do 401 o cliente renova (o fake rotaciona o cookie, que o jar guarda) e repete: o mesmo pedido agora passa.
         self.assertEqual(200, ana.call("POST", "/auth/refresh")[0])
         status, headers, body = ana.fetch(f"/attachments/{clip}", {"Range": "bytes=10-19"})
+        self.assertEqual((206, CLIP[10:20]), (status, body))
+        self.assertEqual(206, ana.fetch(f"/attachments/{clip}", {"Range": "bytes=20-29"})[0])
+
+
+    def test_renovar_depois_do_401_troca_o_cookie_e_o_trecho_repetido_passa_com_o_novo(self):
+        ana, clip = self.login("ana"), self.clip()["id"]
+        stale = ana.auth()
+        self.assertEqual(206, ana.fetch(f"/attachments/{clip}", {"Range": "bytes=0-9"})[0])
+        self.assertEqual(401, ana.fetch(f"/attachments/{clip}", {"Range": "bytes=10-19"})[0])
+        self.assertEqual(200, ana.call("POST", "/auth/refresh")[0])
+        fresh = ana.auth()
+        # O cliente só repete se o cookie mudou: é o que `PapoClient.refresh` confere.
+        self.assertNotEqual(stale, fresh)
+        # O trecho que deu 401 passa com o cookie novo sozinho, sem o jar.
+        status, _, body = raw_call(self.port, "GET", f"/attachments/{clip}", fresh, {"Range": "bytes=10-19"})
         self.assertEqual((206, CLIP[10:20]), (status, body))
         self.assertEqual(206, ana.fetch(f"/attachments/{clip}", {"Range": "bytes=20-29"})[0])
 
@@ -836,6 +882,115 @@ class PrimeiroPedido401Test(VideoTestCase):
         self.assertEqual(401, ana.fetch(f"/attachments/{clip}")[0])
         status, _, body = ana.fetch(f"/attachments/{clip}")
         self.assertEqual((200, CLIP), (status, body))
+
+
+class RotacaoTestCase(FakeTestCase):
+    """Sessões sem jar, para dizer qual token cada chamada leva."""
+
+    def enter(self, username="ana"):
+        """Entra sem jar: (token, atributos do cookie do login, id do usuário)."""
+        status, head, body = raw_call(self.port, "POST", "/auth/login", body={"username": username, "password": PASSWORDS[username]})
+        self.assertEqual(200, status)
+        token, attributes = auth_cookie(head)
+        return token, attributes, body["user"]["id"]
+
+    def refresh(self, token):
+        status, head, body = raw_call(self.port, "POST", "/auth/refresh", token)
+        self.assertEqual(200, status)
+        return auth_cookie(head)[0], body["connection"]["id"]
+
+    def connections(self, token):
+        status, _, body = raw_call(self.port, "GET", "/auth/connected_devices", token)
+        self.assertEqual(200, status)
+        return [c["id"] for c in body["connections"]]
+
+
+class RenovacaoDaSessaoTest(RotacaoTestCase):
+    """`POST /auth/refresh` rotaciona o token como o servidor: `Auth` novo, conexão nova, o antigo vale só na janela de graça."""
+
+    def test_devolve_outro_auth_com_os_atributos_do_login_e_a_conexao_nova(self):
+        old, login_attributes, _ = self.enter()
+        [login_connection] = self.connections(old)
+        status, head, body = raw_call(self.port, "POST", "/auth/refresh", old)
+        self.assertEqual(200, status)
+        fresh, attributes = auth_cookie(head)
+        self.assertTrue(fresh.startswith("jwt-"))
+        self.assertNotEqual(old, fresh)
+        self.assertEqual(login_attributes, attributes)
+        self.assertNotEqual(login_connection, body["connection"]["id"])
+        # Só a conexão nova está ativa: a antiga não aparece na lista.
+        self.assertEqual([body["connection"]["id"]], self.connections(fresh))
+
+    def test_o_cookie_novo_vale_e_e_do_mesmo_usuario(self):
+        old, _, user_id = self.enter()
+        fresh, _ = self.refresh(old)
+        status, _, body = raw_call(self.port, "GET", "/auth/whoami", fresh)
+        self.assertEqual((200, "ana", user_id), (status, body["username"], body["id"]))
+
+    def test_o_cookie_antigo_ainda_vale_na_janela_de_graca(self):
+        old, _, user_id = self.enter()
+        self.refresh(old)
+        status, _, body = raw_call(self.port, "GET", "/auth/whoami", old)
+        self.assertEqual((200, user_id), (status, body["id"]))
+
+    def test_refresh_com_o_token_trocado_devolve_o_ativo_sem_rotacionar_de_novo(self):
+        old, _, _ = self.enter()
+        fresh, connection = self.refresh(old)
+        again, again_connection = self.refresh(old)
+        self.assertEqual((fresh, connection), (again, again_connection))
+        self.assertEqual([connection], self.connections(fresh))
+
+    def test_refresh_encadeado_leva_o_token_mais_antigo_ate_o_ativo(self):
+        first, _, _ = self.enter()
+        second, _ = self.refresh(first)
+        third, connection = self.refresh(second)
+        self.assertEqual(3, len({first, second, third}))
+        self.assertEqual((third, connection), self.refresh(first))
+        self.assertEqual([connection], self.connections(third))
+
+    def test_refresh_sem_cookie_ou_com_token_desconhecido_e_401_sem_set_cookie(self):
+        for token in (None, "jwt-que-nao-existe"):
+            status, head, _ = raw_call(self.port, "POST", "/auth/refresh", token)
+            self.assertEqual(401, status, token)
+            self.assertIsNone(head.get("Set-Cookie"), token)
+
+    def test_refresh_depois_do_logout_e_401_mesmo_pelo_token_antigo_da_cadeia(self):
+        old, _, _ = self.enter()
+        fresh, _ = self.refresh(old)
+        self.assertEqual(204, raw_call(self.port, "POST", "/auth/logout", fresh)[0])
+        self.assertEqual(401, raw_call(self.port, "POST", "/auth/refresh", fresh)[0])
+        self.assertEqual(401, raw_call(self.port, "POST", "/auth/refresh", old)[0])
+
+    def test_o_websocket_aceita_o_cookie_novo(self):
+        ana = self.login("ana")
+        self.assertEqual(200, ana.call("POST", "/auth/refresh")[0])
+        self.watch(ana)
+
+
+class ReusoDeTokenTrocadoTest(RotacaoTestCase):
+    """Com a janela de graça em 0, o token trocado reapresentado é reuso: o servidor revoga todas as sessões do usuário."""
+    env = {"FAKE_REFRESH_GRACE": "0"}
+
+    def test_token_trocado_fora_da_janela_e_401_e_revoga_todas_as_sessoes_do_usuario(self):
+        old, _, _ = self.enter("ana")
+        other, _, _ = self.enter("ana")
+        fresh, _ = self.refresh(old)
+        bia, _, _ = self.enter("bia")
+        for token in (fresh, other, bia):
+            self.assertEqual(200, raw_call(self.port, "GET", "/auth/whoami", token)[0])
+        self.assertEqual(401, raw_call(self.port, "GET", "/auth/whoami", old)[0])
+        # A reapresentação revogou as sessões do usuário, a nova e a outra; as de outros usuários seguem.
+        self.assertEqual(401, raw_call(self.port, "GET", "/auth/whoami", fresh)[0])
+        self.assertEqual(401, raw_call(self.port, "GET", "/auth/whoami", other)[0])
+        self.assertEqual(401, raw_call(self.port, "POST", "/auth/refresh", fresh)[0])
+        self.assertEqual(200, raw_call(self.port, "GET", "/auth/whoami", bia)[0])
+        # Reapresentar de novo não tem mais o que revogar, e segue recusado.
+        self.assertEqual(401, raw_call(self.port, "GET", "/auth/whoami", old)[0])
+
+    def test_refresh_com_o_token_trocado_serve_o_ativo_mesmo_fora_da_janela_pois_a_rota_nao_passa_pelo_middleware(self):
+        old, _, _ = self.enter()
+        fresh, connection = self.refresh(old)
+        self.assertEqual((fresh, connection), self.refresh(old))
 
 
 class SemVideosTest(FakeTestCase):
@@ -1125,6 +1280,9 @@ class VideoInvalidoTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             Path(folder, "leia-me.txt").write_text("sem vídeo")
             self.assertIn("FAKE_VIDEO_DIR: nenhum", self.run_with(FAKE_VIDEO_DIR=folder))
+
+    def test_janela_de_graca_ilegivel_derruba_o_fake_com_mensagem(self):
+        self.assertIn("FAKE_REFRESH_GRACE: valor ilegível", self.run_with(FAKE_REFRESH_GRACE="um minuto"))
 
     def test_velocidade_ou_pedido_ilegivel_derruba_o_fake_com_mensagem(self):
         self.assertIn("FAKE_VIDEO_KBPS e FAKE_VIDEO_401_ONCE: valor ilegível", self.run_with(FAKE_VIDEO_KBPS="rápido"))

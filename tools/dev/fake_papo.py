@@ -48,7 +48,7 @@ o `Range` e o status de cada pedido, para conferir que buscar no vídeo pede só
                               sensível, em retrato (360x640) e sem dimensões
     FAKE_VIDEO_KBPS=500       entrega os vídeos a 500 KB/s, para o player ter o que bufferizar
     FAKE_VIDEO_401_ONCE=N     responde 401 uma vez, no N-ésimo pedido de vídeo desde a partida (1 = o primeiro): o
-                              cliente renova a sessão (`POST /auth/refresh`, que aqui segue valendo) e repete
+                              cliente renova a sessão (`POST /auth/refresh`) e repete com o cookie novo
 
 Vídeos de embed (ligados por um link, sem variável). Uma mensagem com `https://videos.example.com/...` recebe, ~1 s
 depois de criada, um `message_embeds_update` com um embed `opengraph`: título (o nome do arquivo do link), imagem
@@ -58,6 +58,13 @@ mesmo nome que o fim do link, ou o primeiro do mesmo tipo; sem semente, 404 (o q
 serve). O relay segue `FAKE_VIDEO_KBPS` e `FAKE_VIDEO_401_ONCE`, que contam os pedidos dele junto com os dos anexos.
 
     FAKE_RELAY_502=1          o relay responde 502 (falha na origem, ou as vagas globais do servidor cheias) a todo pedido
+
+Renovação da sessão (sempre ligada). `POST /auth/refresh` rotaciona o token como o servidor (`RefreshConnection`): troca o
+`Auth` por outro, com outro id de conexão e o mesmo usuário, no `Set-Cookie`. O token trocado ainda vale por 60 s (a janela de
+graça do servidor); reapresentado depois disso é reuso: o servidor revoga todas as sessões do usuário e responde 401. Um
+`refresh` com o token trocado devolve o token ativo da cadeia, sem rotacionar de novo.
+
+    FAKE_REFRESH_GRACE=0      janela de graça em segundos (60 por padrão); 0 faz o token trocado ser reuso de imediato
 """
 import base64
 import hashlib
@@ -84,7 +91,10 @@ SERVER_PASSWORD = sys.argv[2] if len(sys.argv) > 2 else None
 NAME = f"Boteco {PORT}" if SERVER_PASSWORD is None else f"Clube Fechado {PORT}"
 
 USERS = {}      # username -> {id, password}
-SESSIONS = {}   # token -> {user, id, created}
+SESSIONS = {}   # token -> {user, id, created}: as sessões ativas
+REPLACED = {}   # token trocado pelo refresh -> {session, at, tip}: a sessão dele, quando foi trocado e o token que o substituiu
+REFRESH = {"grace": 60.0}   # FAKE_REFRESH_GRACE: segundos em que o token trocado ainda vale (RefreshGracePeriod do servidor)
+SESSION_COOKIE = "Auth=%s; Path=/; HttpOnly; SameSite=Strict"
 
 
 CHANNELS = [
@@ -271,6 +281,54 @@ def video_session_expires():
     with LOCK:
         VIDEO["requests"] += 1
         return VIDEO["requests"] == VIDEO["expire_at"]
+
+
+def refresh_settings():
+    """Lê FAKE_REFRESH_GRACE; valor ilegível derruba o fake na partida, não no primeiro refresh."""
+    try:
+        REFRESH["grace"] = float(os.environ.get("FAKE_REFRESH_GRACE") or REFRESH["grace"])
+    except ValueError as error:
+        raise SystemExit("FAKE_REFRESH_GRACE: valor ilegível (%s)" % error)
+
+
+def open_session(username):
+    """Registra uma conexão de sessão nova do usuário e devolve o token dela."""
+    token = "jwt-" + uuid.uuid4().hex
+    SESSIONS[token] = {"user": username, "id": str(uuid.uuid4()), "created": now()}
+    return token
+
+
+def session_of(token):
+    """A sessão que o cookie `Auth` autentica, como o `CheckUserConnection` do servidor: o token ativo vale; o trocado pelo
+    refresh vale só na janela de graça. Depois dela é reuso: o servidor revoga todas as sessões do usuário e recusa."""
+    with LOCK:
+        if token in SESSIONS:
+            return SESSIONS[token]
+        replaced = REPLACED.get(token)
+        if replaced is None:
+            return None
+        if time.monotonic() - replaced["at"] < REFRESH["grace"]:
+            return replaced["session"]
+        user = replaced["session"]["user"]
+        for revoked in [t for t, v in SESSIONS.items() if v["user"] == user]:
+            del SESSIONS[revoked]
+        sys.stderr.write("token trocado reapresentado fora da janela de graça: sessões de %s revogadas\n" % user)
+        return None
+
+
+def refresh_session(token):
+    """O `RefreshConnection` do servidor: troca o token ativo por um novo (outro id de conexão, mesmo usuário) e devolve
+    (token novo, sessão nova). Um token já trocado (refresh concorrente) devolve o ativo da cadeia, sem trocar de novo.
+    Token desconhecido, ou de uma cadeia revogada, devolve None."""
+    with LOCK:
+        if token in SESSIONS:
+            old = SESSIONS.pop(token)
+            fresh = open_session(old["user"])
+            REPLACED[token] = {"session": old, "at": time.monotonic(), "tip": fresh}
+            return fresh, SESSIONS[fresh]
+        while token in REPLACED:
+            token = REPLACED[token]["tip"]
+        return (token, SESSIONS[token]) if token in SESSIONS else None
 
 
 def embed_seed(link):
@@ -760,7 +818,7 @@ class Handler(BaseHTTPRequestHandler):
         self.problem(403, "Acesso negado", detail)
 
     def session(self):
-        s = SESSIONS.get(self.cookie())
+        s = session_of(self.cookie())
         if s is None:
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
         return s
@@ -831,7 +889,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def websocket(self):
-        s = SESSIONS.get(self.cookie())
+        s = session_of(self.cookie())
         if s is None:
             return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
         me = uid(s["user"])
@@ -902,13 +960,13 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(404, "Não encontrado", "Sem avatar")
             return True
         m = re.fullmatch(r"/attachments/([^/]+)(/thumbnail)?", path)
-        if m and self.cookie() not in SESSIONS:
+        if m and session_of(self.cookie()) is None:
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
             return True
         if m and m.group(1) in FILES:
             self.attachment(m.group(1))
             return True
-        s = SESSIONS.get(self.cookie())
+        s = session_of(self.cookie())
         embed = re.fullmatch(r"/embeds/([^/]+)(/video)?", path)
         if embed and s is None:
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
@@ -1310,7 +1368,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.problem(401, "Não autorizado", "Senha do servidor incorreta")
         elif self.path in ("/auth/login", "/auth/register"):
-            if SERVER_PASSWORD is not None and self.cookie() != "temp-token" and self.cookie() not in SESSIONS:
+            if SERVER_PASSWORD is not None and self.cookie() != "temp-token" and session_of(self.cookie()) is None:
                 return self.problem(401, "Não autorizado", "Servidor não público: valide a senha do servidor antes")
             username, password = data.get("username", ""), data.get("password", "")
             if self.path == "/auth/register":
@@ -1323,17 +1381,18 @@ class Handler(BaseHTTPRequestHandler):
             user = USERS.get(username)
             if user is None or user["password"] != password:
                 return self.problem(401, "Não autorizado", "Usuário ou senha incorretos")
-            token = "jwt-" + uuid.uuid4().hex
-            SESSIONS[token] = {"user": username, "id": str(uuid.uuid4()), "created": now()}
+            token = open_session(username)
             self.send(200, {"user": {"id": user["id"], "username": username}, "connection_violation": False},
-                      cookie=f"Auth={token}; Path=/; HttpOnly; SameSite=Strict")
+                      cookie=SESSION_COOKIE % token)
         elif self.path == "/auth/logout":
             SESSIONS.pop(self.cookie(), None)
             self.send(204, cookie="Auth=; Path=/; Max-Age=0")
         elif self.path == "/auth/refresh":
-            s = self.session()
-            if s:
-                self.send(200, {"connection": {"id": s["id"], "created_at": s["created"]}})
+            renewed = refresh_session(self.cookie())
+            if renewed is None:
+                return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+            token, s = renewed
+            self.send(200, {"connection": {"id": s["id"], "created_at": s["created"]}}, cookie=SESSION_COOKIE % token)
         elif self.path == "/auth/drop_connection":
             s = self.session()
             if s:
@@ -1414,6 +1473,7 @@ if __name__ == "__main__":
             moment = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=i // 2, microseconds=(i % 4) * 250000)
             react(crowd, keys[i % 3], uid(name), nano(moment))
     video_settings()
+    refresh_settings()
     RELAY["fail"] = os.environ.get("FAKE_RELAY_502", "") not in ("", "0")
     if os.environ.get("FAKE_VIDEO_DIR"):
         seed_videos(os.environ["FAKE_VIDEO_DIR"])
