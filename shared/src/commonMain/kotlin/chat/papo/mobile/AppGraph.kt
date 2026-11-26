@@ -11,6 +11,7 @@ import chat.papo.mobile.data.db.DatabaseFactory
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.db.registry.RegistryDb
 import chat.papo.mobile.media.MediaCache
+import chat.papo.mobile.media.VideoPosterExtractor
 import chat.papo.mobile.security.AppLock
 import chat.papo.mobile.security.AppPrefs
 import chat.papo.mobile.security.LockState
@@ -37,6 +38,8 @@ class PlatformDeps(
     val mediaDirectory: String,
     /** Motor de chamadas; null onde a plataforma ainda não tem um. */
     val voice: VoiceEngineFactory? = null,
+    /** Tira o quadro da capa dos vídeos; null onde a plataforma ainda não sabe, e então os cartões ficam sem capa. */
+    val videoPosters: VideoPosterExtractor? = null,
     /** Versão instalada do app, como mostrada ao usuário. */
     val appVersion: String = "",
 )
@@ -124,6 +127,7 @@ class AppGraph(private val platform: PlatformDeps) {
                 platform.databases.delete(DatabaseFactory.accountDbName(id))
                 MediaCache.deleteDirectory(mediaDir(id))
             },
+            posterExtractor = platform.videoPosters,
         )
         accounts.load()
         AppSession(accounts, keys, CallManager(platform.voice, sessionScope), driver, sessionScope)

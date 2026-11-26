@@ -74,6 +74,15 @@ fun videoAspect(width: Int?, height: Int?): Float {
     return (width.toFloat() / height).coerceIn(MIN_ASPECT, MAX_ASPECT)
 }
 
+/**
+ * A proporção da caixa do cartão de um anexo de vídeo: a do vídeo ([width] e [height]) e, se o servidor não as deu, a da
+ * miniatura que ele gerou ([thumbnailWidth] e [thumbnailHeight]), que mostra o mesmo quadro. Sem nenhuma das duas, 16:9.
+ */
+fun videoCardAspect(width: Int?, height: Int?, thumbnailWidth: Int?, thumbnailHeight: Int?): Float {
+    val hasSize = width != null && height != null && width > 0 && height > 0
+    return if (hasSize) videoAspect(width, height) else videoAspect(thumbnailWidth, thumbnailHeight)
+}
+
 /** Por que o vídeo não tocou. A tela comum escolhe o texto de cada um; o `androidMain` só informa o motivo. */
 enum class PlaybackFailure {
     /**

@@ -1,5 +1,8 @@
 package chat.papo.mobile.ui.chat
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -8,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -32,20 +36,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.PlayableMedia
-import chat.papo.mobile.media.videoAspect
+import chat.papo.mobile.media.PosterSource
+import chat.papo.mobile.media.posterKey
+import chat.papo.mobile.media.posterSource
+import chat.papo.mobile.media.videoCardAspect
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.resources.video_download_failed
 import chat.papo.mobile.resources.video_play
 import chat.papo.mobile.ui.components.formatBytes
+import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.media.rememberAttachmentDownload
 import org.jetbrains.compose.resources.stringResource
 
@@ -54,16 +64,36 @@ private val MaxWidth = 280.dp
 private val MaxHeight = 320.dp
 
 /**
- * Cartão de um vídeo anexado: uma caixa com a proporção do vídeo (a lista não pula; sem dimensões, 16:9) e o ▶ no meio,
- * e embaixo o nome, o tamanho e o **Baixar**. Tocar a caixa chama [onPlay]. O servidor não gera capa de vídeo, então a
- * caixa não tem imagem. Vídeo marcado como sensível fica escondido, com nome, tamanho e Baixar, até o primeiro toque
- * (o segundo toca), como a imagem.
+ * Cartão de um vídeo anexado: uma caixa com a proporção do vídeo (a lista não pula; sem dimensões, a da miniatura do
+ * servidor, e sem ela 16:9) e o ▶ no meio, e embaixo o nome, o tamanho e o **Baixar**. Tocar a caixa chama [onPlay].
+ *
+ * A capa é a miniatura do servidor, quando ele a gerou (só gera para imagem, então quase nunca), ou um quadro do próprio
+ * vídeo tirado neste aparelho (`VideoPosters`), guardado no cache cifrado. Enquanto não chega a caixa fica como está e
+ * a capa aparece com um fade, sob o ▶; sem capa (formato que o aparelho não lê, falha) o cartão fica simples. Vídeo
+ * marcado como sensível fica escondido, sem pedir capa nenhuma, com nome, tamanho e Baixar, até o primeiro toque (o
+ * segundo toca), como a imagem.
  */
 @Composable
 internal fun VideoAttachment(session: AccountSession, attachment: AttachmentDto, media: PlayableMedia, onPlay: (PlayableMedia) -> Unit) {
     var revealed by remember(attachment.id) { mutableStateOf(!attachment.isSensitive) }
     val download = rememberAttachmentDownload(session, attachment)
-    val aspect = videoAspect(media.width, media.height)
+    val aspect = videoCardAspect(media.width, media.height, attachment.thumbnailWidth, attachment.thumbnailHeight)
+    val source = posterSource(attachment, revealed)
+    // O nome decide a chave do cache; o `fetch` só roda se a capa ainda não está lá, e então só pelo caminho da fonte.
+    val poster by rememberMediaImage(
+        session,
+        when (source) {
+            PosterSource.Server -> "att-thumb/${attachment.id}"
+            PosterSource.Extract -> posterKey(session.accountId, attachment.id)
+            PosterSource.None -> null
+        },
+    ) {
+        when (source) {
+            PosterSource.Server -> session.api.attachmentThumbnail(attachment.id)
+            PosterSource.Extract -> session.videoPosters.poster(attachment.id, media.url, attachment.sizeBytes)
+            PosterSource.None -> null
+        }
+    }
     // A largura sai da proporção para a caixa caber na altura máxima: um vídeo em retrato fica estreito, não esticado.
     Column(
         Modifier
@@ -79,6 +109,13 @@ internal fun VideoAttachment(session: AccountSession, attachment: AttachmentDto,
             contentAlignment = Alignment.Center,
         ) {
             if (revealed) {
+                val bitmap = poster
+                // A capa entra com um fade em vez de aparecer de uma vez; o valor só é lido ao desenhar, sem recompor por quadro.
+                val alpha by animateFloatAsState(if (bitmap != null) 1f else 0f, tween(durationMillis = 250), label = "poster")
+                // Inteira, sem recorte: o quadro tem a proporção real do vídeo, que a caixa só segue de perto.
+                if (bitmap != null) {
+                    Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }, contentScale = ContentScale.Fit)
+                }
                 PlayBadge()
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {

@@ -7,6 +7,7 @@ import chat.papo.mobile.data.api.AuthCookieStore
 import chat.papo.mobile.data.api.MemoryCookieStore
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.api.ServerDto
+import chat.papo.mobile.media.VideoPosterExtractor
 import chat.papo.mobile.security.AppPrefs
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +54,7 @@ class AccountManager(
     private val scope: CoroutineScope,
     private val openResources: (accountId: String) -> AccountResources,
     private val deleteLocalData: (accountId: String) -> Unit,
+    private val posterExtractor: VideoPosterExtractor? = null,
 ) {
     private var foreground = true
 
@@ -142,7 +144,7 @@ class AccountManager(
         val sessionScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext.job))
         val cookies = StoredCookie(account.id, cookie)
         val client = PapoClient(engine, account.server, cookies)
-        val session = AccountSession(account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io, dispatchers.background)
+        val session = AccountSession(account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io, dispatchers.background, posterExtractor)
         if (foreground) session.start()
         return session
     }

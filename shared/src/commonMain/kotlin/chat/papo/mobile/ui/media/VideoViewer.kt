@@ -36,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -204,6 +205,11 @@ internal fun VideoViewer(
     // A barra de título acompanha os controles do player: some com eles e deixa o vídeo limpo.
     var controlsVisible by remember { mutableStateOf(true) }
     val resume = remember { Resume(startAtMs) }
+    // Enquanto o vídeo está aberto as capas dos cartões esperam: o player e elas disputariam o limite de pedidos.
+    DisposableEffect(session) {
+        session.videoPosters.playerOpened()
+        onDispose { session.videoPosters.playerClosed() }
+    }
     // Tela cheia de verdade: sem a largura padrão do diálogo e sem deixar a janela ao redor das barras do sistema. A
     // barra de título abaixo já respeita os recuos, então nada importante fica sob elas.
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {

@@ -14,6 +14,8 @@ import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.ws.WsClient
 import chat.papo.mobile.media.MediaCache
+import chat.papo.mobile.media.VideoPosterExtractor
+import chat.papo.mobile.media.VideoPosters
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -32,11 +34,14 @@ class AccountSession(
     resources: AccountResources,
     io: CoroutineDispatcher,
     background: CoroutineDispatcher = io,
+    posterExtractor: VideoPosterExtractor? = null,
 ) {
     private val driver = resources.driver
     val media: MediaCache = resources.media
     val auth = AuthApi(client)
     val api = ChatApi(client)
+    /** Fila das capas de vídeo desta conta: uma extração por vez, pelo cliente dela. */
+    val videoPosters = VideoPosters(client, posterExtractor)
     private val db = AccountDb(driver)
     val emojis = EmojiCatalog(api, media, db.metaQueries, scope, io, background)
     val recentEmojis = RecentEmojis(db.metaQueries, scope, io)
