@@ -107,6 +107,20 @@ interface PlatformUi {
      * o array do cache de mídia.
      */
     fun shareMedia(name: String, mimeType: String, bytes: ByteArray): Boolean
+
+    // 02 · trilha B · onda 3 (teclado)
+
+    /**
+     * O modificador que faz um campo de texto de `TextFieldState` receber, pelo teclado (GIF, figurinha, imagem) e ao colar,
+     * imagens e vídeos como anexos: cada um chega descrito como um [OutgoingFile], com o conteúdo já lido (até
+     * [RECEIVED_MEDIA_MAX_BYTES] cada), porque o acesso que o teclado dá ao conteúdo é temporário. Passa para [onMedia] só o
+     * que é imagem ou vídeo; o resto (texto colado) fica para o campo. Um item que não pôde ser lido, ou que passa do limite,
+     * chega com [OutgoingFile.unavailable]. Roda na thread principal, dentro da entrega do conteúdo.
+     */
+    fun receiveMedia(onMedia: (List<OutgoingFile>) -> Unit): Modifier
 }
+
+/** Tamanho máximo de cada imagem ou vídeo recebido pelo teclado ou colado: ele fica na memória até ser enviado ou tirado. */
+const val RECEIVED_MEDIA_MAX_BYTES = 20 * 1024 * 1024
 
 val LocalPlatformUi = staticCompositionLocalOf<PlatformUi> { error("PlatformUi não fornecido") }

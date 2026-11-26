@@ -56,6 +56,7 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
     // Quem abre a folha de compartilhamento: com a atividade ela entra na pilha do app, sem a atividade precisa de uma pilha nova.
     private val host = context
     private val images = AndroidImages(app)
+    private val receivedMedia = ReceivedMedia(app, images)
 
     // Paint não é seguro entre threads; as consultas são curtas, então um cadeado basta.
     private val glyphPaint = Paint()
@@ -231,6 +232,8 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
             false
         }
     }
+
+    override fun receiveMedia(onMedia: (List<OutgoingFile>) -> Unit): Modifier = receivedMedia.modifier(onMedia)
 }
 
 /**

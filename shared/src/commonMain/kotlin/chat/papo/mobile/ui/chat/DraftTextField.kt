@@ -1,17 +1,20 @@
 package chat.papo.mobile.ui.chat
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.OutputTransformation
+import androidx.compose.foundation.text.input.TextFieldDecorator
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TextFieldDefaults
@@ -19,22 +22,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.editableText
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -45,7 +42,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.takeOrElse
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.DraftField
 import chat.papo.mobile.chat.EmojiDraft
@@ -58,15 +54,18 @@ import kotlin.math.roundToInt
 // o Android reparte de um jeito que depende da posição na linha.
 private const val EMOJI_SLOT = '\u2003'
 private const val EMOJI_JOINER = '\u2060'
+private const val EMOJI_SHOWN = "$EMOJI_SLOT$EMOJI_JOINER"
 
 /** Linhas que o campo mostra antes de rolar. */
 private const val MAX_LINES = 6
 
 /**
  * Os emojis do servidor de uma conta no texto do compositor. O texto continua `:nome:` (o que se guarda, se envia e se copia):
- * esta [VisualTransformation] só troca, na tela, cada `:nome:` por um espaço da largura de um em, e [settle] faz o emoji se
- * comportar como um caractere só. Os `:nome:` que a conta não tem, e os de dentro de código ou de link, ficam como texto,
- * como na mensagem. Use uma instância por [idByName]: ela guarda a última busca, que o campo, a imagem e a edição pedem juntos.
+ * [output] só troca, na tela, cada `:nome:` por um espaço da largura de um em, e [input] faz o emoji se comportar como um
+ * caractere só ([settle]). Os `:nome:` que a conta não tem, e os de dentro de código ou de link, ficam como texto, como na
+ * mensagem. Use uma instância por [idByName]: ela guarda a última busca, que o campo, a imagem e a edição pedem juntos.
+ * Como [VisualTransformation] ([filter]) ela diz ao `TextFieldDefaults.DecorationBox` o que o campo mostra, para o
+ * texto de apoio sumir só quando não há nada a ver.
  */
 @Stable
 class DraftEmojis(private val idByName: Map<String, String>) : VisualTransformation {
@@ -80,6 +79,27 @@ class DraftEmojis(private val idByName: Map<String, String>) : VisualTransformat
             lastText = text
         }
         return lastFound
+    }
+
+    /**
+     * O que o campo mostra no lugar do texto: a mesma troca de [filter], feita no campo de `TextFieldState`, que tira das
+     * trocas o mapeamento das posições (o cursor e a seleção nunca ficam dentro de um emoji). Pelo fim, para as posições
+     * seguintes continuarem valendo enquanto se troca.
+     */
+    val output = OutputTransformation {
+        for (emoji in find(asCharSequence().toString()).asReversed()) replace(emoji.start, emoji.end, EMOJI_SHOWN)
+    }
+
+    /**
+     * A edição do usuário no campo (o teclado, uma seleção, colar), acertada para o emoji ser um caractere só ([settle]):
+     * apagar uma parte do `:nome:` apaga todo ele, e o cursor não fica no meio. Só entra uma troca de texto quando o
+     * acerto mudou o texto, porque trocar o texto encerra a composição do teclado.
+     */
+    val input = InputTransformation {
+        val typed = TextFieldValue(asCharSequence().toString(), selection)
+        val settled = settle(TextFieldValue(originalText.toString(), originalSelection), typed)
+        if (settled.text != typed.text) replace(0, length, settled.text)
+        selection = settled.selection
     }
 
     override fun filter(text: AnnotatedString): TransformedText {
@@ -120,15 +140,14 @@ class DraftEmojis(private val idByName: Map<String, String>) : VisualTransformat
 }
 
 /**
- * O campo de texto do compositor. É o `TextField` do Material, com [emojis] mostrados como imagem animada no lugar do
- * `:nome:`, no tamanho do texto. O campo cresce até [MAX_LINES] linhas e rola dali em diante; a rolagem é daqui e não
- * do campo, porque a imagem precisa rolar junto com o texto e o campo não diz quanto rolou.
+ * O campo de texto do compositor. É o `TextField` do Material sobre um [TextFieldState], com [emojis] mostrados como
+ * imagem animada no lugar do `:nome:`, no tamanho do texto. O campo cresce até [MAX_LINES] linhas e rola dali em diante,
+ * e as imagens rolam junto: a posição de cada uma vem do texto medido e desconta o quanto o campo rolou.
  */
 @Composable
 fun DraftTextField(
     session: AccountSession,
-    value: TextFieldValue,
-    onValueChange: (TextFieldValue) -> Unit,
+    state: TextFieldState,
     emojis: DraftEmojis,
     placeholder: @Composable () -> Unit,
     enabled: Boolean,
@@ -145,56 +164,51 @@ fun DraftTextField(
         else -> colors.unfocusedTextColor
     }
     val textStyle = LocalTextStyle.current.merge(TextStyle(color = textColor))
-    val textLayout = remember { mutableStateOf<TextLayoutResult?>(null) }
+    // O texto medido, como o campo o entrega: quem o lê (a posição das imagens) refaz a medição quando ele muda.
+    val textLayout = remember { mutableStateOf<(() -> TextLayoutResult?)?>(null) }
     val scroll = rememberScrollState()
-    var viewportHeight by remember { mutableIntStateOf(0) }
-    val lineHeight = textStyle.lineHeight.takeOrElse { textStyle.fontSize * 1.5f }
-    val maxHeight = with(LocalDensity.current) { lineHeight.toDp() } * MAX_LINES
-    val found = emojis.find(value.text)
-    // Com a rolagem aqui, o campo não leva mais o cursor para a vista quando só ele muda (setas, o gesto do teclado).
-    LaunchedEffect(value.selection.end, textLayout.value) {
-        scroll.showCursor(textLayout.value, EmojiDraft.toShown(found, value.selection.end), viewportHeight)
+    val found = emojis.find(state.text.toString())
+    val decorator = TextFieldDecorator { innerTextField ->
+        TextFieldDefaults.DecorationBox(
+            value = state.text.toString(),
+            innerTextField = {
+                Box(Modifier.fillMaxWidth().clipToBounds()) {
+                    innerTextField()
+                    EmojiImages(session, found, textLayout, scroll)
+                }
+            },
+            enabled = enabled,
+            singleLine = false,
+            visualTransformation = emojis,
+            interactionSource = interactionSource,
+            placeholder = placeholder,
+            shape = shape,
+            colors = colors,
+        )
     }
 
     CompositionLocalProvider(LocalTextSelectionColors provides colors.textSelectionColors) {
         BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = modifier
-                .defaultMinSize(minWidth = TextFieldDefaults.MinWidth, minHeight = TextFieldDefaults.MinHeight)
-                .semantics { editableText = AnnotatedString(value.text) },
+            state = state,
+            modifier = modifier.defaultMinSize(minWidth = TextFieldDefaults.MinWidth, minHeight = TextFieldDefaults.MinHeight),
             enabled = enabled,
+            inputTransformation = emojis.input,
             textStyle = textStyle,
             keyboardOptions = keyboardOptions,
-            visualTransformation = emojis,
-            onTextLayout = { textLayout.value = it },
+            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = MAX_LINES),
+            onTextLayout = { getResult -> if (textLayout.value !== getResult) textLayout.value = getResult },
             interactionSource = interactionSource,
             cursorBrush = SolidColor(colors.cursorColor),
-            decorationBox = { innerTextField ->
-                TextFieldDefaults.DecorationBox(
-                    value = value.text,
-                    innerTextField = {
-                        Box(Modifier.fillMaxWidth().heightIn(max = maxHeight).onSizeChanged { viewportHeight = it.height }.verticalScroll(scroll)) {
-                            innerTextField()
-                            EmojiImages(session, found, textLayout)
-                        }
-                    },
-                    enabled = enabled,
-                    singleLine = false,
-                    visualTransformation = emojis,
-                    interactionSource = interactionSource,
-                    placeholder = placeholder,
-                    shape = shape,
-                    colors = colors,
-                )
-            },
+            outputTransformation = emojis.output,
+            decorator = decorator,
+            scrollState = scroll,
         )
     }
 }
 
 /** Uma imagem por emoji de [found], sobre o espaço dele no texto de [textLayout]. */
 @Composable
-private fun EmojiImages(session: AccountSession, found: List<EmojiMatch>, textLayout: State<TextLayoutResult?>) {
+private fun EmojiImages(session: AccountSession, found: List<EmojiMatch>, textLayout: State<(() -> TextLayoutResult?)?>, scroll: ScrollState) {
     // A mesma imagem pode aparecer mais de uma vez: a chave tem o id e a ordem dele, para inserir outro emoji antes
     // não trocar a imagem de quem já estava (e decodificá-la de novo).
     val seen = HashMap<String, Int>()
@@ -202,18 +216,18 @@ private fun EmojiImages(session: AccountSession, found: List<EmojiMatch>, textLa
         val occurrence = seen.getOrElse(emoji.id) { 0 }
         seen[emoji.id] = occurrence + 1
         key(emoji.id, occurrence) {
-            EmojiImage(session, emoji.id, Modifier.inSlot(textLayout, EmojiDraft.slotOf(found, index)))
+            EmojiImage(session, emoji.id, Modifier.inSlot(textLayout, scroll, EmojiDraft.slotOf(found, index)))
         }
     }
 }
 
 /**
- * Põe a imagem sobre o caractere [shown] do texto mostrado, quadrada e no meio da linha. Sem posição (o texto ainda
- * não foi medido, ou o que foi medido é de antes), a imagem não aparece. A posição é lida na medição, então a
- * imagem acompanha o texto no mesmo quadro, sem recompor.
+ * Põe a imagem sobre o caractere [shown] do texto mostrado, quadrada e no meio da linha, descontando o quanto o campo
+ * rolou ([scroll]). Sem posição (o texto ainda não foi medido, ou o que foi medido é de antes), a imagem não aparece. A
+ * posição é lida na medição e a rolagem na colocação, então a imagem acompanha o texto no mesmo quadro, sem recompor.
  */
-private fun Modifier.inSlot(textLayout: State<TextLayoutResult?>, shown: Int): Modifier = layout { measurable, _ ->
-    val slot = slotAt(textLayout.value, shown)
+private fun Modifier.inSlot(textLayout: State<(() -> TextLayoutResult?)?>, scroll: ScrollState, shown: Int): Modifier = layout { measurable, _ ->
+    val slot = slotAt(textLayout.value?.invoke(), shown)
     if (slot == null) {
         layout(0, 0) {}
     } else {
@@ -222,19 +236,9 @@ private fun Modifier.inSlot(textLayout: State<TextLayoutResult?>, shown: Int): M
         layout(0, 0) {
             placeable.place(
                 (slot.left + (slot.width - side) / 2).roundToInt(),
-                (slot.top + (slot.height - side) / 2).roundToInt(),
+                (slot.top + (slot.height - side) / 2).roundToInt() - scroll.value,
             )
         }
-    }
-}
-
-/** Rola o mínimo para o cursor (a posição [cursor] do texto mostrado) ficar na janela de [viewport] pixels. */
-private suspend fun ScrollState.showCursor(layout: TextLayoutResult?, cursor: Int, viewport: Int) {
-    if (layout == null || viewport <= 0 || cursor > layout.layoutInput.text.length) return
-    val line = layout.getCursorRect(cursor)
-    when {
-        line.top < value -> scrollTo(line.top.roundToInt())
-        line.bottom > value + viewport -> scrollTo(line.bottom.roundToInt() - viewport)
     }
 }
 

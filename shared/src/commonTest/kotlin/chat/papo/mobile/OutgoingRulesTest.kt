@@ -10,6 +10,7 @@ import chat.papo.mobile.chat.isGif
 import chat.papo.mobile.chat.isImage
 import chat.papo.mobile.chat.isVisualMedia
 import chat.papo.mobile.chat.nameFor
+import chat.papo.mobile.chat.receivedMediaType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -193,5 +194,43 @@ class FileKindTest {
         assertTrue(sizedFile("a", 1, "Video/MP4").isVisualMedia())
         assertFalse(sizedFile("a", 1, "audio/ogg").isVisualMedia())
         assertFalse(sizedFile("a", 1, "application/pdf").isVisualMedia())
+    }
+}
+
+/** O tipo do que o teclado entrega ou o que se cola: só imagem e vídeo viram anexo, o resto fica para o campo de texto. */
+class ReceivedMediaTypeTest {
+    @Test
+    fun valeOTipoQueOProvedorDizQuandoEImagemOuVideo() {
+        assertEquals("image/gif", receivedMediaType("image/gif", listOf("image/png")))
+        assertEquals("video/mp4", receivedMediaType("VIDEO/MP4; codecs=avc1", emptyList()))
+    }
+
+    @Test
+    fun semTipoDoProvedorValeOQueOTecladoDeclarouQuandoESoUm() {
+        assertEquals("image/webp", receivedMediaType(null, listOf("image/webp")))
+        assertEquals("image/png", receivedMediaType("application/octet-stream", listOf("image/png", "IMAGE/PNG")))
+        assertEquals("image/gif", receivedMediaType("", listOf("image/gif")))
+    }
+
+    @Test
+    fun declaracaoComMaisDeUmTipoNaoDecide() {
+        assertNull(receivedMediaType(null, listOf("image/gif", "image/png")))
+        assertNull(receivedMediaType(null, emptyList()))
+    }
+
+    @Test
+    fun oProvedorTemAPalavraSobreADeclaracaoDoTeclado() {
+        assertNull(receivedMediaType("text/plain", listOf("image/gif")))
+        assertNull(receivedMediaType("application/pdf", listOf("image/gif")))
+    }
+
+    @Test
+    fun tipoGenericoOuQueNaoEMidiaNaoVira() {
+        assertNull(receivedMediaType("image/*", emptyList()))
+        assertNull(receivedMediaType(null, listOf("video/*")))
+        assertNull(receivedMediaType(null, listOf("*/*")))
+        assertNull(receivedMediaType(null, listOf("image/")))
+        assertNull(receivedMediaType("audio/ogg", emptyList()))
+        assertNull(receivedMediaType("text/plain", emptyList()))
     }
 }

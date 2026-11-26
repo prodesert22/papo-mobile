@@ -1,5 +1,7 @@
 package chat.papo.mobile
 
+import androidx.compose.foundation.text.input.TextFieldBuffer
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.OffsetMapping
@@ -92,5 +94,75 @@ class DraftEmojisTest {
         assertSame(OffsetMapping.Identity, none.filter(AnnotatedString("a:ok:")).offsetMapping)
         assertNotNull(none.find(":ok:"))
         assertTrue(none.find(":ok:").isEmpty())
+    }
+
+    // O campo de `TextFieldState`: a troca para a tela (`output`) e a edição acertada (`input`), como o campo as aplica.
+
+    /** O que o campo mostra para [text]: a troca de `output` aplicada a um estado novo. */
+    private fun shown(text: String): String {
+        val state = TextFieldState(text)
+        state.edit { with(emojis.output) { transformOutput() } }
+        return state.text.toString()
+    }
+
+    /**
+     * O estado depois de o usuário editar [text] (cursor em [cursor]) com [change] e o campo aplicar `input`: a edição e a
+     * transformação acontecem no mesmo `edit`, como na entrada do usuário, em que o original é o texto de antes.
+     */
+    private fun typed(text: String, cursor: Int, change: TextFieldBuffer.() -> Unit): TextFieldState {
+        val state = TextFieldState(text, TextRange(cursor))
+        state.edit {
+            change()
+            with(emojis.input) { transformInput() }
+        }
+        return state
+    }
+
+    @Test
+    fun oCampoMostraCadaEmojiComoUmEspacoDeUmEmSeguidoDeUmJuntaPalavras() {
+        assertEquals("oi $slot e $slot!", shown("oi :ok: e :party:!"))
+    }
+
+    @Test
+    fun oCampoNaoTrocaOQueNaoEEmoji() {
+        assertEquals("oi :nao_existe: `:ok:` fim", shown("oi :nao_existe: `:ok:` fim"))
+        assertEquals("", shown(""))
+    }
+
+    @Test
+    fun apagarOFimDoEmojiNoCampoApagaOEmojiInteiro() {
+        val state = typed("oi :ok:", 7) {
+            replace(length - 1, length, "") // o teclado apagou o `:` do fim
+            selection = TextRange(length)
+        }
+        assertEquals("oi ", state.text.toString())
+        assertEquals(TextRange(3), state.selection)
+    }
+
+    @Test
+    fun digitarDepoisDoEmojiNoCampoNaoMexeNoTexto() {
+        val state = typed("oi :ok:", 7) {
+            replace(length, length, "!")
+            selection = TextRange(length)
+        }
+        assertEquals("oi :ok:!", state.text.toString())
+        assertEquals(TextRange(8), state.selection)
+    }
+
+    @Test
+    fun cursorQueEntrouNoEmojiNoCampoSaiParaABorda() {
+        val state = typed("a:ok:b", 1) { selection = TextRange(3) }
+        assertEquals("a:ok:b", state.text.toString())
+        assertEquals(TextRange(5), state.selection)
+    }
+
+    @Test
+    fun editarTextoSemEmojiNoCampoFicaComoFoi() {
+        val state = typed("oi", 2) {
+            replace(length, length, " tudo")
+            selection = TextRange(length)
+        }
+        assertEquals("oi tudo", state.text.toString())
+        assertEquals(TextRange(7), state.selection)
     }
 }

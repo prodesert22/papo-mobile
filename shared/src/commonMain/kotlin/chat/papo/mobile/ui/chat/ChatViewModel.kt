@@ -1,9 +1,8 @@
 package chat.papo.mobile.ui.chat
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.coerceIn
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -289,7 +288,7 @@ class ChatViewModel(
         // Editar uma segunda mensagem em seguida volta ao mesmo rascunho de antes, não ao texto da primeira.
         if (stashed == null) stashed = StashedDraft(draft.text, _state.value.replyTo)
         val shown = renderMentions(message.content) { chat.users.value[it]?.username }
-        draft = TextFieldValue(shown, TextRange(shown.length))
+        replaceDraft(shown)
         _state.update { it.copy(editing = message, replyTo = null, files = emptyList()) }
     }
 
@@ -336,9 +335,17 @@ class ChatViewModel(
 
     // Rascunho
 
-    /** O que está escrito no compositor. Mora aqui, e não na tela, para sobreviver a sair da conversa e voltar. */
-    var draft by mutableStateOf(TextFieldValue(""))
-        private set
+    /**
+     * O campo do compositor: o texto, o cursor e a composição do teclado. Mora aqui, e não na tela, para sobreviver a sair
+     * da conversa e voltar. A digitação o muda direto; [draftEdited] avisa o que isso significa para o rascunho.
+     */
+    val draftState = TextFieldState()
+
+    /** O que está escrito no compositor, com o cursor. */
+    val draft: TextFieldValue get() = TextFieldValue(draftState.text.toString(), draftState.selection)
+
+    /** O texto do compositor que o rascunho guardado e o aviso de "digitando" já levaram em conta. */
+    private var settledText = ""
 
     /** Texto e resposta de antes de uma edição, para voltar a eles quando ela acabar. Enquanto existe, nada é guardado. */
     private var stashed: StashedDraft? = null
@@ -352,14 +359,37 @@ class ChatViewModel(
         viewModelScope.launch { restoreDraft() }
     }
 
-    /** O compositor mudou (digitação, emoji, menção escolhida): guarda o rascunho e avisa que está digitando. */
+    /** O compositor foi mudado por quem não é o teclado (emoji, menção escolhida): põe [value] nele e guarda o rascunho. */
     fun onDraftChange(value: TextFieldValue) {
-        val changed = value.text != draft.text
-        draft = value
-        if (!changed) return
+        writeDraft(value)
+        draftEdited()
+    }
+
+    /**
+     * O texto do compositor mudou (digitação, emoji, menção escolhida): guarda o rascunho e avisa que está digitando. Sem
+     * mudança no texto (só o cursor andou) não faz nada, e pode ser chamada mais de uma vez para a mesma mudança.
+     */
+    fun draftEdited() {
+        val text = draft.text
+        if (text == settledText) return
+        settledText = text
         textChanged = true
-        if (value.text.isNotEmpty()) onTyping()
+        if (text.isNotEmpty()) onTyping()
         saveDraft()
+    }
+
+    /** Põe [value] no campo; só troca o texto se ele mudou, para não interromper a composição do teclado à toa. */
+    private fun writeDraft(value: TextFieldValue) {
+        draftState.edit {
+            if (toString() != value.text) replace(0, length, value.text)
+            selection = value.selection.coerceIn(0, length)
+        }
+    }
+
+    /** O texto veio de dentro (restaurar, editar, voltar de uma edição, enviar): é o novo ponto de partida, não digitação. */
+    private fun replaceDraft(text: String) {
+        writeDraft(TextFieldValue(text, TextRange(text.length)))
+        settledText = text
     }
 
     /** Guarda o compositor como rascunho da conversa; durante uma edição o que vale é o de antes dela. */
@@ -379,7 +409,8 @@ class ChatViewModel(
             return // sem ler o banco a conversa abre vazia, como se não houvesse rascunho
         }
         if (stashed != null) return
-        if (!textChanged) draft = TextFieldValue(saved.text, TextRange(saved.text.length))
+        // Digitação que o campo ainda não contou (o aviso vem no quadro seguinte) também vale como "já mexeu".
+        if (!textChanged && draft.text == settledText) replaceDraft(saved.text)
         if (_state.value.replyTo == null) _state.update { it.copy(replyTo = reply) }
     }
 
@@ -387,8 +418,7 @@ class ChatViewModel(
     private fun finishEdit() {
         val before = stashed
         stashed = null
-        val text = before?.text.orEmpty()
-        draft = TextFieldValue(text, TextRange(text.length))
+        replaceDraft(before?.text.orEmpty())
         _state.update { it.copy(editing = null, replyTo = before?.replyTo) }
     }
 
@@ -411,7 +441,7 @@ class ChatViewModel(
             chat.enqueue(channelId, content, s.replyTo?.id, s.files)
             pickedMentions.clear()
             _state.update { it.copy(replyTo = null, files = emptyList(), attachProblem = null, error = null) }
-            draft = TextFieldValue("")
+            replaceDraft("")
             session.drafts.save(channelId, null)
             session.drafts.flush()
             return
