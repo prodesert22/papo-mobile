@@ -56,6 +56,9 @@ class ChatApi(private val client: PapoClient) {
     /** Bytes do avatar, ou null se o usuário não tem um. */
     suspend fun avatar(userId: String): ByteArray? = bytesOrNull("/users/$userId/avatar")
 
+    /** Bytes do avatar persistente de um webhook (rota pública, sem cookie), ou null se ele não tem um. */
+    suspend fun webhookAvatar(webhookId: String): ByteArray? = bytesOrNull("/webhooks/$webhookId/avatar")
+
     suspend fun messages(
         channelId: String,
         since: String? = null,
