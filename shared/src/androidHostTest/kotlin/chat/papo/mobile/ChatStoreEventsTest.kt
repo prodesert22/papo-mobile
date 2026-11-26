@@ -181,7 +181,7 @@ class ChatStoreEventsTest {
         runCurrent()
         assertTrue(chat.channels.value.single().unread)
 
-        chat.enqueue("c1", "  minha  ", replyTo = null, files = listOf(OutgoingFile("f.png", "image/png", 3) { byteArrayOf(1, 2, 3) }))
+        chat.enqueue("c1", "  minha  ", replyTo = null, files = listOf(bytesFile("f.png", "image/png", byteArrayOf(1, 2, 3))))
         chat.outbox.first { it.isEmpty() } // o envio acontece em segundo plano e o motor falso responde em outra thread
         runCurrent()
 

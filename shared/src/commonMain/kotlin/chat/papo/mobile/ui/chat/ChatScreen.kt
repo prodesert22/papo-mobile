@@ -38,7 +38,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -125,6 +124,7 @@ import chat.papo.mobile.chat.EVERYONE_NAME
 import chat.papo.mobile.chat.EmojiCompletion
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiRef
+import chat.papo.mobile.chat.MAX_ATTACHMENTS
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.ServerEmoji
@@ -155,7 +155,6 @@ import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
 import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.channels_join_call
-import chat.papo.mobile.resources.chat_attach
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_emoji
 import chat.papo.mobile.resources.msg_react_more
@@ -175,7 +174,6 @@ import chat.papo.mobile.resources.chat_pinned_no_match
 import chat.papo.mobile.resources.chat_placeholder
 import chat.papo.mobile.resources.chat_placeholder_dm
 import chat.papo.mobile.resources.chat_read_only
-import chat.papo.mobile.resources.chat_remove_attachment
 import chat.papo.mobile.resources.chat_reply_continue
 import chat.papo.mobile.resources.chat_reply_not_reached
 import chat.papo.mobile.resources.chat_replying_to
@@ -203,9 +201,7 @@ import chat.papo.mobile.resources.presence_busy
 import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.switcher_title
-import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
-import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.rememberMediaPainter
 import chat.papo.mobile.ui.components.rememberedPainter
 import chat.papo.mobile.ui.components.text
@@ -568,6 +564,7 @@ fun ChatScreen(
                             onClose = viewModel::dismissReplyNotReached,
                         )
                     }
+                    state.attachProblem?.let { problem -> NoticeBar(problem.text(), viewModel::dismissAttachProblem) }
                     state.error?.let { error -> NoticeBar(error.text(), viewModel::dismissError) }
                 }
                 // Num trecho antigo quem leva de volta ao fim é a `OlderHistoryBar`.
@@ -915,7 +912,6 @@ private fun Composer(
     onCancelContext: () -> Unit,
     onSubmit: () -> Unit,
 ) {
-    val pickFiles = LocalPlatformUi.current.rememberFilePicker(onAddFiles)
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -1103,37 +1099,11 @@ private fun Composer(
                 }
             }
 
-            if (state.files.isNotEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    state.files.forEach { file ->
-                        Row(
-                            Modifier.clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.width(140.dp)) {
-                                Text(file.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                                Text(
-                                    formatBytes(file.size),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            IconButton(onClick = { onRemoveFile(file) }) {
-                                Icon(Icons.Filled.Close, stringResource(Res.string.chat_remove_attachment), Modifier.size(16.dp))
-                            }
-                        }
-                    }
-                }
-            }
+            AttachmentTray(state.files, onRemoveFile)
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
                 if (canAttach) {
-                    IconButton(onClick = pickFiles, enabled = state.editing == null) {
-                        Icon(Icons.Filled.AttachFile, contentDescription = stringResource(Res.string.chat_attach))
-                    }
+                    AttachButton(enabled = state.editing == null, freeSlots = MAX_ATTACHMENTS - state.files.size, onFiles = onAddFiles)
                 } else {
                     // O campo ocuparia o lugar do clipe: a folga mantém o recuo de quando ele existe.
                     Spacer(Modifier.width(8.dp))
@@ -1167,7 +1137,8 @@ private fun Composer(
                         Icon(Icons.Filled.EmojiEmotions, contentDescription = stringResource(Res.string.chat_emoji))
                     }
                 }
-                val canSend = !state.savingEdit && (draft.text.isNotBlank() || state.files.isNotEmpty())
+                // Um arquivo que o provedor já perdeu segura o envio até o usuário tirá-lo do compositor.
+                val canSend = !state.savingEdit && (draft.text.isNotBlank() || state.files.isNotEmpty()) && state.files.none { it.unavailable }
                 Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                     if (state.savingEdit) {
                         CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
