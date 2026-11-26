@@ -204,6 +204,9 @@ internal class YouTubeWebHolder(
         } catch (_: Exception) {
             return null
         }
+        // Do tamanho da caixa: sem isto o `AndroidView` o põe em WRAP_CONTENT, o WebView passa a medir a altura pelo
+        // conteúdo e o `height:100%` da página (o iframe do player) vira zero — o player toca, mas nada aparece.
+        view.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         harden(view)
         return view
     }
