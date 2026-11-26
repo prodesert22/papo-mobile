@@ -13,6 +13,12 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Servidores fechados, que pedem a senha do servidor antes do login.
 - Sessões que se renovam sozinhas e uma lista de dispositivos conectados para
   encerrar sessões.
+- As informações do servidor nas configurações da conta: nome, ícone, se é
+  público ou fechado, dono, e quantos membros, canais e cargos tem.
+- Troca de senha pelas configurações da conta, ou redefinição por um link na
+  tela de entrada. O endereço do link costuma ser o do site, não o da API do
+  servidor, então o app mostra os dois e pede confirmação antes de enviar quando
+  eles diferem.
 - Troca rápida que acha qualquer conversa de qualquer uma das suas contas, com
   menções e conversas não lidas primeiro.
 
@@ -109,6 +115,16 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Lista de membros do servidor: o botão no topo de um canal abre um painel que
   entra pela borda direita, com todos agrupados por presença e busca por nome.
   Toque em alguém para abrir o perfil.
+- Edição do próprio perfil: apelido, recado, descrição e frase de digitação, com
+  avatar e banner escolhidos da galeria. O app corta e reduz a imagem no
+  celular, tira a localização que ela carrega e mostra o resultado de cada
+  mudança. Também dá para remover o banner e escolher Disponível, Ausente ou
+  Ocupado pelo perfil ou pelas configurações da conta.
+- Bloqueio de pessoas pelo perfil, com lista e desbloqueio nas configurações da
+  conta. Bloquear remove a conversa direta e impede mensagens diretas nos dois
+  sentidos; as mensagens da pessoa nos canais continuam visíveis, e desbloquear
+  não traz a conversa de volta. A lista de nova conversa esconde quem você
+  bloqueou e avisa quando foi a outra pessoa que bloqueou você.
 - Mensagens enviadas por webhook levam o selo **APP** ao lado do nome e mostram o
   avatar do webhook.
 
@@ -124,8 +140,16 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 ## Limitações atuais
 
 - Sem notificações push: as mensagens só chegam com o app aberto.
-- Sem caixa de notificações, edição de perfil, preferências do usuário, bloqueio
-  de usuários e administração do servidor.
+- Sem caixa de notificações, preferências do usuário e administração do
+  servidor.
+- O avatar não pode ser removido depois de definido, só trocado, e a imagem é
+  cortada no centro, sem recorte manual. Avatar ou banner animado vai como está
+  quando cabe nos limites de tamanho e é recusado quando não cabe; não há status
+  "invisível".
+- Trocar a senha encerra todas as sessões da conta, inclusive esta, e o servidor
+  não confere a senha atual, então o app só pede confirmação. A checagem da senha
+  nova no app é básica (8 caracteres, uma maiúscula e um símbolo); o servidor pode
+  exigir mais.
 - A lista de membros mostra todos do servidor, não só quem pode ler o canal em
   que você está.
 - O avatar de um webhook só aparece quando está guardado no servidor. A mensagem
