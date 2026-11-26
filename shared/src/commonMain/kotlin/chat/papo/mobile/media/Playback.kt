@@ -69,8 +69,14 @@ fun relayVideo(server: ServerUrl, embed: EmbedDto): PlayableMedia? {
  * muito largo não ocupe a lista inteira. Sem dimensões válidas (o servidor só as dá para
  * alguns contêineres), 16:9.
  */
-fun videoAspect(width: Int?, height: Int?): Float {
-    if (width == null || height == null || width <= 0 || height <= 0) return DEFAULT_ASPECT
+fun videoAspect(width: Int?, height: Int?): Float = aspectOrNull(width, height) ?: DEFAULT_ASPECT
+
+/**
+ * A proporção largura/altura de [width] x [height], entre 0,5 e 2,5 como a do vídeo, ou null se alguma medida falta ou
+ * não é positiva: quem a usa decide o que fazer sem ela (a caixa de um embed espera a imagem chegar).
+ */
+fun aspectOrNull(width: Int?, height: Int?): Float? {
+    if (width == null || height == null || width <= 0 || height <= 0) return null
     return (width.toFloat() / height).coerceIn(MIN_ASPECT, MAX_ASPECT)
 }
 

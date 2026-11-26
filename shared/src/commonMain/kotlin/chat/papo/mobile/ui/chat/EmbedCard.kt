@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -35,16 +34,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.embedMediaAspect
 import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.media.PlayableMedia
+import chat.papo.mobile.media.aspectOrNull
 import chat.papo.mobile.media.relayVideo
 import chat.papo.mobile.ui.components.rememberMediaImage
 import kotlin.io.encoding.Base64
 
 /**
- * Cartão de um embed de link. Se ele traz um vídeo que o relay do servidor serve ([relayVideo]), a imagem (ou uma caixa
- * 16:9 sem imagem) leva o ▶ e tocar chama [onPlay]. Nada é pedido ao relay antes do toque: nem autoplay nem pré-carga,
- * porque cada vídeo aberto prende uma das poucas vagas do relay no servidor.
+ * Cartão de um embed de link. A imagem aparece inteira, na proporção dela ([embedMediaAspect]). Se o embed traz um vídeo que
+ * o relay do servidor serve ([relayVideo]), a caixa da imagem leva o ▶ e tocar nela chama [onPlay]. Nada é pedido ao relay
+ * antes do toque: nem autoplay nem pré-carga, porque cada vídeo aberto prende uma das poucas vagas do relay no servidor.
  */
 @Composable
 internal fun EmbedCard(session: AccountSession, embed: EmbedDto, onPlay: (PlayableMedia) -> Unit) {
@@ -78,40 +79,40 @@ internal fun EmbedCard(session: AccountSession, embed: EmbedDto, onPlay: (Playab
             embed.description?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
             }
-            if (video != null) {
+            if (video != null || hasImage) {
+                // A proporção das medidas do servidor, ou a da imagem quando ela chega; 16:9 até lá.
+                val aspect = embedMediaAspect(embed) ?: image?.let { aspectOrNull(it.width, it.height) } ?: PLACEHOLDER_ASPECT
                 Spacer(Modifier.height(8.dp))
-                EmbedVideoBox(image, onClick = { onPlay(video) })
-            } else {
-                image?.let { bitmap ->
-                    Spacer(Modifier.height(8.dp))
-                    Image(
-                        bitmap,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
+                EmbedMediaBox(image, aspect, video, onPlay)
             }
         }
     }
 }
 
 /**
- * A caixa do vídeo do embed: sempre 16:9, com a imagem do embed por baixo assim que ela chega (antes disso e sem imagem, o
- * fundo do cartão), para a lista não pular quando a imagem carrega. O ▶ fica por cima.
+ * A caixa da imagem do embed: com a proporção [aspect] (a lista não pula quando a imagem chega), na largura do cartão e
+ * no máximo [MediaMaxHeight] de altura, e a imagem inteira dentro dela (`Fit`, sem cortar as laterais nem o topo: uma
+ * imagem alta fica estreita). Com [video] o ▶ fica por cima e tocar em qualquer ponto chama [onPlay]; antes da imagem
+ * chegar, e sem ela, o fundo do cartão.
  */
 @Composable
-private fun EmbedVideoBox(image: ImageBitmap?, onClick: () -> Unit) {
+private fun EmbedMediaBox(image: ImageBitmap?, aspect: Float, video: PlayableMedia?, onPlay: (PlayableMedia) -> Unit) {
     Box(
         Modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
+            .heightIn(max = MediaMaxHeight)
+            .aspectRatio(aspect)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(role = Role.Button, onClick = onClick),
+            .then(if (video != null) Modifier.clickable(role = Role.Button) { onPlay(video) } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-        PlayBadge()
+        image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
+        if (video != null) PlayBadge()
     }
 }
+
+/** Altura máxima da imagem: uma imagem alta fica estreita, nunca cortada (como o cartão do vídeo anexado). */
+private val MediaMaxHeight = 320.dp
+
+/** Proporção da caixa enquanto não se sabe a da imagem: nem o servidor deu as medidas, nem ela chegou. */
+private const val PLACEHOLDER_ASPECT = 16f / 9f
