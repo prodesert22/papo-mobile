@@ -346,6 +346,8 @@
     <string name="viewer_share_failed">Não foi possível compartilhar</string>
     <string name="viewer_image_failed">Não foi possível abrir esta imagem</string>
     <string name="attach_preview_open">Ver a imagem inteira</string>
+    <!-- 02 · trilha B · 0.6.0-beta.2 (imagem de embed no visualizador) -->
+    <string name="embed_image_open">Abrir a imagem</string>
     <!-- 02 · trilha B · onda 2 (vídeo no cartão, YouTube) -->
     <string name="video_open_fullscreen">Abrir em tela cheia</string>
     <string name="embed_youtube_label">YouTube</string>

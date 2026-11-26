@@ -75,11 +75,15 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.LifecycleStartEffect
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.embedImageFile
 import chat.papo.mobile.data.api.AttachmentDto
+import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.media.PREVIEW_MAX_BYTES
 import chat.papo.mobile.media.PlaybackFailure
 import chat.papo.mobile.media.PosterSource
+import chat.papo.mobile.media.embedImageKey
+import chat.papo.mobile.media.fetchEmbedImage
 import chat.papo.mobile.media.guardGone
 import chat.papo.mobile.media.posterKey
 import chat.papo.mobile.media.posterSource
@@ -126,15 +130,16 @@ private const val MAX_ZOOM = 5f
 private const val NOTICE_MS = 3_000L
 
 /**
- * A mídia aberta no visualizador de uma conversa: a mensagem e o anexo em que ele abriu, mais a página em que está e, se
- * for de vídeo, o ponto em que toca. É o que sobrevive a girar o aparelho; a mídia sai das mensagens de novo.
+ * A mídia aberta no visualizador de uma conversa: a mensagem e a página em que ele abriu (um anexo ou a imagem de um embed),
+ * mais a página em que está e, se for de vídeo, o ponto em que toca. É o que sobrevive a girar o aparelho; a mídia sai das
+ * mensagens de novo, e a página de um embed que a mensagem perdeu nesse meio-tempo deixa de existir.
  *
  * A [positionMs] não é estado observável de propósito (ver [PlayingVideo]): muda a cada segundo e só importa quando se
  * salva ou se recria o player. [playing] é, porque trocar a capa pelo player recompõe a página.
  */
 internal class ViewingMedia(
     val messageId: String,
-    /** A chave ([viewerKey]) em que o visualizador abriu: é a única página sensível que ele mostra (ver [viewerItems]). */
+    /** A chave ([viewerKey] ou [viewerEmbedKey]) em que o visualizador abriu: é a única página sensível que ele mostra (ver [viewerItems]). */
     val openedKey: String,
     currentKey: String = openedKey,
     playing: Boolean = false,
@@ -158,6 +163,9 @@ internal class ViewingMedia(
     companion object {
         /** Abre na imagem (ou GIF) [attachment] da mensagem [messageId]. */
         fun image(messageId: String, attachment: AttachmentDto) = ViewingMedia(messageId, viewerKey(attachment.id))
+
+        /** Abre na imagem do embed [embedId] da mensagem [messageId]. */
+        fun embedImage(messageId: String, embedId: String) = ViewingMedia(messageId, viewerEmbedKey(embedId))
 
         /**
          * Abre na página do vídeo anexado [mediaKey] (a `PlayableMedia.key`, `attachment:<id>`) da mensagem [messageId]. Com
@@ -187,11 +195,13 @@ internal class ViewingMedia(
 }
 
 /**
- * Visualizador de mídia da mensagem [message], em tela cheia: as imagens, GIFs e vídeos dela numa fileira que se desliza,
- * com o contador "2/5". A imagem dá zoom de 1x a 5x (pinça e toque duplo), e a página só vira enquanto não há zoom; o GIF
- * anima. O vídeo mostra a capa e o ▶, que abre o player na própria página: só a página que está na tela tem player, e virar
- * a página o libera. **Salvar** e **Compartilhar** valem para a imagem da página. Se o servidor responde 410 (a moderação
- * bloqueou o anexo), ele é gravado como tal e o visualizador se fecha.
+ * Visualizador de mídia da mensagem [message], em tela cheia: as imagens, GIFs e vídeos anexados e, depois deles, as imagens
+ * dos embeds, numa fileira que se desliza, com o contador "2/5". A imagem dá zoom de 1x a 5x (pinça e toque duplo), e a
+ * página só vira enquanto não há zoom; o GIF anima. O vídeo mostra a capa e o ▶, que abre o player na própria página: só a
+ * página que está na tela tem player, e virar a página o libera. **Salvar** e **Compartilhar** valem para a imagem da
+ * página, de anexo ou de embed. Se o servidor responde 410 (a moderação bloqueou o anexo), ele é gravado como tal e o
+ * visualizador se fecha. Se a mensagem perde todas as páginas (os embeds foram trocados por `message_embeds_update` e não
+ * sobrou nenhum), ele também se fecha.
  */
 @Composable
 internal fun MediaViewer(session: AccountSession, message: Message, viewing: ViewingMedia, onDismiss: () -> Unit) {
@@ -225,22 +235,21 @@ internal fun MediaViewer(session: AccountSession, message: Message, viewing: Vie
     val current = items[page]
     val saveAction = remember(session, message.id, current.key) {
         ViewerAction(scope, onDone = { ok -> notice = if (ok) Res.string.viewer_saved else Res.string.viewer_save_failed }) {
-            val attachment = current.attachment
-            val bytes = originalBytes(session, message.id, attachment.id)
-            bytes != null && platform.saveToDownloads(attachment.fileName, attachment.mimeType, bytes)
+            val file = exportFile(session, message.id, current)
+            file != null && platform.saveToDownloads(file.name, file.mimeType, file.bytes)
         }
     }
     val shareAction = remember(session, message.id, current.key) {
         ViewerAction(scope, onDone = { ok -> if (!ok) notice = Res.string.viewer_share_failed }) {
-            val attachment = current.attachment
-            val bytes = originalBytes(session, message.id, attachment.id)
-            bytes != null && platform.shareMedia(attachment.fileName, attachment.mimeType, bytes)
+            val file = exportFile(session, message.id, current)
+            file != null && platform.shareMedia(file.name, file.mimeType, file.bytes)
         }
     }
     ViewerWindow(onDismiss) {
         HorizontalPager(pager, Modifier.fillMaxSize(), key = { items[it].key }) { index ->
             when (val item = items[index]) {
                 is ViewerItem.Image -> MessageImagePage(session, message.id, item.attachment, onGone = onDismiss)
+                is ViewerItem.EmbedImage -> EmbedImagePage(session, item.embed)
                 is ViewerItem.Video -> VideoPage(
                     session = session,
                     messageId = message.id,
@@ -256,11 +265,11 @@ internal fun MediaViewer(session: AccountSession, message: Message, viewing: Vie
         }
         AnimatedVisibility(visible = controlsVisible, modifier = Modifier.align(Alignment.TopStart), enter = fadeIn(), exit = fadeOut()) {
             ViewerTopBar(
-                title = current.attachment.fileName,
+                title = current.title,
                 counter = if (items.size > 1) stringResource(Res.string.viewer_counter, page + 1, items.size) else null,
                 onDismiss = onDismiss,
             ) {
-                if (current is ViewerItem.Image) {
+                if (current !is ViewerItem.Video) {
                     ActionButton(saveAction, Icons.Filled.Download, Res.string.viewer_save)
                     ActionButton(shareAction, Icons.Filled.Share, Res.string.viewer_share)
                 }
@@ -394,6 +403,28 @@ private suspend fun originalBytes(session: AccountSession, messageId: String, at
 
 private fun originalName(attachmentId: String) = "att/$attachmentId"
 
+/** O que **Salvar** e **Compartilhar** entregam à plataforma: a imagem da página, na memória, com o nome e o tipo dela. */
+private class ExportFile(val name: String, val mimeType: String, val bytes: ByteArray)
+
+/**
+ * A imagem de [item] para exportar, ou null se não deu para obtê-la (ou se a página não é uma imagem). O anexo sai pelo
+ * original e o embed pela imagem do cache cifrado da conta, que o cartão já encheu: nada em disco antes de a pessoa
+ * escolher o destino.
+ */
+private suspend fun exportFile(session: AccountSession, messageId: String, item: ViewerItem): ExportFile? = when (item) {
+    is ViewerItem.Image -> originalBytes(session, messageId, item.attachment.id)
+        ?.let { ExportFile(item.attachment.fileName, item.attachment.mimeType, it) }
+    is ViewerItem.EmbedImage -> embedImageBytes(session, item.embed.id)?.let { bytes ->
+        val file = embedImageFile(item.embed, bytes)
+        ExportFile(file.fileName, file.mimeType, bytes)
+    }
+    is ViewerItem.Video -> null
+}
+
+/** A imagem do embed [embedId], do cache cifrado da conta (o cartão a pôs lá) ou, se saiu dele, do servidor. */
+private suspend fun embedImageBytes(session: AccountSession, embedId: String): ByteArray? =
+    session.media.get(embedImageKey(embedId)) { session.fetchEmbedImage(embedId) }
+
 /** Como vai o carregamento de uma imagem do visualizador. */
 private sealed interface ImageLoad {
     data object Loading : ImageLoad
@@ -439,6 +470,16 @@ private fun MessageImagePage(session: AccountSession, messageId: String, attachm
         }?.let { platform.decodeImage(it, VIEWER_IMAGE_PX, animate = true) }
     }
     ImagePage(load, attachment.fileName)
+}
+
+/** A página da imagem de um embed: a que o servidor serve em `GET /embeds/{id}`, a mesma do cartão, até [VIEWER_IMAGE_PX]; um GIF anima. */
+@Composable
+private fun EmbedImagePage(session: AccountSession, embed: EmbedDto) {
+    val platform = LocalPlatformUi.current
+    val load = rememberViewerImage(session.accountId, embed.id) {
+        embedImageBytes(session, embed.id)?.let { platform.decodeImage(it, VIEWER_IMAGE_PX, animate = true) }
+    }
+    ImagePage(load, embed.title.orEmpty())
 }
 
 @Composable
