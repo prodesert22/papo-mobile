@@ -124,7 +124,7 @@ class ProfileImageReducerTest {
             drawColor(Color.BLUE)
             drawRect(0f, 0f, 150f, 200f, Paint().apply { color = Color.RED })
         }
-        val file = File(instrumentation.context.cacheDir, "rotacionada.jpg").also { scratch += it }
+        val file = File.createTempFile("papo-teste-rotacao", ".jpg").also { scratch += it }
         file.writeBytes(encode(source, Bitmap.CompressFormat.JPEG, 100))
         ExifInterface(file.absolutePath).apply {
             setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_ROTATE_90.toString())
@@ -141,7 +141,7 @@ class ProfileImageReducerTest {
 
     @Test
     fun alocalizacaoDoExifNaoSai() {
-        val file = File(instrumentation.context.cacheDir, "com-gps.jpg").also { scratch += it }
+        val file = File.createTempFile("papo-teste-gps", ".jpg").also { scratch += it }
         file.writeBytes(encode(gradient(400, 400), Bitmap.CompressFormat.JPEG))
         ExifInterface(file.absolutePath).apply {
             setAttribute(ExifInterface.TAG_GPS_LATITUDE, "12/1,58/1,17/1")
