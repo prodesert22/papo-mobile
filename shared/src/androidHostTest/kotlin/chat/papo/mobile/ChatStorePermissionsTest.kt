@@ -196,6 +196,19 @@ class ChatStorePermissionsTest {
     }
 
     @Test
+    fun canaisGravadosValemMesmoQuandoALeituraDosUsuariosFalha() = runTest {
+        // A abertura no canal do topo espera só os canais: um 429 ou 500 nas páginas de usuários não pode impedi-la.
+        usersHandler = { problem(HttpStatusCode.TooManyRequests) }
+        val account = account(engine)
+        assertFalse(account.chat.channelsSynced.value)
+
+        account.chat.runSync()
+
+        assertTrue(account.chat.channelsSynced.value)
+        assertFalse(account.chat.synced.value)
+    }
+
+    @Test
     fun sincronizacaoCanceladaNoMeioNaoMarcaComoSincronizada() = runTest {
         val gate = CompletableDeferred<Unit>()
         serverGate = gate

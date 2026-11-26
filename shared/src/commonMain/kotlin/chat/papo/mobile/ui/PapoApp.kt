@@ -365,15 +365,19 @@ private fun OpenTopChatOnStart(
     val entry by navController.currentBackStackEntryAsState()
     // Antes de a navegação montar o grafo não se sabe que tela está por cima: espera o próximo quadro.
     if (entry == null) return
-    val chat = activeId?.let { sessions[it] }?.chat
+    // A mesma conta que a tela principal mostra: a selecionada ou, sem seleção válida, a primeira.
+    val shownId = (accounts.firstOrNull { it.id == activeId } ?: accounts.firstOrNull())?.id
+    val chat = shownId?.let { sessions[it] }?.chat
     val channels by (chat?.visibleChannels ?: NoChannels).collectAsStateWithLifecycle()
-    val synced by (chat?.synced ?: NotSynced).collectAsStateWithLifecycle()
+    // Os canais do servidor bastam: esperar todos os usuários (várias páginas num servidor grande) atrasaria a abertura, e
+    // uma falha no meio deles a impediria.
+    val synced by (chat?.channelsSynced ?: NotSynced).collectAsStateWithLifecycle()
 
     val step = panel.startup.step(
         StartupInput(
-            accountId = activeId,
-            sessionExpired = accounts.firstOrNull { it.id == activeId }?.sessionExpired == true,
-            hasParkedChat = activeId?.let { panel.chats[it] } != null,
+            accountId = shownId,
+            sessionExpired = accounts.firstOrNull { it.id == shownId }?.sessionExpired == true,
+            hasParkedChat = shownId?.let { panel.chats[it] } != null,
             // A tela principal é a raiz da navegação: sem tela anterior a ela, nada está por cima.
             onHome = navController.previousBackStackEntry == null,
             synced = synced,
@@ -383,7 +387,7 @@ private fun OpenTopChatOnStart(
     LaunchedEffect(step) {
         panel.startup = step.next
         val channelId = step.open ?: return@LaunchedEffect
-        activeId?.let { openChat(it, ParkedChat(channelId)) }
+        shownId?.let { openChat(it, ParkedChat(channelId)) }
     }
 }
 

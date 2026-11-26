@@ -40,7 +40,7 @@ internal sealed interface StartupOpening {
 
 /** O que a tela principal sabe, a cada mudança, para decidir se abre o canal do topo. */
 internal data class StartupInput(
-    /** A conta selecionada; nula sem contas. */
+    /** A conta que a tela principal mostra; nula enquanto as contas não carregaram. */
     val accountId: String?,
     /** A sessão da conta foi encerrada: ela precisa entrar de novo, e a tela mostra isso no lugar da lista. */
     val sessionExpired: Boolean,
@@ -48,7 +48,7 @@ internal data class StartupInput(
     val hasParkedChat: Boolean,
     /** A tela principal é a que está à vista, sem busca, configurações ou chamada por cima. */
     val onHome: Boolean,
-    /** A primeira sincronização da conta terminou; antes dela não se sabe o que a conta pode ler. */
+    /** Os canais da conta já chegaram do servidor nesta sessão; antes disso a lista é a do banco, de uma sessão anterior. */
     val synced: Boolean,
     /** Os canais que a lista de canais mostra. */
     val channels: List<Channel>,
@@ -58,20 +58,22 @@ internal data class StartupInput(
 internal data class StartupStep(val next: StartupOpening, val open: String? = null)
 
 /**
- * Um passo da abertura. Qualquer coisa que quem usa já tenha feito (abrir uma conversa, trocar de conta, sair da tela
- * principal), ou que deixe sem o que abrir (sem conta, sessão encerrada, sem canal de texto legível), encerra a espera.
- * Enquanto a conta não sincronizou, espera: não se pede nada ao servidor, usa-se o que a sincronização já traz.
+ * Um passo da abertura. O que quem usa já fez (abrir ou fechar uma conversa, sair da tela principal) ou o que deixa sem o
+ * que abrir (sessão encerrada, nenhum canal de texto) encerra a espera. O que ainda está chegando faz esperar, nunca
+ * desistir: as contas carregando (conta nula), a conta salva trocada pela válida ao carregar, os canais do servidor ainda
+ * não chegados, a lista ainda relida do banco (vazia). Não se pede nada ao servidor: usa-se o que a sincronização traz.
  */
 internal fun StartupOpening.step(input: StartupInput): StartupStep = when (this) {
     StartupOpening.Done -> StartupStep(StartupOpening.Done)
-    StartupOpening.Fresh -> decide(input)
-    is StartupOpening.Waiting -> if (accountId == input.accountId) decide(input) else StartupStep(StartupOpening.Done)
+    // Esperando, a conta pode mudar sem ninguém tocar em nada (a salva era de uma conta que saiu, e o app escolhe outra ao
+    // carregar): a abertura segue a conta que a tela principal mostra agora.
+    StartupOpening.Fresh, is StartupOpening.Waiting -> decide(input)
 }
 
 private fun decide(input: StartupInput): StartupStep {
-    val account = input.accountId
-    if (account == null || input.sessionExpired || input.hasParkedChat || !input.onHome) return StartupStep(StartupOpening.Done)
-    if (!input.synced) return StartupStep(StartupOpening.Waiting(account))
+    if (input.sessionExpired || input.hasParkedChat || !input.onHome) return StartupStep(StartupOpening.Done)
+    val account = input.accountId ?: return StartupStep(StartupOpening.Fresh)
+    if (!input.synced || input.channels.isEmpty()) return StartupStep(StartupOpening.Waiting(account))
     val top = topTextChannel(input.channels) ?: return StartupStep(StartupOpening.Done)
     return StartupStep(StartupOpening.Done, open = top.id)
 }

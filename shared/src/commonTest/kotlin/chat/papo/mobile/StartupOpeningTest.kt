@@ -72,8 +72,9 @@ class StartupOpeningTest {
     }
 
     @Test
-    fun semContaNaoHaOQueAbrir() {
-        assertEquals(done, StartupOpening.Fresh.step(input(accountId = null)))
+    fun contasAindaCarregandoEsperaSemDesistir() {
+        // No primeiro quadro a conta pode ainda ser nula; desistir aqui deixava o app na lista para sempre.
+        assertEquals(StartupStep(StartupOpening.Fresh), StartupOpening.Fresh.step(input(accountId = null)))
     }
 
     @Test
@@ -92,8 +93,9 @@ class StartupOpeningTest {
     }
 
     @Test
-    fun sincronizadaSemNenhumCanalFicaNaLista() {
-        assertEquals(done, StartupOpening.Fresh.step(input(channels = emptyList())))
+    fun sincronizadaComAListaAindaVaziaEspera() {
+        // O aviso dos canais pode chegar antes de a lista relida do banco: lista vazia faz esperar, não desistir.
+        assertEquals(waiting, StartupOpening.Fresh.step(input(channels = emptyList())))
     }
 
     @Test
@@ -119,14 +121,15 @@ class StartupOpeningTest {
     }
 
     @Test
-    fun trocarDeContaNoTrilhoEncerraAEsperaENaoAbreOCanalDaOutra() {
-        // A conta de Bia está sincronizada e tem canais, mas o app foi aberto na de Ana.
-        assertEquals(done, StartupOpening.Waiting(ana).step(input(accountId = bia)))
+    fun aContaMostradaMudandoDuranteAEsperaAbreOCanalDela() {
+        // A conta salva era de uma conta que saiu e o app escolheu a de Bia ao carregar (ou quem usa trocou no trilho antes
+        // de abrir qualquer coisa): a abertura segue a conta que a tela mostra.
+        assertEquals(StartupStep(StartupOpening.Done, open = "canal-avisos"), StartupOpening.Waiting(ana).step(input(accountId = bia)))
     }
 
     @Test
-    fun esperandoAContaDeixaDeExistirEncerra() {
-        assertEquals(done, StartupOpening.Waiting(ana).step(input(accountId = null)))
+    fun esperandoComAContaSumindoVoltaAEsperarAConta() {
+        assertEquals(StartupStep(StartupOpening.Fresh), StartupOpening.Waiting(ana).step(input(accountId = null)))
     }
 
     @Test
