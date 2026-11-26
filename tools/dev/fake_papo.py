@@ -83,6 +83,17 @@ Visualizador de mídia (sempre ligado): o canal `galeria` traz uma mensagem com 
 GIF), uma com uma imagem só, uma de 4800x3200 (para o zoom), uma com dois anexos sensíveis entre normais, uma com um anexo
 bloqueado entre normais e, com `FAKE_VIDEO_DIR`, uma com imagem, vídeo, GIF e imagem juntos.
 
+Áudios anexados (trilha A, onda 3). O canal `audio` traz sempre um áudio que o aparelho não decodifica (`audio/ogg` com bytes que
+não são Ogg: o player diz "formato não suportado") e um que a lista diz limpo mas o servidor já bloqueou (o arquivo responde 410: o
+cartão vira o aviso da moderação). `GET /attachments/{id}` atende `Range` para áudio como para vídeo, e o log da linha de comando
+mostra o `Range` e o status de cada pedido, para conferir que buscar no áudio pede só o trecho novo.
+
+    FAKE_AUDIO_DIR=<pasta>    semeia no `audio` uma mensagem de `bia` para cada .ogg, .opus, .mp3, .m4a, .wav e .webm da pasta, com
+                              30 mensagens curtas depois da primeira (o cartão dela sai da tela e a barra de áudio aparece), e mais:
+                              uma gravação de voz do web (`audio_gravado.<ext>` com o tipo `video/webm`, como o servidor a fareja), um
+                              envio antigo (`antigo.<ext>` com o tipo genérico), um áudio sensível, dois áudios numa mensagem só
+                              (para ver que só um toca por vez)
+
 Renovação da sessão (sempre ligada). `POST /auth/refresh` rotaciona o token como o servidor (`RefreshConnection`): troca o
 `Auth` por outro, com outro id de conexão e o mesmo usuário, no `Set-Cookie`. O token trocado ainda vale por 60 s (a janela de
 graça do servidor); reapresentado depois disso é reuso: o servidor revoga todas as sessões do usuário e responde 401. Um
@@ -289,6 +300,9 @@ ANIMATED_EMOJIS = {
 # Tipos de vídeo que o servidor aceita como arquivo; o MIME do anexo é farejado no upload, aqui pela extensão.
 VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".ogv": "video/ogg"}
 GENERIC_TYPES = {"", "application/octet-stream"}
+# Áudios que FAKE_AUDIO_DIR semeia: o MIME de cada extensão, como o servidor o fareja.
+AUDIO_TYPES = {".ogg": "audio/ogg", ".opus": "audio/ogg", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav",
+               ".webm": "audio/webm"}
 VIDEO = {"kbps": 0.0, "expire_at": 0, "requests": 0}   # FAKE_VIDEO_KBPS, FAKE_VIDEO_401_ONCE e os pedidos de vídeo vistos
 CHUNK = 16384
 SEEDED = []     # vídeos semeados por FAKE_VIDEO_DIR: (nome, bytes, mime, largura, altura)
@@ -1659,12 +1673,63 @@ def seed_track_a():
     de 110 MiB, e 400 com mais de 10 arquivos, nome vazio ou com mais de 128 caracteres, arquivo acima de 100 MiB ou corpo em pedaços
     acima de 110 MiB. Valor ilegível derruba o fake na partida.
 
-    Onda 2 (visualizador): o canal `galeria`, com mensagens de várias mídias (ver `seed_gallery`)."""
+    Onda 2 (visualizador): o canal `galeria`, com mensagens de várias mídias (ver `seed_gallery`).
+
+    Onda 3 (áudio): o canal `audio`, com áudios anexados (ver `seed_audio`); `FAKE_AUDIO_DIR` traz os arquivos de verdade."""
     try:
         UPLOAD["kbps"] = float(os.environ.get("FAKE_UPLOAD_KBPS") or 0)
     except ValueError as error:
         raise SystemExit("FAKE_UPLOAD_KBPS: valor ilegível (%s)" % error)
     seed_gallery()
+    seed_audio(os.environ.get("FAKE_AUDIO_DIR"))
+
+
+def audio_attachment(name, mime, data, moderation="clean"):
+    """Registra o arquivo de um áudio e devolve o anexo como o servidor o descreve: sem miniatura e sem dimensões."""
+    aid = str(uuid.uuid4())
+    FILES[aid] = (mime, data)
+    if moderation == "blocked":   # o servidor real responde 410 a um anexo bloqueado
+        GONE.add(aid)
+    return {"id": aid, "mime_type": mime, "original_file_name": name, "size_bytes": len(data), "width": None, "height": None,
+            "thumbnail_id": None, "thumbnail_width": None, "thumbnail_height": None, "moderation_status": moderation}
+
+
+def seed_audio(folder):
+    """O canal `audio`, para o player de áudio. Sem `folder` (FAKE_AUDIO_DIR) só traz os dois casos que não precisam de arquivo: um
+    áudio que o aparelho não decodifica e um que o servidor já bloqueou, embora a lista ainda o diga limpo. Com a pasta traz cada
+    arquivo dela (o primeiro seguido de 30 mensagens curtas, para o cartão dele sair da tela), a gravação de voz do web, o envio
+    antigo de tipo genérico, o áudio sensível e dois áudios numa mensagem só."""
+    channel = {"id": "c0000000-0000-4000-8000-0000000000a2", "name": "audio", "type": "text", "position": 7,
+               "topic": "Player de áudio", "parent_id": CHANNELS[0]["id"]}
+    CHANNELS.append(channel)
+    cid = channel["id"]
+    root = Path(folder) if folder else None
+    files = sorted(p for p in root.iterdir() if p.suffix.lower() in AUDIO_TYPES) if root is not None and root.is_dir() else []
+    if folder and not files:
+        raise SystemExit("FAKE_AUDIO_DIR: nenhum .ogg, .opus, .mp3, .m4a, .wav ou .webm em %s" % folder)
+    loaded = [(path.name, path.suffix.lower(), AUDIO_TYPES[path.suffix.lower()], path.read_bytes()) for path in files]
+    for index, (name, _, mime, data) in enumerate(loaded):
+        new_message(cid, uid("bia"), "áudio %s" % name, attachments=[audio_attachment(name, mime, data)])
+        if index == 0:
+            for n in range(1, 31):
+                new_message(cid, uid("caio"), "mensagem %d, só para o áudio de cima sair da tela" % n)
+    if loaded:
+        name, ext, mime, data = min(loaded, key=lambda f: (len(f[3]), len(f[0])))   # o menor: as variações não pesam
+        new_message(cid, uid("caio"), "gravação de voz do web: o servidor a farejou como vídeo, e só o nome diz que é áudio",
+                    attachments=[audio_attachment("audio_gravado" + ext, "video/webm", data)])
+        new_message(cid, uid("bia"), "envio antigo, de tipo genérico: só a extensão diz que é áudio",
+                    attachments=[audio_attachment("antigo" + ext, "application/octet-stream", data)])
+        new_message(cid, uid("caio"), "áudio sensível: fica escondido até o toque",
+                    attachments=[audio_attachment(name, mime, data, "sensitive")])
+        if len(loaded) > 1:
+            first, second = loaded[0], loaded[1]
+            new_message(cid, uid("caio"), "dois áudios numa mensagem: só um toca por vez",
+                        attachments=[audio_attachment(first[0], first[2], first[3]), audio_attachment(second[0], second[2], second[3])])
+    new_message(cid, uid("bia"), "formato que o aparelho não decodifica (bytes que não são Ogg)",
+                attachments=[audio_attachment("quebrado.ogg", "audio/ogg", b"isto nao e um arquivo ogg" * 40)])
+    removed = audio_attachment("removido.ogg", "audio/ogg", b"OggS" + bytes(200))
+    GONE.add(removed["id"])   # a lista ainda diz `clean`, mas o servidor já bloqueou: o arquivo responde 410
+    new_message(cid, uid("caio"), "bloqueado pela moderação, mas a lista ainda não sabe (o arquivo responde 410)", attachments=[removed])
 
 
 def seed_gallery():
