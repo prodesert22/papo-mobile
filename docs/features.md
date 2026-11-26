@@ -61,12 +61,15 @@ release notes in [releases/](../releases/) describe each version's changes.
   opening. Messages from the same person within 10 minutes show under one name.
 - Link previews with everything the server sends: color, author, title, fields
   and footer. GIF links from Tenor, GIPHY and KLIPY move in the message.
-- A viewer for a message's images, GIFs and videos: swipe between them, zoom up
-  to 5x, and save or share images and GIFs. Attached GIFs move in the list.
+- A viewer for a message's images, GIFs and videos, and the images of its link
+  previews: swipe between them, zoom up to 5x, and save or share images and
+  GIFs. Attached GIFs move in the list.
 - Videos, attached or from a link, play in the message with a tap on the play
-  button, or full screen with a tap anywhere else on them, while they download
-  and with seeking; their cards show a cover. YouTube links play inside the app
-  the same way, and nothing is requested from YouTube before you tap play.
+  button, without controls, and a tap on the playing video opens it full screen
+  from the same point; full screen has the app's own controls, with 10-second
+  jumps and seeking. They play while they download and their cards show a
+  cover. YouTube links play inside the app the same way, and nothing is
+  requested from YouTube before you tap play.
 - Audio attachments, voice recordings from the web included, play in the
   message with seeking and 1x, 1.5x and 2x speed, and a bar at the top keeps the
   playing audio at hand when its message is out of view.
@@ -106,9 +109,11 @@ release notes in [releases/](../releases/) describe each version's changes.
   videos open outside the app. Opened full screen from the card, a YouTube video
   starts from the beginning.
 - A link preview shows one image and no footer icon, because the server does not
-  serve more.
-- Save and share in the viewer cover images and GIFs; videos and audio are saved
-  with **Baixar**.
+  serve more: a custom preview with both a thumbnail and an image shows only the
+  thumbnail.
+- Save and share in the viewer cover images and GIFs, attached or from link
+  previews; videos and audio are saved with **Baixar**. Videos from links are not
+  in the viewer: they play in their card or full screen.
 - No camera in the attachment menu. The location warning covers JPEG photos only,
   and the app does not remove the location. Items from the keyboard are limited
   to 20 MB each.

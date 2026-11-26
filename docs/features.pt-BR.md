@@ -63,13 +63,15 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   sob um só nome.
 - Prévias de links com tudo o que o servidor manda: cor, autor, título, campos e
   rodapé. Links de GIF do Tenor, GIPHY e KLIPY se mexem na mensagem.
-- Um visualizador para as imagens, GIFs e vídeos de uma mensagem: deslize entre
-  eles, dê zoom de até 5x e salve ou compartilhe imagens e GIFs. GIFs anexados se
-  mexem na lista.
+- Um visualizador para as imagens, GIFs e vídeos de uma mensagem, e as imagens
+  das prévias de links dela: deslize entre eles, dê zoom de até 5x e salve ou
+  compartilhe imagens e GIFs. GIFs anexados se mexem na lista.
 - Vídeos, anexados ou de links, tocam na própria mensagem com um toque no botão
-  de play, ou em tela cheia com um toque em qualquer outro ponto, enquanto
-  baixam e com busca; os cartões mostram uma capa. Links do YouTube tocam dentro
-  do app do mesmo jeito, e nada é pedido ao YouTube antes do toque no play.
+  de play, sem controles, e um toque no vídeo tocando abre a tela cheia do mesmo
+  ponto; a tela cheia tem controles próprios do app, com saltos de 10 segundos e
+  busca. Tocam enquanto baixam e os cartões mostram uma capa. Links do YouTube
+  tocam dentro do app do mesmo jeito, e nada é pedido ao YouTube antes do toque
+  no play.
 - Áudios anexados, inclusive gravações de voz feitas no web, tocam na própria
   mensagem com busca e velocidade de 1x, 1,5x e 2x, e uma barra no topo mantém o
   áudio à mão quando a mensagem sai da tela.
@@ -108,9 +110,11 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   antigo, os vídeos do YouTube abrem fora do app. Aberto em tela cheia pelo
   cartão, o vídeo do YouTube começa do início.
 - A prévia de link mostra uma imagem só e não mostra o ícone do rodapé, porque o
-  servidor não serve mais que isso.
-- Salvar e compartilhar no visualizador valem para imagens e GIFs; vídeos e
-  áudios se salvam com **Baixar**.
+  servidor não serve mais que isso: uma prévia personalizada com miniatura e
+  imagem mostra só a miniatura.
+- Salvar e compartilhar no visualizador valem para imagens e GIFs, anexados ou
+  de prévias de links; vídeos e áudios se salvam com **Baixar**. Vídeos de links
+  não entram no visualizador: tocam no cartão ou em tela cheia.
 - Sem câmera no menu de anexos. O aviso de localização vale só para fotos JPEG, e
   o app não tira a localização. O que vem do teclado tem limite de 20 MB por item.
 - Mensagens que esperam para sair e arquivos anexados a um rascunho se perdem
