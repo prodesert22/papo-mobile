@@ -51,7 +51,7 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   imagem com visualizador em tela cheia, indicador de digitação e presença.
   Mensagens da mesma pessoa em até 10 minutos aparecem sob um só nome.
 - Vídeos, anexados ou de links, tocam dentro do app enquanto baixam, em tela
-  cheia, com busca.
+  cheia, com busca; os cartões mostram uma capa.
 - Emojis: seletor com busca com todos os emojis Unicode e os do servidor,
   sugestões ao digitar `:nome`, emojis do servidor dentro das mensagens e emojis
   maiores nas mensagens que só têm emojis. Os emojis do servidor em GIF e WebP se

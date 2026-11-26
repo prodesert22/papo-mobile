@@ -50,7 +50,7 @@ release notes in [releases/](../releases/) describe each version's changes.
   with a full-screen viewer, typing indicators and presence. Messages from the
   same person within 10 minutes show under one name.
 - Videos, attached or from a link, play inside the app while they download, full
-  screen, with seeking.
+  screen, with seeking; their cards show a cover.
 - Emoji: a searchable picker with every Unicode emoji and the server's own,
   suggestions as you type `:name`, the server's emoji shown inside messages,
   and larger emoji in messages that have nothing else. The server's emoji in
