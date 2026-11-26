@@ -140,11 +140,35 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   chamada.
 - A chamada continua quando você sai do app, com uma notificação para desligar.
 
+## Notificações
+
+- Caixa de notificações para cada conta, aberta pelo sino no topo da lista de
+  canais: menções, respostas às suas mensagens, `@everyone` e mensagens diretas,
+  com o motivo de cada uma. Abrir uma leva à mensagem e a marca como lida; dá
+  também para marcar como lidas todas as carregadas.
+- Número de menções em vermelho ao lado de cada canal e conversa direta, em cada
+  conta na barra de servidores e no sino. Um canal com mensagens novas mostra o
+  nome em branco e um círculo à direita.
+- Configurações de notificação para cada servidor e, partindo de "Usar padrão do
+  servidor", para cada canal; segure o canal na lista ou use o menu da conversa.
+  Você escolhe quais mensagens notificam (todas, só menções ou nada), silencia
+  de 15 minutos a 24 horas ou até reativar, e suprime `@everyone` ou as menções
+  diretas. As conversas diretas também podem ser silenciadas.
+- Silenciar tira o círculo de mensagem nova e esmaece o canal, mas as menções
+  continuam contando. Suprimir `@everyone` ou as menções as tira da contagem.
+
 ## Limitações atuais
 
-- Sem notificações push: as mensagens só chegam com o app aberto.
-- Sem caixa de notificações, preferências do usuário e administração do
-  servidor.
+- Ainda sem notificações do sistema: nada aparece fora do app, e as mensagens
+  só chegam com ele aberto. As configurações de notificação já valem para as
+  contagens e vão valer para as notificações do sistema quando elas chegarem.
+- As configurações de notificação ficam neste celular: o servidor ainda não as
+  guarda, então elas não seguem você no web nem em outro celular.
+- A contagem de menções lê até 500 notificações por conta e mostra "99+" além
+  disso. Notificações lidas em outro aparelho se atualizam quando o app
+  reconecta ou volta para a frente. Um canal posto em "nada" pelo cliente web não
+  recebe notificações do servidor, então fica sem número.
+- Sem administração do servidor.
 - O avatar não pode ser removido depois de definido, só trocado, e a imagem é
   cortada no centro, sem recorte manual. Avatar ou banner animado vai como está
   quando cabe nos limites de tamanho e é recusado quando não cabe; não há status

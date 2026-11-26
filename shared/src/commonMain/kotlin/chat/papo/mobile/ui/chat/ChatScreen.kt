@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -485,28 +486,40 @@ fun ChatScreen(
                     IconButton(onClick = onSwitch) {
                         Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(Res.string.switcher_title))
                     }
-                    IconButton(onClick = onSearch) {
-                        Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.chat_search))
-                    }
-                    if (pinnedListOffered(access, isDm, channel?.type)) {
-                        IconButton(onClick = viewModel::showPinned) {
-                            Icon(Icons.Filled.PushPin, contentDescription = stringResource(Res.string.chat_pinned))
-                        }
-                    }
                     if (!isDm) {
                         IconButton(onClick = onOpenMembers) {
                             Icon(Icons.Filled.Group, contentDescription = stringResource(Res.string.members_open))
                         }
                     }
-                    // Sem o canal ou a DM lidos ainda não há a que configurar.
-                    if (channel != null || isDm) {
-                        Box {
-                            IconButton(onClick = { moreMenu = true }) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(Res.string.notif_more_options))
+                    // Busca, fixadas e notificações ficam no menu: com tudo solto na barra, o título some em 360 dp.
+                    Box {
+                        IconButton(onClick = { moreMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(Res.string.notif_more_options))
+                        }
+                        DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.chat_search)) },
+                                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                                onClick = {
+                                    moreMenu = false
+                                    onSearch()
+                                },
+                            )
+                            if (pinnedListOffered(access, isDm, channel?.type)) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.chat_pinned)) },
+                                    leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                                    onClick = {
+                                        moreMenu = false
+                                        viewModel.showPinned()
+                                    },
+                                )
                             }
-                            DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                            // Sem o canal ou a DM lidos ainda não há o que configurar.
+                            if (channel != null || isDm) {
                                 DropdownMenuItem(
                                     text = { Text(stringResource(Res.string.notif_open)) },
+                                    leadingIcon = { Icon(Icons.Filled.Notifications, contentDescription = null) },
                                     onClick = {
                                         moreMenu = false
                                         notificationsOpen = true

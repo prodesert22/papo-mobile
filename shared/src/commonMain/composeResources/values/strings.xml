@@ -580,7 +580,7 @@
     <!-- Notificações: caixa e contagens -->
     <string name="inbox_title">Caixa de notificações</string>
     <string name="inbox_bell">Caixa de notificações</string>
-    <string name="inbox_bell_unread">Caixa de notificações, %1$s não lidas</string>
+    <string name="inbox_bell_unread">Caixa de notificações, não lidas: %1$s</string>
     <string name="inbox_settings">Configurações de notificação</string>
     <string name="inbox_mark_all">Marcar todas como lidas</string>
     <string name="inbox_mark_all_limit">Marcar todas como lidas vale só para as notificações já carregadas.</string>
@@ -597,6 +597,6 @@
     <string name="inbox_row_unread">, não lida</string>
     <string name="inbox_unavailable_title">Conversa indisponível</string>
     <string name="inbox_unavailable_body">Esta conversa não existe mais ou você não tem acesso a ela.</string>
-    <string name="mentions_count">%1$s menções não lidas</string>
-    <string name="rail_mentions">, %1$s menções não lidas</string>
+    <string name="mentions_count">Menções não lidas: %1$s</string>
+    <string name="rail_mentions">, menções não lidas: %1$s</string>
 </resources>

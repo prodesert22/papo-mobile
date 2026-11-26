@@ -139,10 +139,35 @@ release notes in [releases/](../releases/) describe each version's changes.
   or during the call.
 - A call continues when you leave the app, with a notification to hang up.
 
+## Notifications
+
+- A notification inbox for each account, opened from the bell at the top of the
+  channel list: mentions, replies to your messages, `@everyone` and direct
+  messages, with the reason for each one. Opening one takes you to the message
+  and marks it as read; you can also mark all the loaded ones as read.
+- Mention counts in red next to each channel and direct conversation, on each
+  account in the server bar and on the bell. A channel with new messages shows
+  its name in white and a dot on the right.
+- Notification settings for each server and, with "Use the server default" as
+  the starting point, for each channel; hold a channel in the list or use the
+  conversation menu. You choose which messages notify (all, mentions only or
+  nothing), mute for 15 minutes up to 24 hours or until you turn it back on, and
+  hide `@everyone` or direct mentions. Direct conversations can be muted too.
+- Muting removes the new-message dot and dims the channel, but mentions still
+  count. Hiding `@everyone` or mentions removes them from the count.
+
 ## Current limitations
 
-- No push notifications: messages arrive only while the app is open.
-- No notification inbox, user preferences or server administration.
+- No system notifications yet: nothing appears outside the app, and messages
+  arrive only while it is open. The notification settings already apply to the
+  counts and will apply to system notifications when they arrive.
+- The notification settings stay on this phone: the server does not store them
+  yet, so they do not follow you to the web or to another phone.
+- The mention count reads up to 500 notifications per account and shows "99+"
+  beyond that. Notifications read on another device update when the app
+  reconnects or comes back to the front. A channel set to "nothing" in the web
+  client gets no notifications from the server, so it shows no count.
+- No server administration.
 - Your avatar cannot be removed once set, only replaced, and pictures are cropped
   to the center, with no manual crop. An animated avatar or banner goes as it is
   when it fits the size limits and is refused otherwise; there is no "invisible"
