@@ -66,6 +66,13 @@ graça do servidor); reapresentado depois disso é reuso: o servidor revoga toda
 `refresh` com o token trocado devolve o token ativo da cadeia, sem rotacionar de novo.
 
     FAKE_REFRESH_GRACE=0      janela de graça em segundos (60 por padrão); 0 faz o token trocado ser reuso de imediato
+
+Perfis e webhooks (sempre ligados). `GET /users/{id}/profile` (com sessão; 404 para um usuário que não existe) devolve o
+perfil como a OpenAPI o descreve: `ana` ("Ana Lima", ocupada, cargo Design), `bia` (cargo Admin, avatar e banner) e `caio` (ausente)
+têm recado e descrição; o banner vem de `GET /media/{sha}` (com sessão) e o avatar de `bia` também de `GET /users/{id}/avatar`.
+As mensagens de webhook trazem sempre o mesmo `webhook_id` para o mesmo webhook (derivado do nome). No `papo`: "Robô de Deploy"
+(sem avatar), "Monitor de Status" (duas mensagens seguidas, com avatar persistente em `/webhooks/{id}/avatar`, rota pública) e
+"Maria da Ponte", com um autor temporário cujo `avatar_url` é uma URL externa que o app nunca deve pedir.
 """
 import base64
 import hashlib
@@ -395,10 +402,11 @@ def name_of(user_id):
     return next((n for n, u in USERS.items() if u["id"] == user_id), None)
 
 
-def new_message(channel_id, author_id, content, reply_to=None, attachments=None, created_at=None, external_author=None):
+def new_message(channel_id, author_id, content, reply_to=None, attachments=None, created_at=None, external_author=None, webhook_id=None):
     m = {"id": str(uuid.uuid4()), "channel_id": channel_id, "author_id": author_id, "content": content,
          "created_at": created_at or stamp(), "edited_at": None, "reply_to": reply_to,
-         "webhook_id": str(uuid.uuid4()) if external_author else None, "external_author": external_author,
+         "webhook_id": (webhook_id or webhook_id_for(external_author["name"])) if external_author else None,
+         "external_author": external_author,
          "attachments": attachments or [], "embeds": [], "reactions": {}, }
     MESSAGES.setdefault(channel_id, []).append(m)
     return m
@@ -781,6 +789,102 @@ def send_control():
             "rate": float(pick("rate", "FAKE_SEND_RATE")), "create": bool(int(pick("create", "FAKE_SEND_CREATE")))}
 
 
+# ── Perfis, mídia e webhooks ─────────────────────────────────────────────────────────────────────
+# `GET /users/{id}/profile`, `GET /media/{sha}` (o banner), `GET /users/{id}/avatar` (de quem tem avatar) e
+# `GET /webhooks/{id}/avatar`. Tudo o que está aqui sobre eles fica junto; o resto do fake só chama `serve_profiles`.
+
+PROFILES = {}    # nome do usuário -> {description, status, status_message, banner (sha), avatar (bytes)}
+MEDIA = {}       # sha256 em hexadecimal -> (mime, bytes): a mídia content-addressable, onde moram os banners
+WEBHOOKS = {}    # webhook_id -> {name, avatar (bytes ou None)}: o avatar persistente do webhook, se tem
+
+
+def webhook_id_for(name):
+    """O id do webhook de um autor externo: derivado do nome, o mesmo em toda mensagem dele e em toda partida."""
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, "papo-fake-webhook-" + name))
+
+
+def add_webhook(name, avatar=None):
+    """Registra o webhook `name` (com avatar persistente se `avatar` são os bytes de uma imagem) e devolve o id dele."""
+    webhook_id = webhook_id_for(name)
+    WEBHOOKS[webhook_id] = {"name": name, "avatar": avatar}
+    return webhook_id
+
+
+def add_media(data, mime="image/png"):
+    """Guarda `data` na mídia e devolve o sha256 dele, a referência que o perfil leva em `banner_media`."""
+    sha = hashlib.sha256(data).hexdigest()
+    MEDIA[sha] = (mime, data)
+    return sha
+
+
+def seed_profiles():
+    """Dá apelido, cargo, recado, descrição, banner e avatar a `ana`, `bia` e `caio`, para o perfil ter o que mostrar."""
+    USERS["ana"]["nickname"] = "Ana Lima"
+    USERS["ana"]["roles"] = [{"id": str(uuid.uuid5(uuid.NAMESPACE_DNS, "papo-fake-role-Design")), "name": "Design", "color": "#5B8DEF"}]
+    PROFILES["ana"] = {"status": "busy", "status_message": "Em reunião até as 15h",
+                       "description": "Desenho telas e ouço muito rock.\nPeça um protótipo, não um print."}
+    PROFILES["bia"] = {"status": None, "status_message": "Revisando o deploy", "banner": add_media(png(70, 90, 200, 300, 100)),
+                       "avatar": png(232, 108, 165, 96, 96),
+                       "description": "Cuido da infraestrutura e do café.\nDocs: https://papo.example.com/bia (isto é só texto, não um link)."}
+    PROFILES["caio"] = {"status": "away", "status_message": "De férias", "description": "Volto na segunda."}
+
+
+def seed_webhooks():
+    """No `papo`: o webhook de avatar persistente (duas mensagens seguidas), e um autor temporário com avatar externo.
+    O "Robô de Deploy", sem avatar, já tem a mensagem dele no começo do histórico."""
+    add_webhook("Robô de Deploy")
+    monitor = add_webhook("Monitor de Status", avatar=png(60, 180, 113, 96, 96))
+    persistent = {"name": "Monitor de Status", "avatar_url": "/webhooks/%s/avatar" % monitor}
+    new_message(PAPO, None, "Todos os serviços respondem.", external_author=persistent)
+    new_message(PAPO, None, "Latência normal: 42 ms.", external_author=persistent)
+    add_webhook("Maria da Ponte")
+    new_message(PAPO, None, "Mensagem encaminhada de outro chat.",
+                external_author={"name": "Maria da Ponte", "avatar_url": "https://avatars.example.com/maria.png"})
+
+
+def profile_view(name):
+    """O perfil de `name` como a OpenAPI (`UserProfile`) o descreve; sem avatar, `avatar_blob` e `avatar_format` não vão."""
+    user, extra = USERS[name], PROFILES.get(name, {})
+    avatar = {"avatar_blob": base64.b64encode(extra["avatar"]).decode(), "avatar_format": "PNG"} if extra.get("avatar") else {}
+    return {"id": user["id"], "username": name, "nickname": user.get("nickname"), **avatar,
+            "banner_media": extra.get("banner"), "description": extra.get("description"), "status": extra.get("status"),
+            "status_message": extra.get("status_message"), "typing": None, "status_updated_at": None,
+            "created_at": user["created"], "roles": summary(name)["roles"]}
+
+
+def serve_profiles(handler, path):
+    """Responde as rotas de perfil, mídia e avatar de webhook; devolve False se `path` não é uma delas. O avatar de um
+    webhook é público (`security: []` na OpenAPI); o perfil e a mídia pedem a sessão, como os outros GET autenticados."""
+    found = re.fullmatch(r"/webhooks/([^/]+)/avatar", path)
+    if found:
+        avatar = (WEBHOOKS.get(found.group(1)) or {}).get("avatar")
+        if avatar is None:
+            handler.problem(404, "Recurso não encontrado", "webhook sem avatar")
+        else:
+            handler.serve("image/png", avatar, 0)
+        return True
+    found = re.fullmatch(r"/users/([^/]+)/avatar", path)
+    if found:
+        avatar = PROFILES.get(name_of(found.group(1)) or "", {}).get("avatar")
+        if avatar is None:
+            return False   # quem não tem avatar segue a rota de sempre, que responde 404
+        handler.serve("image/png", avatar, 0)
+        return True
+    profile = re.fullmatch(r"/users/([^/]+)/profile", path)
+    media = re.fullmatch(r"/media/([^/]+)", path)
+    if not (profile or media):
+        return False
+    if session_of(handler.cookie()) is None:
+        handler.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+    elif profile and name_of(profile.group(1)) is not None:
+        handler.send(200, profile_view(name_of(profile.group(1))))
+    elif media and media.group(1) in MEDIA:
+        handler.serve(*MEDIA[media.group(1)], 0)
+    else:
+        handler.problem(404, "Recurso não encontrado", "usuário não encontrado" if profile else "mídia não encontrada")
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -962,6 +1066,8 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path == "/ws":
             self.websocket()
+            return True
+        if serve_profiles(self, path):
             return True
         m = re.fullmatch(r"/users/([^/]+)/avatar", path)
         if m:
@@ -1418,12 +1524,14 @@ if __name__ == "__main__":
     USERS["bia"] = {"id": str(uuid.uuid4()), "password": "Senha@456", "created": "2026-01-02T00:00:00Z", "nickname": "Bia Borges",
                     "roles": [{"id": str(uuid.uuid4()), "name": "Admin", "color": "#E86CA5"}]}
     USERS["caio"] = {"id": str(uuid.uuid4()), "password": "Senha@789", "created": "2026-01-03T00:00:00Z"}
+    seed_profiles()
     # Histórico longo e espalhado por vários dias: dá para paginar a conversa, a busca e os filtros de data.
     old = datetime(2026, 11, 10, 9, 0, 0, tzinfo=timezone.utc)
     for i in range(1, 261):
         when = (old + timedelta(hours=i)).isoformat().replace("+00:00", "Z")
         new_message(PAPO, uid("bia" if i % 3 else "caio"), "mensagem antiga número %d" % i, created_at=when)
     new_message(PAPO, None, "Deploy da versão 1.4 concluído em produção.", external_author={"name": "Robô de Deploy"})
+    seed_webhooks()
     first = new_message(PAPO, uid("caio"), "Alguém viu o deploy de ontem? https://papo.example.com/status")
     aid = str(uuid.uuid4())
     FILES[aid] = ("image/png", png(255, 178, 56))
