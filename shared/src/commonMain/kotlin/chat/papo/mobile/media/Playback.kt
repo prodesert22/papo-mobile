@@ -173,7 +173,7 @@ private val RETRY_DELAYS_MS = listOf(1_000L, 3_000L)
 private val RELAY_MIME_TYPES = setOf("video/mp4", "video/webm", "video/ogg")
 
 /** O id vai no caminho da URL: só o que um UUID tem, para o endereço nunca sair do servidor da conta. */
-private val PATH_TOKEN = Regex("[A-Za-z0-9_-]+")
+internal val PATH_TOKEN = Regex("[A-Za-z0-9_-]+")
 
 /** Páginas de player do YouTube e o encurtador: não são arquivo de vídeo e o relay não as serve. */
 private val YOUTUBE_HOSTS = setOf(

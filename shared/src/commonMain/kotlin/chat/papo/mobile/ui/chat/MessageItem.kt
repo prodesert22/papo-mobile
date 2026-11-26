@@ -401,7 +401,7 @@ internal fun MessageItem(
                 }
                 message.attachments.forEach { attachment ->
                     Spacer(Modifier.height(6.dp))
-                    MessageAttachment(session, message.id, attachment, onOpenImage, videos)
+                    MessageAttachment(session, message, attachment, onOpenImage, videos)
                 }
                 message.embeds.forEach { embed ->
                     Spacer(Modifier.height(6.dp))

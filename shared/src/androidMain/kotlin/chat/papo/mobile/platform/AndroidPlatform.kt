@@ -44,6 +44,7 @@ fun createAndroidGraph(context: Context, activities: ActivityHolder): AppGraph {
             videoPosters = AndroidVideoPosterExtractor(),
             appVersion = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty(),
             webPlayerData = YouTubeWebData,
+            audio = androidAudioEngineFactory(app),
         ),
     )
     // O que ficou para outros aplicativos lerem (Compartilhar) não sobrevive ao bloqueio nem ao apagamento dos dados locais.

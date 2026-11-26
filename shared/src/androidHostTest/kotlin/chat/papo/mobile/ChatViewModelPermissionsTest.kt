@@ -11,6 +11,7 @@ import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.ws.WsEvent
 import chat.papo.mobile.ui.chat.ChatViewModel
+import chat.papo.mobile.ui.chat.MessageTarget
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
@@ -232,6 +233,7 @@ class ChatViewModelPermissionsTest {
         vm.showPinned()
         vm.markRead(stored)
         vm.openReply(stored.copy(replyTo = "original"))
+        vm.showMessage(MessageTarget(stored.id, stored.createdAtIso))
         flush(account)
 
         assertEquals(emptyList(), requests.drop(before).filter { it.contains("/channels/c2/") })

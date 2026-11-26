@@ -10,6 +10,9 @@ import chat.papo.mobile.core.crypto.KeyRing
 import chat.papo.mobile.data.db.DatabaseFactory
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.db.registry.RegistryDb
+import chat.papo.mobile.media.AudioAccounts
+import chat.papo.mobile.media.AudioEngineFactory
+import chat.papo.mobile.media.AudioPlayback
 import chat.papo.mobile.media.MediaCache
 import chat.papo.mobile.media.VideoPosterExtractor
 import chat.papo.mobile.security.AppLock
@@ -25,6 +28,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 
 /** O que cada plataforma precisa fornecer ao código comum. */
@@ -45,6 +49,8 @@ class PlatformDeps(
     val appVersion: String = "",
     /** Apaga o que o player web do YouTube deixou em claro; null onde a plataforma não tem um. Roda quando a sessão fecha. */
     val webPlayerData: WebPlayerData? = null,
+    /** Motor do player de áudio; null onde a plataforma ainda não tem um, e então os áudios aparecem como arquivos. */
+    val audio: AudioEngineFactory? = null,
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -54,12 +60,15 @@ class AppSession internal constructor(
     val calls: CallManager,
     private val registry: SqlDriver,
     private val scope: CoroutineScope,
+    /** O player de áudio de todas as contas (um áudio por vez); null sem motor na plataforma. */
+    val audio: AudioPlayback? = null,
 ) : UnlockedSession {
     /** Em chamada o app não bloqueia sozinho nem desliga o tempo real. */
     override val busy: StateFlow<Boolean> get() = calls.active
 
     override suspend fun close() {
         calls.leave()
+        audio?.release()
         accounts.close()
         scope.cancel()
         registry.close()
@@ -95,6 +104,8 @@ class AppGraph(private val platform: PlatformDeps) {
 
     /** App saiu da tela: agenda o bloqueio e desliga o tempo real. */
     fun onBackground() {
+        // Tocar em segundo plano exigiria um serviço de mídia, que o app não tem: o áudio pausa, mesmo com uma chamada aberta.
+        currentSession()?.audio?.pause()
         currentSession()?.takeIf { !it.busy.value }?.accounts?.setForeground(false)
         lock.onBackground()
     }
@@ -134,6 +145,13 @@ class AppGraph(private val platform: PlatformDeps) {
             posterExtractor = platform.videoPosters,
         )
         accounts.load()
-        AppSession(accounts, keys, CallManager(platform.voice, sessionScope), driver, sessionScope)
+        val audio = platform.audio?.let { engines ->
+            // O áudio é da conta selecionada e da sessão que o abriu: o player confere os dois a cada mudança.
+            val live = combine(accounts.activeId, accounts.sessionMap) { active, sessions ->
+                AudioAccounts(active, sessions.values.map { it.client })
+            }
+            AudioPlayback(engines, sessionScope, live)
+        }
+        AppSession(accounts, keys, CallManager(platform.voice, sessionScope), driver, sessionScope, audio)
     }
 }
