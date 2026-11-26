@@ -51,7 +51,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.navigationevent.NavigationEventInfo
-import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
 import chat.papo.mobile.resources.Res
@@ -230,22 +229,15 @@ fun ConversationPanelHost(
         state.snapTo(PanelValue.Closed)
     }
 
-    // O voltar do sistema, botão ou gesto, com o painel aberto fecha o painel acompanhando o dedo. A conversa pode ter
-    // os dela por cima (a gaveta de emoji, a de membros) e esses valem primeiro: são registrados depois deste.
-    val back = rememberNavigationEventState(NavigationEventInfo.None)
+    // O voltar do sistema, botão ou gesto, com o painel aberto fecha o painel. Durante o gesto nada se mexe: o painel só
+    // desliza para fora quando a volta é confirmada (o app não usa o gesto previsivo, ver `enableOnBackInvokedCallback`
+    // no manifesto). A conversa pode ter os dela por cima (a gaveta de emoji, a de membros) e esses valem primeiro: são
+    // registrados depois deste.
     NavigationBackHandler(
-        state = back,
+        state = rememberNavigationEventState(NavigationEventInfo.None),
         isBackEnabled = parked != null && open,
-        onBackCancelled = { scope.launch { state.animateTo(PanelValue.Open, PanelSlide) } },
         onBackCompleted = { scope.launch { state.animateTo(PanelValue.Closed, PanelSlide) } },
     )
-    LaunchedEffect(back) {
-        snapshotFlow { back.transitionState }.collect { transition ->
-            if (transition !is NavigationEventTransitionState.InProgress || state.offset.isNaN()) return@collect
-            val target = state.anchors.positionOf(PanelValue.Closed) * transition.latestEvent.progress
-            state.dispatchRawDelta(target - state.offset)
-        }
-    }
 
     // Quem sai da conversa (arrastando, ou pelo voltar) deixa o teclado: ele ficaria aberto sobre a lista.
     val focus = LocalFocusManager.current
