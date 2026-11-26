@@ -67,6 +67,14 @@ com vídeo (e uma sem medidas) desenhadas com borda e cantos coloridos, para ver
 moderação: GIF animado, GIF `sensitive`, `pending`, `blocked` (a lista já diz) e um que a lista ainda diz `pending` mas o
 servidor bloqueou (o arquivo e a miniatura respondem 410). Os vídeos desses embeds tocam se houver `FAKE_VIDEO_DIR`.
 
+YouTube (sempre ligado, no canal `embeds`): um embed `oembed` cujo player é `video.url` = `https://www.youtube.com/embed/<id>`, sem
+`mime_type`, como o servidor o entrega, com a miniatura em `GET /embeds/{id}`; e um cujo endereço de player é quase o certo
+(`youtube.com.evil.example.com`), que o app não pode tocar. O id é inventado, então o player real responde "vídeo indisponível"
+(basta para ver o fluxo do app); `FAKE_YOUTUBE_ID=<11 caracteres>` põe um id de verdade, para ver um vídeo tocar. O relay
+(`GET /embeds/{id}/video`) responde 404 a eles, como o servidor.
+
+    FAKE_YOUTUBE_ID=<id>      o id do vídeo do YouTube semeado (11 caracteres de A-Z, a-z, 0-9, _ e -)
+
     FAKE_MODERATION=1         acrescenta a mensagem "moderação ao vivo": a imagem vira `sensitive` (evento
                               `attachment_moderation_update`) depois de 20 s e `blocked` (410, sem evento) depois de mais 20 s.
                               Outro número é o intervalo em segundos
@@ -1707,7 +1715,7 @@ CUSTOM_DESCRIPTION = (
 
 def seed_track_b():
     """Sementes da trilha B do item 2: o canal `embeds`, com embed customizado completo (cor, autor com ícone, campos, rodapé),
-    GIFs de embed e anexados, imagens de embed de todas as proporções e anexos em cada estado de moderação.
+    GIFs de embed e anexados, imagens de embed de todas as proporções, embeds do YouTube e anexos em cada estado de moderação.
 
     `FAKE_MODERATION=1` (ou N, em segundos; 1 liga com 20) acrescenta uma mensagem com uma imagem que, depois de N s, vira
     sensível (evento ao vivo) e, depois de mais N s, bloqueada (o arquivo passa a responder 410, sem evento)."""
@@ -1773,6 +1781,22 @@ def seed_track_b():
             )
     seed_embed(new_message(cid, uid("bia"), "imagem 1200x630 sem medidas no embed"), image_bytes=frame_png(1200, 630), site_name="exemplo.com",
                url="https://exemplo.com/sem-medidas", title="Sem largura nem altura", thumbnail={"mime_type": "image/png"})
+
+    # YouTube: o servidor entrega a página do player em `video.url`, sem `mime_type`, e a miniatura em `GET /embeds/{id}`. O id é
+    # inventado (o player real responde "vídeo indisponível"); FAKE_YOUTUBE_ID põe um id de verdade para ver um vídeo tocar.
+    youtube_id = os.environ.get("FAKE_YOUTUBE_ID", "aB3dE5gH7jK")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", youtube_id):
+        raise SystemExit("FAKE_YOUTUBE_ID: precisa ter 11 caracteres de A-Z, a-z, 0-9, _ e -")
+    watch = "https://www.youtube.com/watch?v=" + youtube_id
+    seed_embed(new_message(cid, uid("caio"), "Vídeo do YouTube: " + watch), image_bytes=frame_png(480, 270, (200, 40, 60)), fetch_method="oembed",
+               provider="YouTube", site_name="YouTube", url=watch, title="Vídeo de exemplo",
+               thumbnail={"mime_type": "image/png", "width": 480, "height": 270},
+               video={"url": "https://www.youtube.com/embed/" + youtube_id})
+    # Quase certo, mas não é o player: o host só começa com `youtube.com`. Não pode virar player; fica um cartão de link comum.
+    lookalike = "https://youtube.com.evil.example.com/embed/" + youtube_id
+    seed_embed(new_message(cid, uid("bia"), "Parece do YouTube, mas o endereço do player é de outro site"), image_bytes=frame_png(480, 270, (60, 60, 60)),
+               fetch_method="oembed", provider="YouTube", site_name="YouTube", url="https://youtube.com.evil.example.com/watch?v=" + youtube_id,
+               title="Embed com endereço falso", thumbnail={"mime_type": "image/png", "width": 480, "height": 270}, video={"url": lookalike})
 
     # Anexos: GIF animado (com selo), GIF sensível, pendente (aparece normal), bloqueado (aviso) e bloqueado no servidor antes do aviso.
     new_message(cid, uid("caio"), "GIF anexado (anima e tem o selo GIF)", attachments=[media_attachment("danca.gif", "image/gif", gif, 320, 180)])

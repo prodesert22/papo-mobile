@@ -119,10 +119,15 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
         onControlsVisible: (Boolean) -> Unit,
-    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure, onControlsVisible)
+        onFullscreen: (() -> Unit)?,
+    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure, onControlsVisible, onFullscreen)
 
     @Composable
     override fun HideSystemBars() = HideSystemBarsInDialog()
+
+    @Composable
+    override fun YouTubePlayer(videoId: String, modifier: Modifier, fullscreenButton: Boolean, onOpenExternally: () -> Unit) =
+        AndroidYouTubePlayer(videoId, modifier, fullscreenButton, onOpenExternally)
 
     /**
      * Descreve o arquivo sem ler o conteúdo: nome, tipo e tamanho vêm do provedor. Abrir o arquivo uma vez já aqui
@@ -207,7 +212,7 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
  * deslizar da borda para vê-las de passagem. Fora de um diálogo não faz nada: a janela do app é da tela de conversa.
  */
 @Composable
-private fun HideSystemBarsInDialog() {
+internal fun HideSystemBarsInDialog() {
     val view = LocalView.current
     DisposableEffect(view) {
         val window = (view.parent as? DialogWindowProvider)?.window

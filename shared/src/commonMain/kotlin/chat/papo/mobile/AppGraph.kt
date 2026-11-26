@@ -17,6 +17,7 @@ import chat.papo.mobile.security.AppPrefs
 import chat.papo.mobile.security.LockState
 import chat.papo.mobile.security.MasterKeyStore
 import chat.papo.mobile.security.UnlockedSession
+import chat.papo.mobile.security.WebPlayerData
 import chat.papo.mobile.voice.CallManager
 import chat.papo.mobile.voice.VoiceEngineFactory
 import io.ktor.client.engine.HttpClientEngine
@@ -42,6 +43,8 @@ class PlatformDeps(
     val videoPosters: VideoPosterExtractor? = null,
     /** Versão instalada do app, como mostrada ao usuário. */
     val appVersion: String = "",
+    /** Apaga o que o player web do YouTube deixou em claro; null onde a plataforma não tem um. Roda quando a sessão fecha. */
+    val webPlayerData: WebPlayerData? = null,
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -79,6 +82,7 @@ class AppGraph(private val platform: PlatformDeps) {
         },
         scope = scope,
         openSession = ::openSession,
+        onSessionClosed = { platform.webPlayerData?.wipe() },
     )
 
     private fun mediaDir(accountId: String) = "${platform.mediaDirectory}/$accountId"

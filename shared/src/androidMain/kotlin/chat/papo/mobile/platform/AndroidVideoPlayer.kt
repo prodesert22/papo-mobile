@@ -77,7 +77,8 @@ private class PlayerHolder(context: Context, client: PapoClient) : RememberObser
  * O player vale para o par ([client], [media]); [startAtMs] só conta na primeira composição, porque
  * a tela devolve a posição que recebe de [onPosition] e ela não pode reiniciar o vídeo.
  * [onControlsVisible] acompanha os controles do `PlayerView`: começa verdadeiro (o player os mostra ao se ligar) e
- * depois segue cada vez que eles somem ou voltam.
+ * depois segue cada vez que eles somem ou voltam. Com [onFullscreen] o `PlayerView` mostra o botão de tela cheia do
+ * Media3; sem ele (a tela cheia) o botão não existe.
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -89,12 +90,15 @@ internal fun AndroidVideoPlayer(
     onPosition: (Long) -> Unit,
     onFailure: (PlaybackFailure) -> Unit,
     onControlsVisible: (Boolean) -> Unit,
+    onFullscreen: (() -> Unit)?,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val currentOnPosition by rememberUpdatedState(onPosition)
     val currentOnFailure by rememberUpdatedState(onFailure)
     val currentOnControlsVisible by rememberUpdatedState(onControlsVisible)
+    val currentOnFullscreen by rememberUpdatedState(onFullscreen)
+    val hasFullscreen = onFullscreen != null
     val player = remember(client, media.key) { PlayerHolder(context, client) }.player
 
     DisposableEffect(player) {
@@ -185,6 +189,11 @@ internal fun AndroidVideoPlayer(
                 setControllerVisibilityListener(
                     PlayerView.ControllerVisibilityListener { visibility -> currentOnControlsVisible(visibility == View.VISIBLE) },
                 )
+                // O botão de tela cheia do Media3 aparece só por haver um ouvinte (um null não o esconde de volta), então o
+                // ouvinte só se põe com `onFullscreen`, na criação da view: a nulidade não muda durante a vida dela.
+                if (hasFullscreen) {
+                    setFullscreenButtonClickListener { currentOnFullscreen?.invoke() }
+                }
             }
         },
         update = { view ->

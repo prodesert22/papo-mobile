@@ -13,6 +13,7 @@ import chat.papo.mobile.security.LockTimeout
 import chat.papo.mobile.security.MasterKeyStore
 import chat.papo.mobile.security.UnlockedSession
 import chat.papo.mobile.security.UserAuthAvailability
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
@@ -21,6 +22,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
@@ -90,6 +92,8 @@ class AppLockTest {
         val prefs = FakePrefs()
         val sessions = mutableListOf<FakeSession>()
         var wipes = 0
+        var closes = 0
+        var onClose: () -> Unit = {}
         val lock = AppLock(
             keyStore = keyStore,
             crypto = NoCrypto,
@@ -98,6 +102,7 @@ class AppLockTest {
             scope = scope.backgroundScope,
             openSession = { _: KeyRing -> FakeSession().also { sessions += it } },
             timeSource = scope.testScheduler.timeSource,
+            onSessionClosed = { closes++; onClose() },
         )
         val prompt = AuthPrompt("t", "s")
     }
@@ -210,5 +215,78 @@ class AppLockTest {
         assertEquals(1, f.keyStore.wiped)
         assertEquals(true, f.lock.dataWasWiped.value)
         assertEquals(false, f.lock.lockEnabled.value)
+    }
+
+    @Test
+    fun travarApagaOQueFicouForaDaSessaoAntesDeFecharla() = runTest {
+        val f = Fixture(this)
+        f.lock.start()
+        f.lock.setLockEnabled(true, f.prompt)
+        assertEquals(0, f.closes)
+        var sessionClosedAtHook = true
+        f.onClose = { sessionClosedAtHook = f.sessions.single().closed }
+
+        f.lock.lockNow()
+
+        assertEquals(1, f.closes)
+        assertEquals(false, sessionClosedAtHook)
+        assertTrue(f.sessions.single().closed)
+    }
+
+    @Test
+    fun abrirEDesbloquearNaoApagamNada() = runTest {
+        val f = Fixture(this)
+        f.lock.start()
+        f.lock.setLockEnabled(true, f.prompt)
+        f.lock.lockNow()
+        f.lock.unlock(f.prompt)
+
+        assertIs<LockState.Unlocked>(f.lock.state.value)
+        assertEquals(1, f.closes)
+    }
+
+    @Test
+    fun semBloqueioLigadoOHookNaoRoda() = runTest {
+        val f = Fixture(this)
+        f.lock.start()
+
+        f.lock.lockNow()
+
+        assertEquals(0, f.closes)
+        assertIs<LockState.Unlocked>(f.lock.state.value)
+    }
+
+    @Test
+    fun apagarOsDadosLocaisTambemApagaOQueFicouForaDaSessao() = runTest {
+        val f = Fixture(this)
+        f.lock.start()
+
+        f.lock.resetLocalData()
+
+        assertEquals(1, f.closes)
+        assertEquals(1, f.wipes)
+    }
+
+    @Test
+    fun umHookQueFalhaNaoImpedeOBloqueio() = runTest {
+        val f = Fixture(this)
+        f.lock.start()
+        f.lock.setLockEnabled(true, f.prompt)
+        f.onClose = { error("o WebView já não existia") }
+
+        f.lock.lockNow()
+
+        assertIs<LockState.Locked>(f.lock.state.value)
+        assertTrue(f.sessions.single().closed)
+    }
+
+    @Test
+    fun umHookQueSinalizaCancelamentoNaoEEngolido() = runTest {
+        val f = Fixture(this)
+        f.lock.start()
+        f.lock.setLockEnabled(true, f.prompt)
+        f.onClose = { throw CancellationException("cancelado") }
+
+        assertFailsWith<CancellationException> { f.lock.lockNow() }
     }
 }

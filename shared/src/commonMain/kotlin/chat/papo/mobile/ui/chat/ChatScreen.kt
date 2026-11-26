@@ -205,9 +205,12 @@ import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.rememberMediaPainter
 import chat.papo.mobile.ui.components.rememberedPainter
 import chat.papo.mobile.ui.components.text
-import chat.papo.mobile.ui.media.PlayingVideo
+import chat.papo.mobile.ui.media.InlineVideos
+import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.media.VideoViewer
+import chat.papo.mobile.ui.media.YouTubeViewer
 import chat.papo.mobile.ui.media.findOpenVideo
+import chat.papo.mobile.ui.media.findOpenYouTube
 import chat.papo.mobile.ui.settings.ConfirmDialog
 import kotlinx.coroutines.delay
 import kotlin.math.max
@@ -281,8 +284,14 @@ fun ChatScreen(
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
     var viewing by remember { mutableStateOf<ViewingImage?>(null) }
     var reactorsOf by remember { mutableStateOf<ReactorsRequest?>(null) }
-    // Um vídeo por vez. Gira o aparelho e a atividade se recria: a chave e o ponto sobrevivem, e a mídia sai das mensagens de novo.
-    var playing by rememberSaveable(stateSaver = PlayingVideo.Saver) { mutableStateOf<PlayingVideo?>(null) }
+    // Um vídeo por vez: o que toca no cartão da mensagem ou o que está em tela cheia (ver `InlineVideos`). Gira o aparelho e a
+    // atividade se recria: as chaves e os pontos sobrevivem, e a mídia sai das mensagens de novo. Os cartões abrem a tela
+    // cheia só por `VideoHost.openFullscreen`, que grava `videos.fullscreen` (`playing`): o visualizador abaixo lê dele.
+    val videosState = rememberSaveable(stateSaver = InlineVideos.Saver) { mutableStateOf(InlineVideos()) }
+    var videos by videosState
+    val videoHost = remember(videosState) { VideoHost(videosState) }
+    // Só a tela cheia importa aqui: o vídeo que toca no cartão recompõe o cartão, não a conversa.
+    val playing by remember(videosState) { derivedStateOf { videosState.value.fullscreen } }
     // Perder a leitura com uma folha ou diálogo aberto: eles agiriam sobre uma conversa que a pessoa já não vê.
     LaunchedEffect(access.readDenied) {
         if (access.readDenied) {
@@ -292,7 +301,7 @@ fun ChatScreen(
             confirmDelete = null
             viewing = null
             reactorsOf = null
-            playing = null
+            videos = InlineVideos()
         }
     }
     val listState = rememberLazyListState()
@@ -514,7 +523,7 @@ fun ChatScreen(
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
                                 onOpenImage = { viewing = ViewingImage(message.id, it) },
                                 onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
-                                onPlay = { playing = PlayingVideo(it.key) },
+                                videos = videoHost,
                             )
                         }
                     }
@@ -683,15 +692,18 @@ fun ChatScreen(
     }
     viewing?.let { ImageViewer(session, it.messageId, it.attachment) { viewing = null } }
     playing?.let { current ->
+        val youtube = remember(current, messages) { findOpenYouTube(messages, current.key) }
         val video = remember(current, messages) { findOpenVideo(session.client.server, messages, current.key) }
         // Sem o vídeo nas mensagens (apagado, ou ainda carregando depois de girar) o visualizador não aparece.
-        if (video != null) {
+        if (youtube != null) {
+            YouTubeViewer(video = youtube, onDismiss = { videos = videos.closeFullscreen() })
+        } else if (video != null) {
             VideoViewer(
                 session = session,
                 video = video,
                 startAtMs = current.positionMs,
                 onPosition = { current.positionMs = it },
-                onDismiss = { playing = null },
+                onDismiss = { videos = videos.closeFullscreen() },
             )
         }
     }

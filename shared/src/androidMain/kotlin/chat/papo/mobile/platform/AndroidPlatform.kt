@@ -27,6 +27,8 @@ private val backgroundDispatcher by lazy {
 fun createAndroidGraph(context: Context, activities: ActivityHolder): AppGraph {
     val app = context.applicationContext
     val crypto = JcaCrypto()
+    // O app ainda não criou nenhum WebView: o que um processo encerrado com o player do YouTube aberto deixou sai agora.
+    YouTubeWebData.sweepLeftovers(app)
     return AppGraph(
         PlatformDeps(
             crypto = crypto,
@@ -39,6 +41,7 @@ fun createAndroidGraph(context: Context, activities: ActivityHolder): AppGraph {
             voice = WebRtcVoiceEngineFactory(app, ActivityRequests(app, activities)),
             videoPosters = AndroidVideoPosterExtractor(),
             appVersion = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty(),
+            webPlayerData = YouTubeWebData,
         ),
     )
 }

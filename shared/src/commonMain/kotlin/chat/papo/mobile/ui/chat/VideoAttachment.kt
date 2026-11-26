@@ -17,11 +17,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -38,7 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -59,10 +56,10 @@ import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.resources.video_download_failed
-import chat.papo.mobile.resources.video_play
 import chat.papo.mobile.resources.video_poster_loading
 import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.rememberMediaImage
+import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.media.rememberAttachmentDownload
 import org.jetbrains.compose.resources.stringResource
 
@@ -72,14 +69,15 @@ private val MaxHeight = 320.dp
 
 /**
  * Cartão de um vídeo anexado: uma caixa com a proporção do vídeo (a lista não pula; sem dimensões, a da miniatura do
- * servidor, e sem ela 16:9) e o ▶ no meio, e embaixo o nome, o tamanho e o **Baixar**. Tocar a caixa chama [onPlay].
+ * servidor, e sem ela 16:9) e o ▶ no meio, e embaixo o nome, o tamanho e o **Baixar**. O ▶ toca o vídeo na própria caixa
+ * e tocar fora dele abre a tela cheia ([VideoBox]); [videos] guarda qual vídeo toca.
  *
  * A capa é a miniatura do servidor, quando ele a gerou (só gera para imagem, então quase nunca), ou um quadro do próprio
  * vídeo tirado neste aparelho (`VideoPosters`), guardado no cache cifrado. Enquanto não chega a caixa fica como está e
  * a capa aparece com um fade, sob o ▶, e um anel de progresso em volta do ▶ mostra que ela está sendo feita (só enquanto
  * é extraída: a que já estava no cache aparece sem ele); sem capa (formato que o aparelho não lê, falha) o cartão fica
  * simples, sem o anel. Vídeo marcado como sensível fica escondido, sem pedir capa nenhuma, com nome, tamanho e Baixar,
- * até o primeiro toque (o segundo toca), como a imagem.
+ * até o primeiro toque, em qualquer ponto; depois vale o gesto do ▶ e do resto da caixa, como no vídeo comum.
  */
 @Composable
 internal fun VideoAttachment(
@@ -87,7 +85,7 @@ internal fun VideoAttachment(
     messageId: String,
     attachment: AttachmentDto,
     media: PlayableMedia,
-    onPlay: (PlayableMedia) -> Unit,
+    videos: VideoHost,
 ) {
     // A chave inclui o estado: virar sensível depois de aberto esconde de novo.
     val sensitive = moderationView(attachment.moderationStatus) == ModerationView.Sensitive
@@ -119,41 +117,38 @@ internal fun VideoAttachment(
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(aspect)
-                .clickable(role = Role.Button) { if (revealed) onPlay(media) else revealed = true },
-            contentAlignment = Alignment.Center,
-        ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(aspect), contentAlignment = Alignment.Center) {
             if (revealed) {
-                val bitmap = poster
-                // A capa entra com um fade em vez de aparecer de uma vez; o valor só é lido ao desenhar, sem recompor por quadro.
-                val alpha by animateFloatAsState(if (bitmap != null) 1f else 0f, tween(durationMillis = 250), label = "poster")
-                // Inteira, sem recorte: o quadro tem a proporção real do vídeo, que a caixa só segue de perto.
-                if (bitmap != null) {
-                    Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }, contentScale = ContentScale.Fit)
+                ServerVideoBox(session, messageId, media, videos, embed = false) {
+                    val bitmap = poster
+                    // A capa entra com um fade em vez de aparecer de uma vez; o valor só é lido ao desenhar, sem recompor por quadro.
+                    val alpha by animateFloatAsState(if (bitmap != null) 1f else 0f, tween(durationMillis = 250), label = "poster")
+                    // Inteira, sem recorte: o quadro tem a proporção real do vídeo, que a caixa só segue de perto.
+                    if (bitmap != null) {
+                        Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }, contentScale = ContentScale.Fit)
+                    }
+                    // O anel entra e sai com um fade: some junto com o início do fade da capa, sem um vazio entre os dois.
+                    val progress by animateFloatAsState(if (making && bitmap == null) 1f else 0f, tween(durationMillis = 250), label = "posterProgress")
+                    if (progress > 0f) {
+                        val loading = stringResource(Res.string.video_poster_loading)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(64.dp).graphicsLayer { this.alpha = progress }.semantics { contentDescription = loading },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            strokeWidth = 2.dp,
+                        )
+                    }
                 }
-                // O anel entra e sai com um fade: some junto com o início do fade da capa, sem um vazio entre os dois.
-                val progress by animateFloatAsState(if (making && bitmap == null) 1f else 0f, tween(durationMillis = 250), label = "posterProgress")
-                if (progress > 0f) {
-                    val loading = stringResource(Res.string.video_poster_loading)
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(64.dp).graphicsLayer { this.alpha = progress }.semantics { contentDescription = loading },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        strokeWidth = 2.dp,
-                    )
-                }
-                PlayBadge()
             } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {
-                    Icon(Icons.Filled.VisibilityOff, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        stringResource(Res.string.chat_sensitive),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Box(Modifier.fillMaxSize().clickable(role = Role.Button) { revealed = true }, contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {
+                        Icon(Icons.Filled.VisibilityOff, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            stringResource(Res.string.chat_sensitive),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -183,13 +178,5 @@ internal fun VideoAttachment(
                 }
             }
         }
-    }
-}
-
-/** O ▶ no meio da caixa: um disco escuro com o triângulo branco, legível sobre qualquer fundo nos dois temas. */
-@Composable
-internal fun PlayBadge() {
-    Box(Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
-        Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(Res.string.video_play), tint = Color.White, modifier = Modifier.size(32.dp))
     }
 }

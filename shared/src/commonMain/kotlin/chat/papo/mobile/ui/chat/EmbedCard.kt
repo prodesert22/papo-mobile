@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -56,6 +57,7 @@ import chat.papo.mobile.chat.embedMediaAspect
 import chat.papo.mobile.chat.fieldRows
 import chat.papo.mobile.chat.isGifEmbed
 import chat.papo.mobile.chat.safeLink
+import chat.papo.mobile.chat.youTubeId
 import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.EmbedFieldDto
 import chat.papo.mobile.media.PlayableMedia
@@ -76,6 +78,7 @@ import chat.papo.mobile.ui.components.parseHexColor
 import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.components.rememberMediaPainter
 import chat.papo.mobile.ui.components.rememberedPainter
+import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.media.openInBrowser
 import org.jetbrains.compose.resources.stringResource
 
@@ -105,21 +108,22 @@ private const val PLACEHOLDER_ASPECT = 16f / 9f
 /**
  * Cartão de um embed. O de GIF ([isGifEmbed]) é só a imagem animada, o provedor e o título; os outros são o cartão
  * completo de [LinkEmbedCard]. Nada é pedido ao relay de vídeo antes do toque: nem autoplay nem pré-carga, porque cada
- * vídeo aberto prende uma das poucas vagas do relay no servidor.
+ * vídeo aberto prende uma das poucas vagas do relay no servidor. [videos] guarda qual vídeo toca.
  */
 @Composable
 internal fun EmbedCard(
     session: AccountSession,
+    messageId: String,
     embed: EmbedDto,
     users: Map<String, User>,
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
-    onPlay: (PlayableMedia) -> Unit,
+    videos: VideoHost,
 ) {
     if (isGifEmbed(embed)) {
         GifEmbedCard(session, embed)
     } else {
-        LinkEmbedCard(session, embed, users, emojiIds, unicodeEmojis, onPlay)
+        LinkEmbedCard(session, messageId, embed, users, emojiIds, unicodeEmojis, videos)
     }
 }
 
@@ -127,20 +131,23 @@ internal fun EmbedCard(
  * Cartão de um embed de link ou customizado: barra lateral com a cor do embed (ou a de contorno), provedor, autor com o
  * ícone, título com link, descrição em Markdown, campos em grade, imagem e rodapé. Tudo é texto: o conteúdo é remoto, e
  * os links só abrem se forem `http` ou `https` ([safeLink]). Se o embed traz um vídeo que o relay do servidor serve
- * ([relayVideo]), a caixa da imagem leva o ▶ e tocar nela chama [onPlay].
+ * ([relayVideo]), a caixa da imagem leva o ▶, que o toca ali mesmo, e tocar fora dele abre a tela cheia ([VideoBox]). Um
+ * embed do YouTube ([youTubeId]) tem a mídia própria de [YouTubeMedia], que não passa pelo relay.
  *
  * O servidor serve uma imagem por embed (a `thumbnail` ou, sem ela, a `image`) e não serve o ícone do rodapé.
  */
 @Composable
 private fun LinkEmbedCard(
     session: AccountSession,
+    messageId: String,
     embed: EmbedDto,
     users: Map<String, User>,
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
-    onPlay: (PlayableMedia) -> Unit,
+    videos: VideoHost,
 ) {
     val video = relayVideo(session.client.server, embed)
+    val youtubeId = youTubeId(embed)
     val image = if (embed.hasImage()) rememberEmbedImage(session, embed) else null
     val accent = MaterialTheme.colorScheme.primary
     val barColor = parseHexColor(embed.color) ?: MaterialTheme.colorScheme.outline
@@ -167,9 +174,11 @@ private fun LinkEmbedCard(
         }
         embed.description?.takeIf { it.isNotBlank() }?.let { EmbedDescription(session, it, users, emojiIds, unicodeEmojis) }
         if (embed.fields.isNotEmpty()) EmbedFields(embed.fields)
-        if (video != null || embed.hasImage()) {
+        if (youtubeId != null) {
+            YouTubeMedia(messageId, youtubeId, image, videos, Modifier.padding(top = 4.dp))
+        } else if (video != null || embed.hasImage()) {
             val aspect = embedMediaAspect(embed) ?: image?.let { aspectOrNull(it.width, it.height) } ?: PLACEHOLDER_ASPECT
-            EmbedMediaBox(image, aspect, video, onPlay, Modifier.padding(top = 4.dp))
+            EmbedMediaBox(session, messageId, image, aspect, video, videos, Modifier.padding(top = 4.dp))
         }
         embed.footer?.text?.takeIf { it.isNotBlank() }?.let {
             Text(
@@ -315,14 +324,17 @@ private fun EmbedFields(fields: List<EmbedFieldDto>) {
 /**
  * A caixa da imagem do embed: com a proporção [aspect] (a lista não pula quando a imagem chega), na largura do cartão e
  * no máximo [MediaMaxHeight] de altura, e a imagem inteira dentro dela (`Fit`, sem cortar as laterais nem o topo). Com
- * [video] o ▶ fica por cima e tocar em qualquer ponto chama [onPlay]; antes da imagem chegar, e sem ela, o fundo do cartão.
+ * [video] a caixa é a de um vídeo tocável ([VideoBox]): o ▶ o toca ali mesmo e o resto da caixa abre a tela cheia; antes da
+ * imagem chegar, e sem ela, o fundo do cartão.
  */
 @Composable
 private fun EmbedMediaBox(
+    session: AccountSession,
+    messageId: String,
     image: PlatformImage?,
     aspect: Float,
     video: PlayableMedia?,
-    onPlay: (PlayableMedia) -> Unit,
+    videos: VideoHost,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -330,12 +342,13 @@ private fun EmbedMediaBox(
             .heightIn(max = MediaMaxHeight)
             .aspectRatio(aspect)
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .then(if (video != null) Modifier.clickable(role = Role.Button) { onPlay(video) } else Modifier),
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         contentAlignment = Alignment.Center,
     ) {
-        image?.let { Image(it.rememberedPainter(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
-        if (video != null) PlayBadge()
+        val cover: @Composable BoxScope.() -> Unit = {
+            image?.let { Image(it.rememberedPainter(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
+        }
+        if (video != null) ServerVideoBox(session, messageId, video, videos, embed = true, cover = cover) else cover()
     }
 }
 
