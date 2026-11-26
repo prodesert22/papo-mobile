@@ -1,5 +1,6 @@
 package chat.papo.mobile.ui.profile
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -203,15 +204,15 @@ private fun UnsavedBar(visible: Boolean, canSave: Boolean, onDiscard: () -> Unit
         Surface(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
             shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.inverseSurface,
-            contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+            // As cores do tema do app (como o aviso da lista de canais), não as invertidas do Material.
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             shadowElevation = 6.dp,
         ) {
             Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(Res.string.profile_edit_unsaved), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = onDiscard) {
-                    Text(stringResource(Res.string.profile_edit_discard_all), color = MaterialTheme.colorScheme.inversePrimary)
-                }
+                TextButton(onClick = onDiscard) { Text(stringResource(Res.string.profile_edit_discard_all)) }
                 Button(onClick = onSave, enabled = canSave) { Text(stringResource(Res.string.profile_edit_save)) }
             }
         }
