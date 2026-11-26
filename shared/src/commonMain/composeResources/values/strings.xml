@@ -76,6 +76,51 @@
     <string name="security_alert_body">O servidor detectou o reuso de um token desta conta e encerrou todas as conexões. Se não foi você, troque a senha.</string>
     <string name="security_alert_dismiss">Entendi</string>
 
+    <!-- Editar perfil -->
+    <string name="profile_edit_action">Editar perfil</string>
+    <string name="profile_edit_title">Editar perfil</string>
+    <string name="profile_edit_row_title">Perfil e status</string>
+    <string name="profile_edit_row_body">Apelido, frase de status, descrição, avatar e banner.</string>
+    <string name="profile_edit_nickname">Apelido</string>
+    <string name="profile_edit_status_message">Frase de status</string>
+    <string name="profile_edit_description">Descrição</string>
+    <string name="profile_edit_typing">Frase de digitação</string>
+    <string name="profile_edit_typing_help">Aparece para os outros enquanto você digita.</string>
+    <string name="profile_edit_counter">%1$d/%2$d</string>
+    <string name="profile_edit_avatar">Avatar</string>
+    <string name="profile_edit_avatar_help">Recortado no centro, em quadrado, e reduzido para 512 px antes de enviar.</string>
+    <string name="profile_edit_banner">Banner</string>
+    <string name="profile_edit_banner_help">Recortado no centro, na proporção 3:1, e reduzido para 1536 × 512 px antes de enviar.</string>
+    <string name="profile_edit_pick_avatar">Escolher avatar</string>
+    <string name="profile_edit_pick_banner">Escolher banner</string>
+    <string name="profile_edit_remove_banner">Remover banner</string>
+    <string name="profile_edit_banner_removal">O banner será removido ao salvar.</string>
+    <string name="profile_edit_discard">Desfazer escolha</string>
+    <string name="profile_edit_preparing">Preparando a imagem…</string>
+    <string name="profile_edit_save">Salvar</string>
+    <string name="profile_edit_saving">Salvando…</string>
+    <string name="profile_edit_reload">Recarregar perfil</string>
+    <string name="profile_edit_step_text">Dados do perfil</string>
+    <string name="profile_edit_step_avatar">Avatar</string>
+    <string name="profile_edit_step_banner">Banner</string>
+    <string name="profile_edit_outcome_sending">Enviando…</string>
+    <string name="profile_edit_outcome_saved">Salvo.</string>
+    <string name="profile_edit_outcome_skipped">Não enviado: um pedido anterior falhou.</string>
+    <string name="profile_edit_failed_rejected">O servidor recusou a mudança.</string>
+    <string name="profile_edit_failed_rate_limited">Muitos pedidos. Espere um pouco e salve de novo.</string>
+    <string name="profile_edit_failed_not_sent">Sem conexão. Nada foi enviado; salve de novo quando voltar.</string>
+    <string name="profile_edit_failed_unauthorized">A sessão desta conta terminou. Entre de novo.</string>
+    <string name="profile_edit_failed_uncertain">Não confirmado. O servidor pode ter aplicado a mudança: recarregue o perfil antes de tentar de novo.</string>
+    <string name="profile_edit_refused_not_an_image">Não foi possível abrir esta imagem.</string>
+    <string name="profile_edit_refused_source_too_large">O arquivo é grande demais (mais de 32 MB).</string>
+    <string name="profile_edit_refused_animation">Esta animação é maior que o servidor aceita (2 MB; 512 px no avatar e 2048 px no banner). Escolha uma menor ou uma imagem parada.</string>
+    <string name="profile_edit_refused_too_heavy">Mesmo comprimida, a imagem passa de 2 MB. Escolha uma mais simples.</string>
+    <string name="profile_edit_refused_unreadable">Não foi possível ler o arquivo.</string>
+    <string name="profile_status_title">Status</string>
+    <string name="profile_status_available">Disponível</string>
+    <string name="profile_status_away">Ausente</string>
+    <string name="profile_status_busy">Ocupado</string>
+
     <!-- Configurações da conta -->
     <string name="account_label">Apelido desta conta</string>
     <string name="account_label_hint">Ex.: Trabalho, Pessoal</string>

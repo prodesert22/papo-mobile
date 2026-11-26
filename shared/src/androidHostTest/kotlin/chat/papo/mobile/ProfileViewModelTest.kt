@@ -37,7 +37,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class ProfileViewModelTest {
     /** Um servidor Papo com um perfil e a abertura de conversa direta; [profileStatus] e [dmStatus] mudam as respostas. */
-    private class Server(val nickname: String = "Bia Borges") {
+    private class Server(@Volatile var nickname: String = "Bia Borges") {
         val requests = CopyOnWriteArrayList<String>()
         val bodies = CopyOnWriteArrayList<String>()
         @Volatile var profileStatus = HttpStatusCode.OK
@@ -115,6 +115,59 @@ class ProfileViewModelTest {
 
         assertIs<ProfileLoad.Loaded>(again.settled().load)
         assertEquals(1, server.requests.size)
+    }
+
+    @Test
+    fun mostrarOCacheDepoisDeInvalidarTrazOPerfilNovoSemPassarPorCarregando() = runTest {
+        val server = Server()
+        val session = session(server)
+        val vm = ProfileViewModel(session, "u2")
+        vm.settled()
+
+        session.profiles.invalidate("u2")
+        server.nickname = "Bia Souza"
+        vm.showCached()
+        assertIs<ProfileLoad.Loaded>(vm.state.value.load)
+        val shown = vm.state.first { (it.load as? ProfileLoad.Loaded)?.profile?.nickname == "Bia Souza" }
+
+        assertIs<ProfileLoad.Loaded>(shown.load)
+        assertEquals(2, server.requests.size)
+    }
+
+    @Test
+    fun mostrarOCacheDentroDaValidadeNaoVoltaAoServidor() = runTest {
+        val server = Server()
+        val vm = ProfileViewModel(session(server), "u2")
+        vm.settled()
+
+        vm.showCached()
+        runCurrent()
+
+        assertEquals(1, server.requests.size)
+    }
+
+    @Test
+    fun mostrarOCacheSemPerfilNaTelaOuComFalhaNaoMudaNada() = runTest {
+        val server = Server().also { it.profileStatus = HttpStatusCode.InternalServerError }
+        val session = session(server)
+        val vm = ProfileViewModel(session, "u2")
+        val failed = vm.settled().load
+        vm.showCached()
+        runCurrent()
+        assertEquals(failed, vm.state.value.load)
+        assertEquals(1, server.requests.size)
+
+        server.profileStatus = HttpStatusCode.OK
+        vm.retry()
+        val loaded = vm.settled().load
+        session.profiles.invalidate("u2")
+        server.profileStatus = HttpStatusCode.InternalServerError
+        vm.showCached()
+        TestResources.waitUntil { server.requests.size == 3 }
+        runCurrent()
+
+        // A leitura nova falhou: o perfil que estava na tela continua.
+        assertEquals(loaded, vm.state.value.load)
     }
 
     @Test

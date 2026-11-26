@@ -77,6 +77,8 @@ import chat.papo.mobile.ui.home.rememberConversationPanelState
 import chat.papo.mobile.ui.home.step
 import chat.papo.mobile.ui.lock.LockScreen
 import chat.papo.mobile.ui.members.MembersDrawer
+import chat.papo.mobile.ui.profile.EditProfileScreen
+import chat.papo.mobile.ui.profile.EditProfileViewModel
 import chat.papo.mobile.ui.profile.ProfileScreen
 import chat.papo.mobile.ui.profile.ProfileViewModel
 import chat.papo.mobile.ui.search.SearchScreen
@@ -132,6 +134,10 @@ private data class BlockedRoute(val accountId: String)
 /** A troca da senha da conta [accountId]. */
 @Serializable
 private data class PasswordRoute(val accountId: String)
+
+/** Edição do próprio perfil da conta [accountId]. */
+@Serializable
+private data class EditProfileRoute(val accountId: String)
 
 /** Troca rápida entre as conversas de todas as contas; [accountId] e [channelId] são a conversa de onde veio, se houve. */
 @Serializable
@@ -306,7 +312,23 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                     onBack = { navController.popBackStack() },
                     // Veio desta conversa (o título da conversa direta leva ao perfil) ou da lista: ela abre no painel.
                     onOpenChat = { channelId -> openChat(route.accountId, ParkedChat(channelId)) },
+                    onEdit = { navController.navigate(EditProfileRoute(route.accountId)) },
                 )
+            }
+        }
+        composable<EditProfileRoute> { entry ->
+            val route = entry.toRoute<EditProfileRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                val reducer = LocalPlatformUi.current.imageReducer
+                // A sessão entra na chave: o que se edita numa sessão nunca vai para outra.
+                val vm = viewModel(key = "edit-profile/${route.accountId}/${accountSession.hashCode()}") {
+                    EditProfileViewModel(accountSession, reducer)
+                }
+                EditProfileScreen(accountSession, vm, onBack = { navController.popBackStack() })
             }
         }
         composable<SearchRoute> { entry ->
@@ -344,6 +366,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                 onBack = { navController.popBackStack() },
                 onOpenBlocked = { navController.navigate(BlockedRoute(accountId)) },
                 onOpenPassword = { navController.navigate(PasswordRoute(accountId)) },
+                onEditProfile = { navController.navigate(EditProfileRoute(accountId)) },
             )
         }
         composable<PasswordRoute> { entry ->

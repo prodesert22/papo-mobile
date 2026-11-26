@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -111,6 +112,52 @@ class ChatStoreEventsTest {
         chat.handle(WsEvent.EmbedsUpdated("c1", "desconhecida", emptyList()))
         chat.handle(WsEvent.ReactionUpdated("desconhecida", null, "👍", 1))
         chat.handle(WsEvent.AttachmentModeration("c1", "desconhecida", "a", "sensitive"))
+    }
+
+    @Test
+    fun avatarTrocadoPelaPropriaContaSobeAVersaoDepoisDeGuardarAImagemComONomeNovo() = runTest {
+        val chat = TestResources.session(engine, this).chat
+        chat.sync()
+        runCurrent()
+        var stored: Long? = null
+
+        chat.avatarReplaced("u1") { version ->
+            // A imagem entra no cache antes de a interface ver a versão nova.
+            assertEquals(0L, chat.users.value.getValue("u1").avatarVersion)
+            stored = version
+        }
+        runCurrent()
+
+        assertEquals(1L, stored)
+        assertEquals(1L, chat.users.value.getValue("u1").avatarVersion)
+        assertEquals(0L, chat.users.value.getValue("u2").avatarVersion)
+    }
+
+    @Test
+    fun avatarTrocadoComFalhaAoGuardarAImagemAindaSobeAVersaoERepassaOCancelamento() = runTest {
+        val chat = TestResources.session(engine, this).chat
+        chat.sync()
+        runCurrent()
+
+        chat.avatarReplaced("u1") { throw java.io.IOException("disco cheio") }
+        runCurrent()
+        assertEquals(1L, chat.users.value.getValue("u1").avatarVersion)
+
+        assertFailsWith<kotlinx.coroutines.CancellationException> {
+            chat.avatarReplaced("u1") { throw kotlinx.coroutines.CancellationException("fechou") }
+        }
+        runCurrent()
+        assertEquals(1L, chat.users.value.getValue("u1").avatarVersion)
+    }
+
+    @Test
+    fun avatarDeUsuarioQueOAppNaoConheceNaoFazNada() = runTest {
+        val chat = TestResources.session(engine, this).chat
+        var called = false
+
+        chat.avatarReplaced("u9") { called = true }
+
+        assertFalse(called)
     }
 
     @Test

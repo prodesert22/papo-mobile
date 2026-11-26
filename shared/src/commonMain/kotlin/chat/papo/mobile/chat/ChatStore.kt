@@ -642,6 +642,25 @@ class ChatStore(
         ws.send(WsCommand.Typing(channelId))
     }
 
+    /**
+     * O avatar de [userId] acabou de ser trocado por esta conta (resposta 200 do PUT): sobe a versão sem esperar o
+     * `avatar_update`, que chega em seguida e sobe de novo, e a interface busca de novo. [store] guarda a imagem nova
+     * com o nome da versão que vem, antes de a interface a ver, para o avatar não piscar nem pedir o que já se tem.
+     * Se o evento chegou antes, o nome pode não ser o da versão final: a interface então busca no servidor, que está certo.
+     * Sem efeito se o app ainda não conhece o usuário.
+     */
+    suspend fun avatarReplaced(userId: String, store: suspend (version: Long) -> Unit) {
+        val next = withContext(io) { q.selectUser(userId).executeAsOneOrNull()?.avatar_version }?.plus(1) ?: return
+        try {
+            store(next)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Sem a imagem no cache a interface a busca no servidor, que já a tem.
+        }
+        withContext(io) { q.bumpAvatar(userId) }
+    }
+
     /** Atividade real do usuário (toque, digitação); alimenta o "ausente" automático do servidor. */
     suspend fun notifyActivity(force: Boolean = false) {
         val last = lastActivitySent
