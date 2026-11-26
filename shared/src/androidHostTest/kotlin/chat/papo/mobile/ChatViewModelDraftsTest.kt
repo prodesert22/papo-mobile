@@ -173,6 +173,124 @@ class ChatViewModelDraftsTest {
         assertEquals("oi :party:", posted.single().field("content"))
     }
 
+    // O campo do compositor: o teclado escreve direto nele, e o compositor avisa depois
+
+    /** O que o campo faz quando o usuário digita [text]: escreve nele, com o cursor no fim, sem passar pelo view model. */
+    private fun ChatViewModel.typeInField(text: String) = draftState.edit {
+        replace(0, length, text)
+        selection = TextRange(length)
+    }
+
+    @Test
+    fun digitarDiretoNoCampoEGuardadoQuandoOCompositorAvisa() = runTest {
+        val session = session()
+        val vm = ChatViewModel(session, "c1")
+        vm.loaded()
+
+        vm.typeInField("oi, tudo bem")
+        assertEquals("oi, tudo bem", vm.draft.text)
+        assertNull(stored("c1")) // ainda ninguém avisou
+        vm.draftEdited()
+        advanceTimeBy(Drafts.DEBOUNCE)
+        runCurrent()
+
+        assertEquals(Draft("oi, tudo bem"), stored("c1"))
+    }
+
+    @Test
+    fun avisarSemMudarOTextoNaoGuardaNemDeixaDeRestaurar() = runTest {
+        val gate = GateDispatcher(StandardTestDispatcher(testScheduler))
+        val session = session(gate)
+        meta.put(Drafts.key("c1"), Drafts.encode(Draft("do banco")))
+
+        gate.closed = true
+        val vm = ChatViewModel(session, "c1")
+        runCurrent()
+        vm.draftEdited() // nada foi digitado: o cursor andou, ou o aviso veio duas vezes
+        vm.draftEdited()
+        gate.open()
+        runCurrent()
+
+        assertEquals("do banco", vm.draft.text)
+    }
+
+    @Test
+    fun restaurarNaoPisaNaDigitacaoQueOCompositorAindaNaoAvisou() = runTest {
+        val gate = GateDispatcher(StandardTestDispatcher(testScheduler))
+        val session = session(gate)
+        meta.put(Drafts.key("c1"), Drafts.encode(Draft("velho")))
+
+        gate.closed = true
+        val vm = ChatViewModel(session, "c1")
+        runCurrent()
+        vm.typeInField("novo") // o campo já mudou; o aviso só chega no quadro seguinte
+        gate.open()
+        runCurrent()
+
+        assertEquals("novo", vm.draft.text)
+    }
+
+    @Test
+    fun enviarEsvaziaOCampoEUmAvisoTardioNaoOFazVoltar() = runTest {
+        val session = session()
+        val vm = ChatViewModel(session, "c1")
+        vm.loaded()
+        vm.typeInField("vai embora")
+        vm.draftEdited()
+
+        vm.submit()
+        session.chat.outbox.first { it.isEmpty() }
+        vm.draftEdited()
+        session.drafts.flush()
+        runCurrent()
+
+        assertEquals("", vm.draftState.text.toString())
+        assertNull(stored("c1"))
+        assertEquals("vai embora", posted.single().field("content"))
+    }
+
+    @Test
+    fun onDraftChangeEscreveNoCampoComOCursorOndeFoiPedido() = runTest {
+        val session = session()
+        val vm = ChatViewModel(session, "c1")
+
+        vm.onDraftChange(TextFieldValue("abcdef", TextRange(2)))
+        assertEquals("abcdef", vm.draftState.text.toString())
+        assertEquals(TextRange(2), vm.draftState.selection)
+        assertEquals(TextRange(2), vm.draft.selection)
+
+        // Só o cursor mudou: o texto fica como estava.
+        vm.onDraftChange(TextFieldValue("abcdef", TextRange(4, 6)))
+        assertEquals("abcdef", vm.draftState.text.toString())
+        assertEquals(TextRange(4, 6), vm.draftState.selection)
+
+        // Um cursor além do fim do texto cai no fim.
+        vm.onDraftChange(TextFieldValue("abc", TextRange(10)))
+        assertEquals(TextRange(3), vm.draftState.selection)
+    }
+
+    @Test
+    fun editarColocaOTextoNoCampoComOCursorNoFimEVoltarRestauraOAnterior() = runTest {
+        val session = session()
+        val vm = ChatViewModel(session, "c1")
+        vm.loaded()
+        val mine = vm.messages.first { it.size == 3 }.first { it.id == "m2" }
+        vm.typeInField("antes")
+        vm.draftEdited()
+
+        vm.startEdit(mine)
+        assertEquals("msg 2", vm.draftState.text.toString())
+        assertEquals(TextRange(5), vm.draftState.selection)
+        vm.draftEdited() // o aviso do que a edição pôs no campo não é digitação: nada é guardado
+        advanceTimeBy(Drafts.DEBOUNCE * 2)
+        runCurrent()
+        assertEquals(Draft("antes"), stored("c1"))
+
+        vm.cancelContext()
+        assertEquals("antes", vm.draftState.text.toString())
+        assertEquals(TextRange(5), vm.draftState.selection)
+    }
+
     // Rascunho
 
     @Test

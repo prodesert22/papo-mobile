@@ -47,10 +47,13 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.webkit.WebStorageCompat
+import androidx.webkit.WebViewFeature
 import chat.papo.mobile.chat.isYouTubeId
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.embed_youtube_player
 import chat.papo.mobile.resources.embed_youtube_stopped
+import chat.papo.mobile.resources.embed_youtube_unavailable
 import chat.papo.mobile.security.WebPlayerData
 import java.io.File
 import org.jetbrains.compose.resources.stringResource
@@ -66,7 +69,8 @@ internal class CustomView(val view: View, val callback: WebChromeClient.CustomVi
  * claro na pasta de dados), então ele só existe com estas condições, que o [YouTubeWebHolder] cumpre: JavaScript ligado só
  * porque o player o exige; sem acesso a arquivo nem a conteúdo; sem cache HTTP; sem cookies de terceiros; sem ponte de
  * JavaScript para o app; sem janelas novas nem permissões; nenhuma navegação para fora do embed ([youTubeNavigation]); e o
- * perfil apagado ao fechar e ao travar o app ([YouTubeWebData]). Não se usa o WebView para mais nada.
+ * que ele guardou apagado ao fechar e ao travar o app ([YouTubeWebData]). Sem o recurso do WebView que garante essa
+ * apagada ([YouTubeWebData.canWipe]) o player não abre. Não se usa o WebView para mais nada.
  */
 @Composable
 internal fun AndroidYouTubePlayer(videoId: String, modifier: Modifier, fullscreenButton: Boolean, onOpenExternally: () -> Unit) {
@@ -105,7 +109,7 @@ internal fun AndroidYouTubePlayer(videoId: String, modifier: Modifier, fullscree
     if (view == null || stopped) {
         Box(modifier.background(Color.Black).padding(12.dp), contentAlignment = Alignment.Center) {
             Text(
-                stringResource(Res.string.embed_youtube_stopped),
+                stringResource(if (view == null) Res.string.embed_youtube_unavailable else Res.string.embed_youtube_stopped),
                 style = MaterialTheme.typography.labelLarge,
                 color = Color.White,
                 textAlign = TextAlign.Center,
@@ -135,7 +139,8 @@ internal fun AndroidYouTubePlayer(videoId: String, modifier: Modifier, fullscree
 /**
  * Dono do `WebView` de uma composição: o cria, o endurece, o carrega quando a composição é aplicada e o fecha ao sair dela,
  * inclusive se ela for abandonada antes de aplicada, ou quando o app trava ([YouTubeWebData.wipe]) (regra 7). [close] é
- * idempotente. Sem WebView no aparelho (o componente do sistema ausente ou desligado) não há view, e a tela mostra o aviso.
+ * idempotente. Sem WebView no aparelho (o componente do sistema ausente, desligado ou sem o recurso de apagar os dados
+ * do site, [YouTubeWebData.canWipe]) não há view, e a tela mostra o aviso.
  */
 internal class YouTubeWebHolder(
     private val context: Context,
@@ -179,7 +184,7 @@ internal class YouTubeWebHolder(
 
     /**
      * Destrói o WebView e apaga o que o Chromium guardou (cookies, armazenamento, cache e histórico). Idempotente; só na
-     * thread principal.
+     * thread principal. A página já não existe quando os dados são apagados, então nada novo é gravado depois.
      */
     fun close() {
         if (closed) return
@@ -197,9 +202,13 @@ internal class YouTubeWebHolder(
         YouTubeWebData.clearStorage()
     }
 
-    /** O WebView endurecido, ou null se o aparelho não o tem (o componente do sistema ausente ou desligado). */
+    /**
+     * O WebView endurecido, ou null se o aparelho não o tem (o componente do sistema ausente ou desligado) ou se ele não sabe
+     * apagar o que guardou: sem isso a exceção da regra 8 não se cumpre, e o vídeo só abre fora do app.
+     */
     private fun createWebView(): WebView? {
         val view = try {
+            if (!YouTubeWebData.canWipe()) return null
             WebView(context)
         } catch (_: Exception) {
             return null
@@ -305,6 +314,10 @@ internal class YouTubeWebHolder(
  * `app_webview/` (cookies, armazenamento, estado de rede) e `cache/WebView/`, em claro. Os dados saem de três jeitos:
  * ao fechar o player ([YouTubeWebHolder.close]), ao travar o app ([wipe], ligado ao `AppLock`) e, se o processo morreu com o
  * player aberto, na próxima abertura do app ([sweepLeftovers]), antes de qualquer WebView existir.
+ *
+ * O Chromium nunca descarrega o perfil enquanto o processo vive, então as pastas não se apagam com ele em uso; o que se
+ * apaga é o conteúdo, por [clearStorage]. Sobram só arquivos genéricos do Chromium, sem origem, resposta nem cookie, que o
+ * próximo [sweepLeftovers] remove.
  */
 internal object YouTubeWebData : WebPlayerData {
     // Só na thread principal.
@@ -324,13 +337,21 @@ internal object YouTubeWebData : WebPlayerData {
         if (Looper.myLooper() == Looper.getMainLooper()) closeAll() else Handler(Looper.getMainLooper()).post(closeAll)
     }
 
-    /** Cookies e armazenamento do Chromium; o cache e o histórico são de cada WebView, apagados antes de ele ser destruído. */
+    /**
+     * Se o WebView do aparelho apaga tudo o que um site guardou ([clearStorage]): ele vem do WebView 133. O
+     * `WebStorage.deleteAllData` do sistema não serve, porque deixa de fora o `CacheStorage` e os service workers
+     * (que o player do YouTube grava). Chamar isto carrega o componente do sistema, então só depois do [sweepLeftovers].
+     */
+    fun canWipe(): Boolean = WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA)
+
+    /**
+     * Apaga tudo o que os sites guardaram: cookies, cache HTTP, armazenamento (`localStorage`, `IndexedDB`,
+     * `CacheStorage`) e service workers. A apagada é assíncrona e o app não espera por ela: o que falhar ou o que o
+     * processo deixar por fazer sai no próximo [sweepLeftovers]. Só na thread principal e só com [canWipe].
+     */
     fun clearStorage() {
-        CookieManager.getInstance().apply {
-            removeAllCookies(null)
-            flush()
-        }
-        WebStorage.getInstance().deleteAllData()
+        if (!canWipe()) return
+        WebStorageCompat.deleteBrowsingData(WebStorage.getInstance()) { }
     }
 
     /**

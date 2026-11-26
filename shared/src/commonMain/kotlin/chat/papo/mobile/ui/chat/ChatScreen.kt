@@ -29,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
@@ -76,6 +77,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -116,6 +118,7 @@ import chat.papo.mobile.chat.EmojiCompletion
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiRef
 import chat.papo.mobile.chat.MAX_ATTACHMENTS
+import chat.papo.mobile.chat.Markdown
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.ServerEmoji
@@ -192,6 +195,7 @@ import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.switcher_title
 import chat.papo.mobile.ui.components.AudioBar
+import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.media.InlineVideos
@@ -268,8 +272,12 @@ fun ChatScreen(
     val isDm = dms.any { it.id == viewModel.channelId }
     val draft = viewModel.draft
     // O rascunho vai para o banco quando a tela sai de cena: outra tela por cima, app em segundo plano ou fim da conversa.
+    // O compositor avisa as mudanças do campo no quadro seguinte; a última tecla antes de sair não pode ficar de fora.
     LifecycleResumeEffect(session) {
-        onPauseOrDispose { session.drafts.flush() }
+        onPauseOrDispose {
+            viewModel.draftEdited()
+            session.drafts.flush()
+        }
     }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
     var reactingTo by remember { mutableStateOf<Message?>(null) }
@@ -599,6 +607,7 @@ fun ChatScreen(
             Composer(
                 session = session,
                 state = state,
+                draftState = viewModel.draftState,
                 draft = draft,
                 users = users,
                 presence = presence,
@@ -614,6 +623,7 @@ fun ChatScreen(
                     stringResource(Res.string.chat_placeholder, if (isVoice) title else "#$title")
                 },
                 onDraftChange = viewModel::onDraftChange,
+                onDraftEdited = viewModel::draftEdited,
                 onPickMention = viewModel::pickMention,
                 onAddFiles = viewModel::addFiles,
                 onRemoveFile = viewModel::removeFile,
@@ -912,6 +922,7 @@ private fun TypingLine(users: List<User>) {
 private fun Composer(
     session: AccountSession,
     state: ChatUiState,
+    draftState: TextFieldState,
     draft: TextFieldValue,
     users: Map<String, User>,
     presence: Map<String, Presence>,
@@ -923,6 +934,7 @@ private fun Composer(
     availableHeightPx: Int,
     placeholder: String,
     onDraftChange: (TextFieldValue) -> Unit,
+    onDraftEdited: () -> Unit,
     onPickMention: (username: String, userId: String) -> Unit,
     onAddFiles: (List<OutgoingFile>) -> Unit,
     onRemoveFile: (OutgoingFile) -> Unit,
@@ -936,6 +948,10 @@ private fun Composer(
     val density = LocalDensity.current
     val panelScope = rememberCoroutineScope()
     val panel = remember { EmojiPanelState(panelScope) }
+    // GIF, figurinha e imagem colada vão para os anexos, como os do clipe; na edição e sem permissão de anexar o campo não os pede.
+    val platform = LocalPlatformUi.current
+    val latestOnAddFiles by rememberUpdatedState(onAddFiles)
+    val receiveMedia = remember(platform) { platform.receiveMedia { latestOnAddFiles(it) } }
 
     // Quanto do teclado está na tela acima da barra de navegação, e a altura em que ele parou da última vez.
     val imeInsets = WindowInsets.ime
@@ -1013,15 +1029,20 @@ private fun Composer(
     }
     // Os `:nome:` de emojis do servidor aparecem como imagem no campo, mas o texto do rascunho continua `:nome:`.
     val draftEmojis = remember(serverEmojis.idByName) { DraftEmojis(serverEmojis.idByName) }
-    // `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos (nome de emoji do servidor fica como texto).
-    val onChange: (TextFieldValue) -> Unit = { typed ->
-        val value = draftEmojis.settle(draft, typed)
-        val edit = if (emojiCatalog != null && value.composition == null && value.selection.collapsed) {
-            EmojiCompletion.closeShortcode(draft.text, value.text, value.selection.start, emojiCatalog, serverEmojis.idByName.keys)
-        } else {
-            null
+    // Cada mudança do campo chega aqui depois de feita: `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos
+    // (nome de emoji do servidor fica como texto), e o rascunho é guardado. Uma mudança em andamento no teclado
+    // (composição) espera: o atalho só vale para uma tecla `:` digitada, nunca no meio de uma sugestão.
+    val latestOnDraftChange by rememberUpdatedState(onDraftChange)
+    val latestOnDraftEdited by rememberUpdatedState(onDraftEdited)
+    LaunchedEffect(draftState, emojiCatalog, serverEmojis.idByName) {
+        var previous = draftState.text.toString()
+        snapshotFlow { Triple(draftState.text.toString(), draftState.selection, draftState.composition) }.collect { (text, selection, composition) ->
+            val edit = EmojiCompletion.closeTypedShortcode(
+                previous, text, selection.start, selection.end, composition != null, emojiCatalog, serverEmojis.idByName.keys,
+            )
+            if (edit != null) latestOnDraftChange(TextFieldValue(edit.text, TextRange(edit.cursor))) else latestOnDraftEdited()
+            previous = draftState.text.toString()
         }
-        onDraftChange(if (edit != null) TextFieldValue(edit.text, TextRange(edit.cursor)) else value)
     }
     fun insertEmoji(ref: EmojiRef) {
         val text = when (ref) {
@@ -1128,8 +1149,7 @@ private fun Composer(
                 }
                 DraftTextField(
                     session = session,
-                    value = draft,
-                    onValueChange = onChange,
+                    state = draftState,
                     emojis = draftEmojis,
                     placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     enabled = !state.savingEdit,
@@ -1146,7 +1166,8 @@ private fun Composer(
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focus)
-                        .onFocusChanged { if (it.isFocused && panel.isOpen) panel.toKeyboard() },
+                        .onFocusChanged { if (it.isFocused && panel.isOpen) panel.toKeyboard() }
+                        .then(if (canAttach && state.editing == null) receiveMedia else Modifier),
                 )
                 IconButton(onClick = toggleEmoji, enabled = !state.savingEdit) {
                     if (panel.isOpen) {
@@ -1346,6 +1367,7 @@ private fun MessageActionsSheet(
     val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
     val recents by session.recentEmojis.items.collectAsStateWithLifecycle()
     val quick = remember(recents, serverEmojis) { EmojiPickerModel.quickReactions(recents, serverEmojis) }
+    val links = remember(message.content) { Markdown.linksIn(message.content) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 16.dp)) {
@@ -1392,6 +1414,16 @@ private fun MessageActionsSheet(
                     onSelectText()
                     onDismiss()
                 }
+            }
+            if (links.isNotEmpty()) {
+                MessageLinksSection(
+                    links,
+                    onCopy = {
+                        clipboard.setText(AnnotatedString(it))
+                        onDismiss()
+                    },
+                    onOpened = onDismiss,
+                )
             }
             if (offer.pin) {
                 SheetAction(Icons.Filled.PushPin, stringResource(if (pinned) Res.string.msg_unpin else Res.string.msg_pin)) {

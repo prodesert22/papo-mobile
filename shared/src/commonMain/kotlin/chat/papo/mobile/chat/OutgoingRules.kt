@@ -56,6 +56,23 @@ fun nameFor(displayName: String?, mimeType: String): String {
     return limitName(cleaned.ifEmpty { genericName(mimeType) })
 }
 
+/**
+ * O tipo de uma imagem ou de um vídeo recebido pelo teclado ou colado, ou null se o conteúdo é outra coisa (texto, um
+ * arquivo qualquer): fica o que o provedor do conteúdo diz ([resolved]); se ele não diz, o tipo que o teclado declarou
+ * ([declared]), só quando é um só. O teclado anuncia que aceita qualquer tipo, então um tipo genérico não basta.
+ */
+fun receivedMediaType(resolved: String?, declared: List<String>): String? {
+    val concrete = resolved?.let(::baseType)?.takeIf { it.isNotEmpty() && it != "application/octet-stream" }
+    val type = concrete ?: declared.map(::baseType).distinct().singleOrNull() ?: return null
+    return type.takeIf(::isMediaType)
+}
+
+/** Imagem ou vídeo de um formato só (`image/gif`, `video/mp4`): o tipo genérico de imagem, de vídeo ou de qualquer coisa não vale. */
+private fun isMediaType(type: String): Boolean {
+    val subtype = type.substringAfter('/', "")
+    return (type.startsWith("image/") || type.startsWith("video/")) && subtype.isNotEmpty() && subtype != "*"
+}
+
 /** É um GIF (a prévia leva o selo). */
 fun OutgoingFile.isGif(): Boolean = baseType(mimeType) == "image/gif"
 
