@@ -87,16 +87,13 @@
     <string name="profile_edit_typing">Frase de digitação</string>
     <string name="profile_edit_typing_help">Aparece para os outros enquanto você digita.</string>
     <string name="profile_edit_counter">%1$d/%2$d</string>
-    <string name="profile_edit_avatar">Avatar</string>
     <string name="profile_edit_avatar_help">Recortado no centro, em quadrado, e reduzido para 512 px antes de enviar.</string>
-    <string name="profile_edit_banner">Banner</string>
     <string name="profile_edit_banner_help">Recortado no centro, na proporção 3:1, e reduzido para 1536 × 512 px antes de enviar.</string>
     <string name="profile_edit_pick_avatar">Escolher avatar</string>
     <string name="profile_edit_pick_banner">Escolher banner</string>
     <string name="profile_edit_remove_banner">Remover banner</string>
     <string name="profile_edit_banner_removal">O banner será removido ao salvar.</string>
     <string name="profile_edit_discard">Desfazer escolha</string>
-    <string name="profile_edit_preparing">Preparando a imagem…</string>
     <string name="profile_edit_save">Salvar</string>
     <string name="profile_edit_saving">Salvando…</string>
     <string name="profile_edit_reload">Recarregar perfil</string>
