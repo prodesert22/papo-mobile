@@ -45,7 +45,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.UserProfile
 import chat.papo.mobile.chat.profileHeader
@@ -59,6 +61,7 @@ import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.profile_about
 import chat.papo.mobile.resources.profile_copy_username
+import chat.papo.mobile.resources.profile_edit_action
 import chat.papo.mobile.resources.profile_member_since
 import chat.papo.mobile.resources.profile_message
 import chat.papo.mobile.resources.profile_not_found
@@ -78,7 +81,7 @@ private val AvatarRing = 4.dp
  * O perfil de um usuário: banner, avatar, nome, cargos e a descrição. Tudo o que vem do servidor é texto simples:
  * nada aqui é link, nem a descrição, que só se seleciona e copia. Enquanto o perfil carrega, aparece o que o app
  * já sabe da pessoa. "Mensagem" abre a conversa direta, "Copiar @usuário" copia o nome de usuário; no próprio
- * perfil não há ações.
+ * perfil as ações são editar o perfil e escolher o status.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,6 +91,8 @@ fun ProfileScreen(
     onBack: () -> Unit,
     /** Abre a conversa direta, cujo id é o argumento. */
     onOpenChat: (String) -> Unit,
+    /** Abre a edição do próprio perfil. */
+    onEdit: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val users by session.chat.users.collectAsStateWithLifecycle()
@@ -99,6 +104,11 @@ fun ProfileScreen(
     val bannerSha = profile?.bannerSha
     val banner by rememberMediaImage(session, bannerSha?.let { "media/$it" }) { bannerSha?.let { session.api.media(it) } }
     val isSelf = userId == session.userId
+    // Voltar da edição do próprio perfil: o cache da sessão já tem a leitura nova.
+    LifecycleResumeEffect(viewModel) {
+        viewModel.showCached()
+        onPauseOrDispose {}
+    }
 
     Scaffold(
         topBar = {
@@ -151,8 +161,13 @@ fun ProfileScreen(
                 }
                 Spacer(Modifier.height(16.dp))
 
-                if (!isSelf && state.load != ProfileLoad.NotFound) {
+                if (isSelf) {
+                    OwnActions(session, onEdit)
+                    Spacer(Modifier.height(16.dp))
+                } else if (state.load != ProfileLoad.NotFound) {
                     Actions(header?.username, state, onMessage = { viewModel.openChat(onOpenChat) })
+                    Spacer(Modifier.height(8.dp))
+                    BlockAction(session, userId, header?.displayName ?: "?")
                     Spacer(Modifier.height(16.dp))
                 }
 
@@ -175,6 +190,20 @@ fun ProfileScreen(
                 Spacer(Modifier.height(24.dp))
             }
         }
+    }
+}
+
+/** No próprio perfil: "Editar perfil" e a escolha de Disponível, Ausente ou Ocupado. */
+@Composable
+private fun OwnActions(session: AccountSession, onEdit: () -> Unit) {
+    // A sessão entra na chave: o estado de uma conta nunca aparece na tela de outra.
+    val statusModel = viewModel(key = "own-status/${session.accountId}/${session.hashCode()}") { OwnStatusViewModel(session) }
+    Column {
+        Button(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(Res.string.profile_edit_action), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.height(16.dp))
+        OwnStatusPicker(statusModel)
     }
 }
 

@@ -32,6 +32,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import chat.papo.mobile.chat.nameFor
 import chat.papo.mobile.data.api.PapoClient
+import chat.papo.mobile.media.ImageReducer
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackFailure
 import chat.papo.mobile.voice.VideoTrackHandle
@@ -78,6 +79,17 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
         val contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems.coerceAtLeast(2))
         val launcher = rememberLauncherForActivityResult(contract, describeAll)
         return { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
+    }
+
+    override val imageReducer: ImageReducer = AndroidImageReducer()
+
+    @Composable
+    override fun rememberImagePicker(onPicked: (OutgoingFile) -> Unit): () -> Unit {
+        val describeAll = rememberDescribeAll { files -> files.firstOrNull()?.let(onPicked) }
+        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) describeAll(listOf(uri))
+        }
+        return { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     }
 
     /** Descreve o que o seletor devolveu fora da thread principal (o provedor pode ser lento) e entrega a lista a [onPicked]. */

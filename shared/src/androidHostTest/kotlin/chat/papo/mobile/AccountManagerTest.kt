@@ -15,11 +15,16 @@ import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -32,6 +37,12 @@ import kotlin.test.assertTrue
 internal class FakeBackend(private val serverPassword: String? = null) {
     val users = mutableMapOf("ana" to "Senha@123", "bia" to "Senha@456")
     val loggedOut = mutableListOf<String>()
+
+    /** Cada `POST /auth/password_reset` recebido, como `token`. O token diz o que o servidor responde (ver a rota). */
+    val resets = java.util.concurrent.CopyOnWriteArrayList<String>()
+    var serverName: String? = null
+    var serverIcon: String? = null
+    var serverDown = false
 
     val engine = MockEngine { request ->
         val host = request.url.host
@@ -50,7 +61,12 @@ internal class FakeBackend(private val serverPassword: String? = null) {
         fun denied(detail: String) = json("""{"type":"t","title":"Não autorizado","status":401,"detail":"$detail"}""", HttpStatusCode.Unauthorized)
 
         when (request.url.encodedPath) {
-            "/server" -> json("""{"id":"s","name":"Servidor $host","public":${serverPassword == null},"member_count":2}""")
+            "/server" ->
+                if (serverDown) json("""{"type":"t","title":"Erro","status":503,"detail":"fora do ar"}""", HttpStatusCode.ServiceUnavailable)
+                else {
+                    val icon = serverIcon?.let { ""","icon_blob":"$it"""" }.orEmpty()
+                    json("""{"id":"s","name":"${serverName ?: "Servidor $host"}","public":${serverPassword == null},"member_count":2,"role_count":3$icon}""")
+                }
             "/roles" -> json("""{"roles":[]}""")
             "/auth/login_server" ->
                 if (field("server_password") == serverPassword) respond("", HttpStatusCode.NoContent, headersOf(HttpHeaders.SetCookie, "Auth=temp; Max-Age=1800"))
@@ -79,6 +95,25 @@ internal class FakeBackend(private val serverPassword: String? = null) {
                 val user = cookie?.substringAfterLast('-')
                 if (cookie?.startsWith("jwt-$host-") == true) json("""{"id":"id-$user","username":"$user","nickname":"Apelido $user"}""")
                 else denied("Token ausente")
+            }
+            "/auth/password_reset" -> {
+                val token = field("token").orEmpty()
+                resets += token
+                fun problem(status: HttpStatusCode, detail: String) =
+                    json("""{"type":"t","title":"Erro","status":${status.value},"detail":"$detail"}""", status)
+                when (token) {
+                    "tok-ana" -> {
+                        users["ana"] = field("password").orEmpty()
+                        json("""{"ok":true}""")
+                    }
+                    "tok-gone" -> problem(HttpStatusCode.Gone, "link inválido")
+                    "tok-slow" -> problem(HttpStatusCode.TooManyRequests, "devagar")
+                    "tok-boom" -> problem(HttpStatusCode.InternalServerError, "falhou")
+                    "tok-weak" -> problem(HttpStatusCode.BadRequest, "senha fraca")
+                    // Um servidor que repete o que recebeu na mensagem de erro.
+                    "tok-echo" -> problem(HttpStatusCode.BadRequest, "o token tok-echo e a senha ${field("password")} não servem")
+                    else -> problem(HttpStatusCode.Gone, "link inválido")
+                }
             }
             "/auth/logout" -> {
                 loggedOut += cookie.orEmpty()
@@ -192,7 +227,9 @@ class AccountManagerTest {
         val f = Fixture(this)
         val first = f.manager(this).also { it.load() }
         val ana = first.begin(first.probe("papo.test")).login("ana", "Senha@123")
-        first.setAppearance(ana.account.id, "  Trabalho ", 0xFF112233.toInt())
+        first.setLabel(ana.account.id, "  Trabalho ")
+        first.setColor(ana.account.id, 0xFF112233.toInt())
+        first.flushAppearance()
         first.close()
 
         val second = f.manager(this).also { it.load() }
@@ -227,6 +264,223 @@ class AccountManagerTest {
         val f = Fixture(this)
         val manager = f.manager(this)
         assertFailsWith<InvalidServerUrl> { manager.probe("ftp://x") }
+        assertEquals(0, f.backend.engine.requestHistory.size)
+    }
+
+    @Test
+    fun rotuloDigitadoEmPartesFicaInteiroMesmoComATelaJaFechada() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val ui = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+
+        // Uma tecla por chamada, como a tela; o escopo dela é cancelado antes de a última gravação rodar.
+        ui.launch { manager.setLabel(ana.account.id, "T") }
+        runCurrent()
+        ui.launch { manager.setLabel(ana.account.id, "Trabalho") }
+        runCurrent()
+        ui.cancel()
+        runCurrent()
+
+        assertEquals("Trabalho", manager.accounts.value.single().label)
+    }
+
+    @Test
+    fun variasTeclasSeguidasGravamSoAUltimaNaOrdemCerta() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+
+        "Trabalho".indices.forEach { manager.setLabel(ana.account.id, "Trabalho".take(it + 1)) }
+        runCurrent()
+
+        assertEquals("Trabalho", manager.accounts.value.single().label)
+    }
+
+    @Test
+    fun trocarACorLogoAposDigitarNaoVoltaORotulo() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+
+        manager.setLabel(ana.account.id, "Trabalho")
+        manager.setColor(ana.account.id, 0xFF112233.toInt())
+        runCurrent()
+
+        val account = manager.accounts.value.single()
+        assertEquals("Trabalho", account.label)
+        assertEquals(0xFF112233.toInt(), account.color)
+    }
+
+    @Test
+    fun tirarACorNaoMudaORotuloENemOContrario() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        manager.setLabel(ana.account.id, "Casa")
+        manager.setColor(ana.account.id, 0xFF112233.toInt())
+        runCurrent()
+
+        manager.setColor(ana.account.id, null)
+        runCurrent()
+        assertEquals("Casa", manager.accounts.value.single().label)
+        assertNull(manager.accounts.value.single().color)
+
+        manager.setLabel(ana.account.id, "   ") // vazio de verdade: volta ao padrão
+        runCurrent()
+        assertNull(manager.accounts.value.single().label)
+    }
+
+    @Test
+    fun rotuloECorDeUmaContaNaoMudamOutra() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+
+        manager.setLabel(ana.account.id, "Ana")
+        manager.setLabel(bia.account.id, "Bia")
+        manager.setColor(bia.account.id, 0xFF445566.toInt())
+        runCurrent()
+
+        val byId = manager.accounts.value.associateBy { it.id }
+        assertEquals("Ana", byId.getValue(ana.account.id).label)
+        assertNull(byId.getValue(ana.account.id).color)
+        assertEquals("Bia", byId.getValue(bia.account.id).label)
+        assertEquals(0xFF445566.toInt(), byId.getValue(bia.account.id).color)
+    }
+
+    @Test
+    fun flushGravaOQueAindaEsperaOEscritor() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+
+        manager.setLabel(ana.account.id, "Trabalho")
+        manager.setColor(ana.account.id, 0xFF112233.toInt())
+        manager.flushAppearance() // sem o escritor ter rodado
+
+        val saved = f.store.get(ana.account.id)!!
+        assertEquals("Trabalho", saved.label)
+        assertEquals(0xFF112233.toInt(), saved.color)
+    }
+
+    @Test
+    fun contaRemovidaNaoGuardaRotuloPendente() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+
+        manager.setLabel(ana.account.id, "Trabalho")
+        manager.setColor(ana.account.id, 1)
+        manager.remove(ana.account.id)
+        manager.flushAppearance()
+        runCurrent()
+
+        assertNull(f.store.get(ana.account.id))
+    }
+
+    @Test
+    fun atualizarOServidorGravaNomeEIconeSemChamarWhoami() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        runCurrent()
+        f.backend.serverName = "Renomeado"
+        f.backend.serverIcon = Base64.encode(byteArrayOf(1, 2, 3))
+        val before = f.backend.engine.requestHistory.size
+
+        val info = manager.refreshServer(ana.account.id)
+        runCurrent()
+
+        assertEquals("Renomeado", info!!.name)
+        assertEquals(3, info.roleCount)
+        val saved = manager.accounts.value.single()
+        assertEquals("Renomeado", saved.serverName)
+        assertEquals(listOf<Byte>(1, 2, 3), saved.serverIcon!!.toList())
+        val paths = f.backend.engine.requestHistory.drop(before).map { it.url.encodedPath }
+        assertEquals(listOf("/server"), paths)
+    }
+
+    @Test
+    fun atualizarOServidorSemRedeLevantaOErroEMantemOQueEstavaGravado() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        runCurrent()
+        f.backend.serverDown = true
+
+        assertFailsWith<ApiException> { manager.refreshServer(ana.account.id) }
+        runCurrent()
+
+        assertEquals("Servidor papo.test", manager.accounts.value.single().serverName)
+    }
+
+    @Test
+    fun atualizarOServidorDeContaDesconhecidaNaoFazPedido() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+
+        assertNull(manager.refreshServer("nao-existe"))
+        assertEquals(0, f.backend.engine.requestHistory.size)
+    }
+
+    @Test
+    fun atualizarOServidorSemNomeUsaOEndereco() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        f.backend.serverName = ""
+
+        manager.refreshServer(ana.account.id)
+        runCurrent()
+
+        assertEquals("papo.test", manager.accounts.value.single().serverName)
+    }
+
+    @Test
+    fun encerrarASessaoMarcaExpiradaSemLogoutNemAlertaDeViolacao() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        runCurrent()
+        val session = manager.session(ana.account.id)!!
+
+        manager.endSession(ana.account.id)
+        runCurrent()
+
+        assertTrue(manager.accounts.value.single().sessionExpired)
+        assertNull(session.client.cookieHeader())
+        assertEquals(emptyList(), f.backend.loggedOut)
+        assertEquals(emptySet(), manager.securityAlerts.value)
+        assertEquals(ana.account.userId, manager.accounts.value.single().userId) // os dados da conta ficam
+        assertEquals(listOf(ana.account.id), manager.accounts.value.map { it.id })
+        assertTrue(f.deleted.isEmpty())
+    }
+
+    @Test
+    fun encerrarASessaoDeUmaContaNaoMexeNaOutra() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+
+        manager.endSession(ana.account.id)
+        runCurrent()
+
+        val byId = manager.accounts.value.associateBy { it.id }
+        assertTrue(byId.getValue(ana.account.id).sessionExpired)
+        assertEquals(false, byId.getValue(bia.account.id).sessionExpired)
+        assertEquals("Auth=jwt-papo.test-bia", manager.session(bia.account.id)!!.client.cookieHeader())
+    }
+
+    @Test
+    fun encerrarASessaoDeContaDesconhecidaNaoFazNada() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+
+        manager.endSession("nao-existe")
+
         assertEquals(0, f.backend.engine.requestHistory.size)
     }
 }

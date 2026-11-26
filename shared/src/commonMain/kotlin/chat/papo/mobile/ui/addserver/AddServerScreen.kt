@@ -84,6 +84,8 @@ import chat.papo.mobile.resources.password_show
 import chat.papo.mobile.resources.register_password_rule
 import chat.papo.mobile.resources.register_submit
 import chat.papo.mobile.resources.register_tab
+import chat.papo.mobile.resources.reset_done
+import chat.papo.mobile.resources.reset_open
 import chat.papo.mobile.resources.welcome_body
 import chat.papo.mobile.resources.welcome_title
 import chat.papo.mobile.ui.components.colorFor
@@ -131,6 +133,7 @@ fun AddServerScreen(
                             AddServerStep.InsecureWarning -> InsecureStep(state, viewModel)
                             AddServerStep.ServerPassword -> ServerPasswordStep(state, viewModel)
                             AddServerStep.Credentials -> CredentialsStep(state, viewModel)
+                            AddServerStep.ResetPassword -> ResetPasswordStep(state, viewModel)
                         }
                     }
                 }
@@ -236,6 +239,10 @@ private fun ServerPasswordStep(state: AddServerState, vm: AddServerViewModel) {
 private fun CredentialsStep(state: AddServerState, vm: AddServerViewModel) {
     state.probe?.let { ServerCard(it) }
     Spacer(Modifier.height(24.dp))
+    if (state.passwordWasReset) {
+        Text(stringResource(Res.string.reset_done), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(16.dp))
+    }
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         CredentialsMode.entries.forEachIndexed { index, mode ->
             SegmentedButton(
@@ -281,6 +288,11 @@ private fun CredentialsStep(state: AddServerState, vm: AddServerViewModel) {
         enabled = state.username.isNotBlank() && state.password.isNotEmpty(),
         onClick = vm::submitCredentials,
     )
+    if (!register) {
+        TextButton(onClick = vm::openReset, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(Res.string.reset_open))
+        }
+    }
 }
 
 @Composable
