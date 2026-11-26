@@ -12,3 +12,4 @@
 - A conversation opened from a search result or from the call screen now opens
   in the panel, so going back shows the channel list instead of the search
   results or the call.
+- A little space now separates the newest message from the message box.
