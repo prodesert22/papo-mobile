@@ -44,6 +44,7 @@ class ProfileViewModelTest {
         @Volatile var dmStatus = HttpStatusCode.OK
         @Volatile var offline = false
         @Volatile var dmGate: CompletableDeferred<Unit>? = null
+        @Volatile var profileGate: CompletableDeferred<Unit>? = null
 
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -54,7 +55,8 @@ class ProfileViewModelTest {
                 respond(text, status, headersOf(HttpHeaders.ContentType, if (status.isSuccess()) "application/json" else "application/problem+json"))
             fun problem(status: HttpStatusCode) = json("""{"type":"t","title":"Erro","status":${status.value},"detail":"falhou ${status.value}"}""", status)
             when {
-                request.method == HttpMethod.Get && path.endsWith("/profile") ->
+                request.method == HttpMethod.Get && path.endsWith("/profile") -> {
+                    profileGate?.await()
                     if (profileStatus.isSuccess()) {
                         json(
                             """{"id":"u2","username":"bia","nickname":"$nickname","description":"Mexo com infra","status_message":"Revisando",""" +
@@ -64,6 +66,7 @@ class ProfileViewModelTest {
                     } else {
                         problem(profileStatus)
                     }
+                }
                 request.method == HttpMethod.Post && path == "/dms" -> {
                     dmGate?.await()
                     if (dmStatus.isSuccess()) {
@@ -155,6 +158,22 @@ class ProfileViewModelTest {
 
         assertIs<ProfileLoad.Loaded>(vm.settled().load)
         assertEquals(2, server.requests.size)
+    }
+
+    @Test
+    fun tentarDeNovoEnquantoLeNaoMostraErroDeCancelamentoEOPerfilChega() = runTest {
+        val server = Server().also { it.profileGate = CompletableDeferred() }
+        val vm = ProfileViewModel(session(server), "u2")
+        TestResources.waitUntil { server.requests.isNotEmpty() }
+        runCurrent()
+
+        vm.retry()
+        runCurrent()
+        server.profileGate!!.complete(Unit)
+
+        assertIs<ProfileLoad.Loaded>(vm.settled().load)
+        // As duas leituras dividiram o pedido que já estava em andamento.
+        assertEquals(1, server.requests.size)
     }
 
     @Test

@@ -13,9 +13,13 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -68,10 +72,10 @@ class WebhookAvatarsTest {
     private fun TestScope.cache() = MediaCache(TestResources.tempDir(), key, crypto, StandardTestDispatcher(testScheduler))
 
     /** Uma sessão da conta: o [WebhookAvatars] dela sobre o [media] da conta; abrir outra sobre o mesmo [media] é reabrir o app. */
-    private fun TestScope.avatars(server: Server, media: MediaCache = cache()) = WebhookAvatars(
+    private fun TestScope.avatars(server: Server, media: MediaCache = cache(), scope: CoroutineScope = backgroundScope) = WebhookAvatars(
         api = ChatApi(PapoClient(server.engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt"))),
         media = media,
-        scope = backgroundScope,
+        scope = scope,
         timeSource = testScheduler.timeSource,
     )
 
@@ -255,6 +259,21 @@ class WebhookAvatarsTest {
         assertTrue(first.isCancelled)
         assertContentEquals(red, avatars.get("w1"))
         assertEquals(1, server.requests.size)
+    }
+
+    @Test
+    fun fecharASessaoNoMeioDoPedidoCancelaQuemEsperaEmVezDeEntregarUmAvatarVazio() = runTest {
+        val server = Server(red).also { it.gate = CompletableDeferred() }
+        val session = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val avatars = avatars(server, scope = session)
+        val waiter = async { runCatching { avatars.get("w1") } }
+        TestResources.waitUntil { server.requests.isNotEmpty() }
+        runCurrent()
+
+        session.cancel()
+        runCurrent()
+
+        assertTrue(waiter.await().exceptionOrNull() is CancellationException)
     }
 
     @Test

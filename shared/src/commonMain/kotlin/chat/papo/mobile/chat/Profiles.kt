@@ -139,7 +139,7 @@ class ProfileCache(
         val version = stamp.avatarVersion ?: return
         if (blob.isNullOrBlank()) return
         val bytes = withContext(background) { runCatching { Base64.decode(blob) }.getOrNull() } ?: return
-        if (bytes.isNotEmpty()) media.put(avatarMediaName(userId, version), bytes)
+        media.put(avatarMediaName(userId, version), bytes)
     }
 
     companion object {

@@ -16,9 +16,13 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -83,10 +87,15 @@ class ProfileCacheTest {
 
     private fun TestScope.cache() = MediaCache(TestResources.tempDir(), key, crypto, StandardTestDispatcher(testScheduler))
 
-    private fun TestScope.profiles(server: Server, media: MediaCache = cache(), stampOf: (String) -> ProfileStamp = { stamp }) = ProfileCache(
+    private fun TestScope.profiles(
+        server: Server,
+        media: MediaCache = cache(),
+        scope: CoroutineScope = backgroundScope,
+        stampOf: (String) -> ProfileStamp = { stamp },
+    ) = ProfileCache(
         api = ChatApi(PapoClient(server.engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt"))),
         media = media,
-        scope = backgroundScope,
+        scope = scope,
         background = StandardTestDispatcher(testScheduler),
         stampOf = stampOf,
         timeSource = testScheduler.timeSource,
@@ -167,7 +176,7 @@ class ProfileCacheTest {
     fun mudancaDeOutroUsuarioNaoInvalidaALeitura() = runTest {
         val server = Server(sha)
         val states = mutableMapOf("u2" to stamp, "u3" to stamp)
-        val profiles = profiles(server) { states.getValue(it) }
+        val profiles = profiles(server, stampOf = { states.getValue(it) })
         profiles.get("u2")
 
         states["u3"] = stamp.copy(presence = Presence("busy", null))
@@ -222,6 +231,21 @@ class ProfileCacheTest {
     }
 
     @Test
+    fun fecharASessaoNoMeioDaLeituraCancelaQuemEspera() = runTest {
+        val server = Server(sha).also { it.gate = CompletableDeferred() }
+        val session = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val profiles = profiles(server, scope = session)
+        val waiter = async { runCatching { profiles.get("u2") } }
+        TestResources.waitUntil { server.requests.isNotEmpty() }
+        runCurrent()
+
+        session.cancel()
+        runCurrent()
+
+        assertTrue(waiter.await().exceptionOrNull() is CancellationException)
+    }
+
+    @Test
     fun usuarioInexistenteFalhaComOErroDoServidorENaoFicaGuardado() = runTest {
         val server = Server(sha).also { it.status = HttpStatusCode.NotFound }
         val profiles = profiles(server)
@@ -266,7 +290,7 @@ class ProfileCacheTest {
     fun semVersaoConhecidaOAvatarFicaDeForaMasOPerfilChega() = runTest {
         val server = Server(sha).also { it.avatarBlob = Base64.encode(picture) }
         val media = cache()
-        val profiles = profiles(server, media) { ProfileStamp(null, avatarVersion = null, nickname = null) }
+        val profiles = profiles(server, media, stampOf = { ProfileStamp(null, avatarVersion = null, nickname = null) })
 
         assertEquals("Ana Lima", profiles.get("u2").displayName)
 
