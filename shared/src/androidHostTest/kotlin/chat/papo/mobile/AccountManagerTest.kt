@@ -37,6 +37,9 @@ import kotlin.test.assertTrue
 internal class FakeBackend(private val serverPassword: String? = null) {
     val users = mutableMapOf("ana" to "Senha@123", "bia" to "Senha@456")
     val loggedOut = mutableListOf<String>()
+
+    /** Cada `POST /auth/password_reset` recebido, como `token`. O token diz o que o servidor responde (ver a rota). */
+    val resets = java.util.concurrent.CopyOnWriteArrayList<String>()
     var serverName: String? = null
     var serverIcon: String? = null
     var serverDown = false
@@ -92,6 +95,25 @@ internal class FakeBackend(private val serverPassword: String? = null) {
                 val user = cookie?.substringAfterLast('-')
                 if (cookie?.startsWith("jwt-$host-") == true) json("""{"id":"id-$user","username":"$user","nickname":"Apelido $user"}""")
                 else denied("Token ausente")
+            }
+            "/auth/password_reset" -> {
+                val token = field("token").orEmpty()
+                resets += token
+                fun problem(status: HttpStatusCode, detail: String) =
+                    json("""{"type":"t","title":"Erro","status":${status.value},"detail":"$detail"}""", status)
+                when (token) {
+                    "tok-ana" -> {
+                        users["ana"] = field("password").orEmpty()
+                        json("""{"ok":true}""")
+                    }
+                    "tok-gone" -> problem(HttpStatusCode.Gone, "link inválido")
+                    "tok-slow" -> problem(HttpStatusCode.TooManyRequests, "devagar")
+                    "tok-boom" -> problem(HttpStatusCode.InternalServerError, "falhou")
+                    "tok-weak" -> problem(HttpStatusCode.BadRequest, "senha fraca")
+                    // Um servidor que repete o que recebeu na mensagem de erro.
+                    "tok-echo" -> problem(HttpStatusCode.BadRequest, "o token tok-echo e a senha ${field("password")} não servem")
+                    else -> problem(HttpStatusCode.Gone, "link inválido")
+                }
             }
             "/auth/logout" -> {
                 loggedOut += cookie.orEmpty()

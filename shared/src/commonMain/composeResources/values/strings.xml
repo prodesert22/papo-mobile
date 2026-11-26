@@ -149,6 +149,17 @@
     </plurals>
     <string name="password_change_uncertain_prepare">Não foi possível confirmar o pedido. A senha não mudou; você pode tentar de novo.</string>
     <string name="password_change_uncertain">Não foi possível confirmar se a senha mudou. Tente entrar com a senha nova antes de repetir.</string>
+    <string name="reset_open">Redefinir senha com um link</string>
+    <string name="reset_title">Redefinir a senha</string>
+    <string name="reset_body">Cole o link de redefinição que o dono do servidor gerou para você e escolha a senha nova.</string>
+    <string name="reset_link">Link de redefinição</string>
+    <string name="reset_link_invalid">Isso não parece um link de redefinição.</string>
+    <string name="reset_host_mismatch">O link é de %1$s, mas este servidor é %2$s. Só continue se confia em quem mandou o link.</string>
+    <string name="reset_submit">Redefinir a senha</string>
+    <string name="reset_submit_anyway">Enviar mesmo assim</string>
+    <string name="reset_gone">Link inválido, expirado ou já usado.</string>
+    <string name="reset_uncertain">Não foi possível confirmar. Tente entrar com a senha nova antes de pedir outro link.</string>
+    <string name="reset_done">Senha redefinida. Entre com a senha nova.</string>
 
     <!-- Configurações do app -->
     <string name="settings_title">Configurações</string>
