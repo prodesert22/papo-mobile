@@ -4,9 +4,11 @@ import chat.papo.mobile.chat.ChannelType
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.DirectConversationDto
 import chat.papo.mobile.data.api.EmbedDto
+import chat.papo.mobile.data.api.EmbedMediaDto
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.UserSummaryDto
 import chat.papo.mobile.data.ws.WsEvent
+import chat.papo.mobile.media.relayVideo
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -20,6 +22,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -108,6 +111,42 @@ class ChatStoreEventsTest {
         chat.handle(WsEvent.EmbedsUpdated("c1", "desconhecida", emptyList()))
         chat.handle(WsEvent.ReactionUpdated("desconhecida", null, "👍", 1))
         chat.handle(WsEvent.AttachmentModeration("c1", "desconhecida", "a", "sensitive"))
+    }
+
+    @Test
+    fun videoDoEmbedSobreviveAGravacaoELeitura() = runTest {
+        val session = TestResources.session(engine, this)
+        val chat = session.chat
+        chat.sync()
+        chat.handle(message("m5", 5))
+        // O evento como o servidor o manda (openapi: `message_embeds_update`), com campos que o app não usa.
+        val event = WsEvent.parse(
+            """{"type":"message_embeds_update","channel_id":"c1","message_id":"m5","embeds":[{
+                "id":"e1","source_type":"link","fetch_method":"opengraph","site_name":"Exemplo","url":"https://videos.example.com/p",
+                "title":"Passeio","thumbnail":{"mime_type":"image/png","width":320,"height":180},
+                "video":{"url":"https://cdn.example.com/passeio.mp4","mime_type":"video/mp4","width":640,"height":360,"size_bytes":1234},
+                "created_at":"2026-01-01T00:00:06Z","fetched_at":"2026-01-01T00:00:06Z"}]}""",
+        )
+        assertNotNull(event)
+        chat.handle(event)
+
+        val embed = chat.messages("c1", 10).first().single().embeds.single()
+        assertEquals(EmbedMediaDto("https://cdn.example.com/passeio.mp4", "video/mp4", 640, 360), embed.video)
+        // O que o `EmbedCard` decide: o vídeo toca pelo relay do servidor da conta, e a imagem continua sendo a da miniatura.
+        val media = relayVideo(session.client.server, embed)
+        assertNotNull(media)
+        assertEquals("embed:e1", media.key)
+        assertEquals("https://papo.test/embeds/e1/video", media.url)
+        assertEquals("image/png", embed.thumbnail?.mimeType)
+    }
+
+    @Test
+    fun embedSemVideoContinuaSemVideoDepoisDeGravar() = runTest {
+        val chat = TestResources.session(engine, this).chat
+        chat.sync()
+        chat.handle(message("m5", 5))
+        chat.handle(WsEvent.EmbedsUpdated("c1", "m5", listOf(EmbedDto("e1", title = "Página", url = "https://x.test"))))
+        assertNull(chat.messages("c1", 10).first().single().embeds.single().video)
     }
 
     @Test

@@ -50,6 +50,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
@@ -102,6 +103,7 @@ import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.ReactionSummaryDto
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.playableAttachment
+import chat.papo.mobile.media.relayVideo
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.chat_edited
 import chat.papo.mobile.resources.chat_reply_missing
@@ -429,7 +431,7 @@ fun MessageItem(
                 }
                 message.embeds.forEach { embed ->
                     Spacer(Modifier.height(6.dp))
-                    EmbedCard(session, embed)
+                    EmbedCard(session, embed, onPlay)
                 }
                 if (message.reactions.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
@@ -661,8 +663,14 @@ private fun FileAttachment(session: AccountSession, attachment: AttachmentDto) {
     }
 }
 
+/**
+ * Cartão de um embed de link. Se ele traz um vídeo que o relay do servidor serve ([relayVideo]), a imagem (ou uma caixa
+ * 16:9 sem imagem) leva o ▶ e tocar chama [onPlay]. Nada é pedido ao relay antes do toque: nem autoplay nem pré-carga,
+ * porque cada vídeo aberto prende uma das poucas vagas do relay no servidor.
+ */
 @Composable
-private fun EmbedCard(session: AccountSession, embed: EmbedDto) {
+private fun EmbedCard(session: AccountSession, embed: EmbedDto, onPlay: (PlayableMedia) -> Unit) {
+    val video = relayVideo(session.client.server, embed)
     val hasImage = embed.thumbnail != null || embed.image != null
     val image by rememberMediaImage(session, if (hasImage) "embed/${embed.id}" else null) {
         session.api.embedImageBase64(embed.id)?.let { Base64.decode(it) }
@@ -692,16 +700,41 @@ private fun EmbedCard(session: AccountSession, embed: EmbedDto) {
             embed.description?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
             }
-            image?.let { bitmap ->
+            if (video != null) {
                 Spacer(Modifier.height(8.dp))
-                Image(
-                    bitmap,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).clip(RoundedCornerShape(8.dp)),
-                    contentScale = ContentScale.Crop,
-                )
+                EmbedVideoBox(image, onClick = { onPlay(video) })
+            } else {
+                image?.let { bitmap ->
+                    Spacer(Modifier.height(8.dp))
+                    Image(
+                        bitmap,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
             }
         }
+    }
+}
+
+/**
+ * A caixa do vídeo do embed: sempre 16:9, com a imagem do embed por baixo assim que ela chega (antes disso e sem imagem, o
+ * fundo do cartão), para a lista não pular quando a imagem carrega. O ▶ fica por cima.
+ */
+@Composable
+private fun EmbedVideoBox(image: ImageBitmap?, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(16f / 9f)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+        PlayBadge()
     }
 }
 

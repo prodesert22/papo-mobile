@@ -218,6 +218,9 @@
     <string name="video_failed_unsupported">Formato de vídeo não suportado neste aparelho.</string>
     <string name="video_failed_network">Não foi possível carregar o vídeo. Confira a sua conexão.</string>
     <string name="video_download_failed">Não foi possível baixar o arquivo.</string>
+    <string name="video_embed_failed_not_found">Vídeo indisponível.</string>
+    <string name="video_embed_failed_unavailable">O servidor não conseguiu buscar o vídeo agora.</string>
+    <string name="video_open_in_browser">Abrir no navegador</string>
     <string name="msg_select">Selecionar texto</string>
     <string name="mention_everyone_hint">Avisa todos que leem o canal</string>
     <string name="chat_empty_read_only">Nenhuma mensagem por aqui ainda.</string>

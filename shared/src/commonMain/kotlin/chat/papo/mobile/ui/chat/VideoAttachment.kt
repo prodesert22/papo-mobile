@@ -123,7 +123,7 @@ internal fun VideoAttachment(session: AccountSession, attachment: AttachmentDto,
 
 /** O ▶ no meio da caixa: um disco escuro com o triângulo branco, legível sobre qualquer fundo nos dois temas. */
 @Composable
-private fun PlayBadge() {
+internal fun PlayBadge() {
     Box(Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
         Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(Res.string.video_play), tint = Color.White, modifier = Modifier.size(32.dp))
     }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -45,6 +46,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,11 +60,14 @@ import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackFailure
 import chat.papo.mobile.media.playableAttachment
+import chat.papo.mobile.media.relayVideo
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.action_retry
 import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.resources.video_download_failed
+import chat.papo.mobile.resources.video_embed_failed_not_found
+import chat.papo.mobile.resources.video_embed_failed_unavailable
 import chat.papo.mobile.resources.video_failed_gone
 import chat.papo.mobile.resources.video_failed_network
 import chat.papo.mobile.resources.video_failed_not_found
@@ -69,7 +75,9 @@ import chat.papo.mobile.resources.video_failed_rate_limited
 import chat.papo.mobile.resources.video_failed_unauthorized
 import chat.papo.mobile.resources.video_failed_unavailable
 import chat.papo.mobile.resources.video_failed_unsupported
+import chat.papo.mobile.resources.video_open_in_browser
 import chat.papo.mobile.ui.components.LocalPlatformUi
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -93,15 +101,19 @@ internal class PlayingVideo(val key: String, var positionMs: Long = 0L) {
 }
 
 /**
- * O que o visualizador abre: a [media] e, quando ela é um anexo, o [attachment] que o **Baixar** salva
- * (null onde não há arquivo a baixar).
+ * O que o visualizador abre: a [media] e a origem dela. De um anexo, o [attachment] que o **Baixar** salva; de um embed
+ * (o relay do servidor), [attachment] é null e [pageUrl] é a página do embed, que o **Abrir no navegador** abre
+ * (null se o embed não tem uma URL `http` ou `https`).
  */
-internal data class OpenVideo(val media: PlayableMedia, val attachment: AttachmentDto?)
+internal data class OpenVideo(val media: PlayableMedia, val attachment: AttachmentDto?, val pageUrl: String? = null) {
+    /** Só há dois jeitos de chegar aqui: anexo (tem arquivo para baixar) ou embed (só o relay, sem arquivo). */
+    val isEmbed: Boolean get() = attachment == null
+}
 
 /**
  * Refaz o [OpenVideo] de [key] a partir das [messages], que são de quem dá o servidor: depois de girar o aparelho só a
- * chave sobrevive (a mídia não se salva). Null se nenhum anexo toca mais com essa chave, por exemplo porque a
- * mensagem foi apagada.
+ * chave sobrevive (a mídia não se salva). Null se nenhum anexo nem embed toca mais com essa chave, por exemplo porque a
+ * mensagem foi apagada ou os embeds dela foram trocados.
  */
 internal fun findOpenVideo(server: ServerUrl, messages: List<Message>, key: String): OpenVideo? {
     for (message in messages) {
@@ -109,24 +121,59 @@ internal fun findOpenVideo(server: ServerUrl, messages: List<Message>, key: Stri
             val media = playableAttachment(server, attachment) ?: continue
             if (media.key == key) return OpenVideo(media, attachment)
         }
+        for (embed in message.embeds) {
+            val media = relayVideo(server, embed) ?: continue
+            if (media.key == key) return OpenVideo(media, attachment = null, pageUrl = webLink(embed.url))
+        }
     }
     return null
 }
 
+/** Uma página que abre fora do app: só `http` e `https`, com host e sem espaços (regra 6). Qualquer outra coisa vira null. */
+private val WEB_LINK = Regex("""https?://[^\s/?#]+\S*""", RegexOption.IGNORE_CASE)
+
+/**
+ * O link da web de [url], ou null se não for um (ver [WEB_LINK]). O esquema sai em minúsculas: o Android só resolve
+ * `https://` para o navegador, e `Https://` (como alguns teclados escrevem) não acha aplicativo nenhum.
+ */
+internal fun webLink(url: String?): String? {
+    if (url == null || !WEB_LINK.matches(url)) return null
+    val schemeEnd = url.indexOf("://")
+    return url.substring(0, schemeEnd).lowercase() + url.substring(schemeEnd)
+}
+
 /** O que o painel de falha oferece além de fechar. */
-internal data class FailureActions(val retry: Boolean, val download: Boolean)
+internal data class FailureActions(val retry: Boolean, val download: Boolean, val browser: Boolean = false)
 
 /**
  * Repetir só faz sentido onde a falha pode passar sozinha ([PlaybackFailure.RateLimited], [PlaybackFailure.Unavailable]
  * e [PlaybackFailure.Network]); sem acesso, sem arquivo e formato sem suporte, o mesmo pedido falharia igual. Baixar
  * precisa de um arquivo no servidor ([canDownload]) e de um pedido que ainda possa dar certo, e é a saída do formato
- * que o aparelho não toca.
+ * que o aparelho não toca. O vídeo de embed não tem arquivo, e a saída dele é a página de origem no navegador
+ * ([canOpenInBrowser]), onde o pedido não adianta repetir: relay que não serve o vídeo, vídeo que mudou ou formato
+ * que o aparelho não toca. Sem acesso, nem a página resolve.
  */
-internal fun failureActions(failure: PlaybackFailure, canDownload: Boolean): FailureActions = when (failure) {
-    PlaybackFailure.Unauthorized, PlaybackFailure.NotFound, PlaybackFailure.Gone -> FailureActions(retry = false, download = false)
-    PlaybackFailure.Unsupported -> FailureActions(retry = false, download = canDownload)
-    PlaybackFailure.RateLimited, PlaybackFailure.Unavailable, PlaybackFailure.Network ->
-        FailureActions(retry = true, download = canDownload)
+internal fun failureActions(failure: PlaybackFailure, canDownload: Boolean, canOpenInBrowser: Boolean = false): FailureActions =
+    when (failure) {
+        PlaybackFailure.Unauthorized -> FailureActions(retry = false, download = false)
+        PlaybackFailure.NotFound, PlaybackFailure.Gone -> FailureActions(retry = false, download = false, browser = canOpenInBrowser)
+        PlaybackFailure.Unsupported -> FailureActions(retry = false, download = canDownload, browser = canOpenInBrowser)
+        PlaybackFailure.RateLimited, PlaybackFailure.Unavailable, PlaybackFailure.Network ->
+            FailureActions(retry = true, download = canDownload)
+    }
+
+/**
+ * O texto de cada falha. No vídeo de [embed] o servidor é quem o busca na origem, então 404 (o relay não serve este
+ * vídeo) e 5xx (a origem falhou, ou as vagas do relay estão cheias) dizem isso, e não "enviar" como no anexo.
+ */
+internal fun failureMessage(failure: PlaybackFailure, embed: Boolean): StringResource = when (failure) {
+    PlaybackFailure.Unauthorized -> Res.string.video_failed_unauthorized
+    PlaybackFailure.NotFound -> if (embed) Res.string.video_embed_failed_not_found else Res.string.video_failed_not_found
+    PlaybackFailure.Gone -> Res.string.video_failed_gone
+    PlaybackFailure.RateLimited -> Res.string.video_failed_rate_limited
+    PlaybackFailure.Unavailable -> if (embed) Res.string.video_embed_failed_unavailable else Res.string.video_failed_unavailable
+    PlaybackFailure.Unsupported -> Res.string.video_failed_unsupported
+    PlaybackFailure.Network -> Res.string.video_failed_network
 }
 
 /** Último ponto conhecido do vídeo: um campo comum, sem recompor, lido só quando o player é recriado. */
@@ -148,6 +195,7 @@ internal fun VideoViewer(
     onDismiss: () -> Unit,
 ) {
     val platform = LocalPlatformUi.current
+    val uriHandler = LocalUriHandler.current
     val download = video.attachment?.let { rememberAttachmentDownload(session, it) }
     var attempt by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<PlaybackFailure?>(null) }
@@ -178,13 +226,14 @@ internal fun VideoViewer(
                 }
             } else {
                 FailurePanel(
-                    failure = failed,
-                    actions = failureActions(failed, canDownload = download != null),
+                    message = failureMessage(failed, embed = video.isEmbed),
+                    actions = failureActions(failed, canDownload = download != null, canOpenInBrowser = video.pageUrl != null),
                     download = download,
                     onRetry = {
                         failure = null
                         attempt++
                     },
+                    onOpenInBrowser = { video.pageUrl?.let { openInBrowser(uriHandler, it) } },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -223,10 +272,11 @@ internal fun VideoViewer(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FailurePanel(
-    failure: PlaybackFailure,
+    message: StringResource,
     actions: FailureActions,
     download: AttachmentDownload?,
     onRetry: () -> Unit,
+    onOpenInBrowser: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -237,12 +287,12 @@ private fun FailurePanel(
         Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
         Spacer(Modifier.height(12.dp))
         Text(
-            failureText(failure),
+            stringResource(message),
             style = MaterialTheme.typography.bodyLarge,
             color = Color.White,
             textAlign = TextAlign.Center,
         )
-        if (actions.retry || (actions.download && download != null)) {
+        if (actions.retry || actions.browser || (actions.download && download != null)) {
             Spacer(Modifier.height(20.dp))
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
@@ -251,6 +301,16 @@ private fun FailurePanel(
                 if (actions.retry) {
                     Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) {
                         Text(stringResource(Res.string.action_retry))
+                    }
+                }
+                if (actions.browser) {
+                    OutlinedButton(
+                        onClick = onOpenInBrowser,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(Res.string.video_open_in_browser))
                     }
                 }
                 if (actions.download && download != null) {
@@ -285,15 +345,15 @@ private fun FailurePanel(
 /** O vermelho de erro do tema escuro, legível sobre o preto nos dois temas do app. */
 private val DownloadFailedColor = Color(0xFFFFB4AB)
 
-@Composable
-private fun failureText(failure: PlaybackFailure): String = stringResource(
-    when (failure) {
-        PlaybackFailure.Unauthorized -> Res.string.video_failed_unauthorized
-        PlaybackFailure.NotFound -> Res.string.video_failed_not_found
-        PlaybackFailure.Gone -> Res.string.video_failed_gone
-        PlaybackFailure.RateLimited -> Res.string.video_failed_rate_limited
-        PlaybackFailure.Unavailable -> Res.string.video_failed_unavailable
-        PlaybackFailure.Unsupported -> Res.string.video_failed_unsupported
-        PlaybackFailure.Network -> Res.string.video_failed_network
-    },
-)
+/**
+ * Abre [url] (já filtrada por [webLink]) no navegador do aparelho. Sem um aplicativo que a abra o Compose lança
+ * [IllegalArgumentException]; não há o que mostrar além de nada acontecer, e a mensagem do erro leva a URL, que não vai
+ * a lugar nenhum.
+ */
+internal fun openInBrowser(handler: UriHandler, url: String) {
+    try {
+        handler.openUri(url)
+    } catch (_: IllegalArgumentException) {
+        // Sem navegador instalado: o botão não tem como avisar, e a falha de abrir uma página não derruba o visualizador.
+    }
+}

@@ -50,6 +50,8 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Formatação Markdown com listas e divisórias, prévias de links, miniaturas de
   imagem com visualizador em tela cheia, indicador de digitação e presença.
   Mensagens da mesma pessoa em até 10 minutos aparecem sob um só nome.
+- Vídeos, anexados ou de links, tocam dentro do app enquanto baixam, em tela
+  cheia, com busca.
 - Emojis: seletor com busca com todos os emojis Unicode e os do servidor,
   sugestões ao digitar `:nome`, emojis do servidor dentro das mensagens e emojis
   maiores nas mensagens que só têm emojis. Os emojis do servidor em GIF e WebP se
@@ -75,8 +77,9 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   de usuários e administração do servidor.
 - Nas chamadas: sem o som da tela transmitida, sem volume por pessoa e sem
   escolha de fone Bluetooth.
-- Vídeos anexados só tocam depois de baixados, e GIFs anexados, imagens de prévia
-  de links e emojis em APNG mostram só o primeiro quadro.
+- GIFs anexados, imagens de prévia de links e emojis em APNG mostram só o primeiro
+  quadro.
+- Os vídeos pausam quando você sai do app e não continuam em segundo plano.
 - Mensagens que esperam para sair e arquivos anexados a um rascunho se perdem
   quando o app trava ou fecha.
 - A interface está em português.
