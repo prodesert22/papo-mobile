@@ -83,6 +83,7 @@ import chat.papo.mobile.ui.profile.ProfileScreen
 import chat.papo.mobile.ui.profile.ProfileViewModel
 import chat.papo.mobile.ui.search.SearchScreen
 import chat.papo.mobile.ui.search.SearchViewModel
+import chat.papo.mobile.ui.notifications.AccountNotificationsScreen
 import chat.papo.mobile.ui.settings.AccountSettingsScreen
 import chat.papo.mobile.ui.settings.AppSettingsScreen
 import chat.papo.mobile.ui.settings.BlockedUsersScreen
@@ -130,6 +131,10 @@ private data class ProfileRoute(val accountId: String, val userId: String)
 /** Os usuários que a conta [accountId] bloqueou. */
 @Serializable
 private data class BlockedRoute(val accountId: String)
+
+/** As notificações da conta [accountId]: nível, supressão, silêncio e sincronização. */
+@Serializable
+private data class NotificationsRoute(val accountId: String)
 
 /** A troca da senha da conta [accountId]. */
 @Serializable
@@ -368,7 +373,18 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                 onOpenBlocked = { navController.navigate(BlockedRoute(accountId)) },
                 onOpenPassword = { navController.navigate(PasswordRoute(accountId)) },
                 onEditProfile = { navController.navigate(EditProfileRoute(accountId)) },
+                onOpenNotifications = { navController.navigate(NotificationsRoute(accountId)) },
             )
+        }
+        composable<NotificationsRoute> { entry ->
+            val route = entry.toRoute<NotificationsRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                AccountNotificationsScreen(accountSession.notificationPrefs, onBack = { navController.popBackStack() })
+            }
         }
         composable<PasswordRoute> { entry ->
             val route = entry.toRoute<PasswordRoute>()
