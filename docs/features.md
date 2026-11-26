@@ -115,7 +115,8 @@ release notes in [releases/](../releases/) describe each version's changes.
   from the right edge with everyone grouped by presence and a search by name.
   Tap a person to open their profile.
 - Edit your own profile: nickname, status message, description and typing
-  phrase, with your avatar and banner chosen from the gallery. The app crops
+  phrase, with your avatar and banner chosen from the gallery through a pencil button
+  on each image, laid out like a profile card. The app crops
   and shrinks the picture on the phone, drops the location it carries, and
   shows the result of each change. You can also remove your banner, and choose
   Available, Away or Busy from the profile editor or from your own profile, each

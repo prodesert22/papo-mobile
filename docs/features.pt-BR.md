@@ -116,7 +116,8 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   entra pela borda direita, com todos agrupados por presença e busca por nome.
   Toque em alguém para abrir o perfil.
 - Edição do próprio perfil: apelido, recado, descrição e frase de digitação, com
-  avatar e banner escolhidos da galeria. O app corta e reduz a imagem no
+  avatar e banner escolhidos da galeria por um lápis sobre cada imagem, no formato
+  de um cartão de perfil. O app corta e reduz a imagem no
   celular, tira a localização que ela carrega e mostra o resultado de cada
   mudança. Também dá para remover o banner e escolher Disponível, Ausente ou
   Ocupado pelo editor de perfil ou pelo seu próprio perfil, cada um com um disco
