@@ -44,6 +44,9 @@ tem cargos, permissões de canal e uma dona (`dona`, `Senha@000`); a docstring d
 `FAKE_VIDEO_DIR` aponta uma pasta de vídeos para semear (servidos com `Range`),
 `FAKE_VIDEO_KBPS` limita a velocidade e `FAKE_VIDEO_401_ONCE=N` responde 401 ao
 N-ésimo pedido de vídeo.
+Uma mensagem com um link `https://videos.example.com/...` ganha um embed de vídeo cerca
+de um segundo depois (`GET /embeds/{id}` e o relay `/embeds/{id}/video`, que serve um vídeo
+semeado com `Range`), e `FAKE_RELAY_502=1` faz o relay responder 502.
 
 ## Builds de release
 

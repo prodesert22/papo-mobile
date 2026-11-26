@@ -851,6 +851,240 @@ class SemVideosTest(FakeTestCase):
         self.assertEqual(64000, len(ana.fetch(f"/attachments/{sent['attachments'][0]['id']}")[2]))
 
 
+class EmbedTestCase(VideoTestCase):
+    """Fake com os vídeos semeados (`clip.mp4` e `outro.webm`) e `bia` mandando links no `papo`; `ana` observa."""
+
+    CLIP_LINK = "https://videos.example.com/v/clip.mp4"
+
+    def updates_of(self, watcher, message_id):
+        """Espera o `message_embeds_update` da mensagem; devolve (os eventos vistos até ele, o evento)."""
+        seen = watcher.wait(lambda e: e["type"] == "message_embeds_update" and e["message_id"] == message_id)
+        return seen, seen[-1]
+
+    def send_link(self, content=None, author="bia", channel="papo"):
+        """Manda a mensagem e espera o embed dela chegar a `ana`; devolve (a mensagem enviada, o primeiro embed)."""
+        watcher = self.watch(self.login("ana"))
+        sender = self.login(author)
+        status, sent = sender.send(self.channel(channel, sender)["id"], content or self.CLIP_LINK)
+        self.assertEqual(201, status)
+        _, event = self.updates_of(watcher, sent["id"])
+        return sent, event["embeds"][0]
+
+    def relay(self, embed, headers=None, who="ana"):
+        return self.login(who).fetch(f"/embeds/{embed['id']}/video", headers)
+
+
+class EmbedDeVideoTest(EmbedTestCase):
+    def test_link_vira_embed_depois_da_mensagem_e_a_resposta_do_envio_ainda_nao_o_traz(self):
+        watcher = self.watch(self.login("ana"))
+        bia = self.login("bia")
+        papo = self.channel("papo", bia)["id"]
+        status, sent = bia.send(papo, f"olha {self.CLIP_LINK} que legal")
+        self.assertEqual((201, []), (status, sent["embeds"]))
+        started = time.monotonic()
+        seen, event = self.updates_of(watcher, sent["id"])
+        # O crawl do servidor roda em segundo plano: a mensagem chega primeiro e o embed ~1 s depois.
+        self.assertGreaterEqual(time.monotonic() - started, 0.5)
+        self.assertEqual(["message", "message_embeds_update"], [e["type"] for e in seen if e["type"].startswith("message")])
+        self.assertEqual(papo, event["channel_id"])
+        self.assertEqual(1, len(event["embeds"]))
+        embed = event["embeds"][0]
+        self.assertEqual(("link", "opengraph", self.CLIP_LINK), (embed["source_type"], embed["fetch_method"], embed["url"]))
+        self.assertEqual("clip.mp4", embed["title"])
+        self.assertEqual(("video/mp4", self.CLIP_LINK), (embed["video"]["mime_type"], embed["video"]["url"]))
+        self.assertEqual("image/png", embed["thumbnail"]["mime_type"])
+        # O evento leva só metadados: a imagem se busca à parte.
+        self.assertNotIn("image_data", embed)
+        # A mesma lista passa a vir no histórico.
+        _, body = bia.call("GET", f"/channels/{papo}/messages?limit=30")
+        self.assertEqual([embed], next(m for m in body["messages"] if m["id"] == sent["id"])["embeds"])
+
+    def test_mime_do_embed_segue_a_extensao_do_link(self):
+        for link, mime in (("https://videos.example.com/outro.webm", "video/webm"), ("https://videos.example.com/x.OGV?t=1", "video/ogg"),
+                           ("https://videos.example.com/pagina", "video/mp4")):
+            _, embed = self.send_link(link)
+            self.assertEqual(mime, embed["video"]["mime_type"], link)
+
+    def test_so_link_https_do_videos_example_com_gera_embed(self):
+        watcher = self.watch(self.login("ana"))
+        bia = self.login("bia")
+        papo = self.channel("papo", bia)["id"]
+        for ignored in ("https://outro.example.com/clip.mp4", "http://videos.example.com/clip.mp4",
+                        "https://videos.example.com.evil.test/clip.mp4", "sem link"):
+            self.assertEqual(201, bia.send(papo, ignored)[0])
+        # Um embed de verdade logo depois: se algum dos anteriores gerasse evento, ele chegaria antes.
+        _, sent = bia.send(papo, self.CLIP_LINK)
+        seen, _ = self.updates_of(watcher, sent["id"])
+        self.assertEqual(1, len([e for e in seen if e["type"] == "message_embeds_update"]))
+
+    def test_links_repetidos_viram_um_embed_e_distintos_seguem_a_ordem_do_texto(self):
+        watcher = self.watch(self.login("ana"))
+        bia = self.login("bia")
+        content = "https://videos.example.com/outro.webm e https://videos.example.com/clip.mp4 e https://videos.example.com/outro.webm"
+        status, sent = bia.send(self.channel("papo", bia)["id"], content)
+        self.assertEqual(201, status)
+        _, event = self.updates_of(watcher, sent["id"])
+        self.assertEqual(["outro.webm", "clip.mp4"], [e["title"] for e in event["embeds"]])
+        self.assertEqual(2, len({e["id"] for e in event["embeds"]}))
+
+    def test_mensagem_apagada_antes_do_fim_do_crawl_nao_gera_evento(self):
+        watcher = self.watch(self.login("ana"))
+        bia = self.login("bia")
+        papo = self.channel("papo", bia)["id"]
+        _, gone = bia.send(papo, self.CLIP_LINK)
+        self.assertEqual(204, bia.call("DELETE", f"/messages/{gone['id']}")[0])
+        _, kept = bia.send(papo, self.CLIP_LINK)
+        seen, _ = self.updates_of(watcher, kept["id"])
+        self.assertEqual([kept["id"]], [e["message_id"] for e in seen if e["type"] == "message_embeds_update"])
+
+
+class EmbedDimensoesTest(EmbedTestCase):
+    def setUp(self):
+        # Um `ffprobe` de mentira na frente do PATH: o fake o chama para ler a largura e a altura de cada vídeo semeado.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        probe = Path(folder.name, "ffprobe")
+        probe.write_text("#!/bin/sh\necho 640,360\n")
+        probe.chmod(0o755)
+        self.env = {**self.env, "PATH": folder.name + os.pathsep + os.environ.get("PATH", "")}
+        super().setUp()
+
+    def test_o_embed_traz_a_largura_e_a_altura_do_video_semeado(self):
+        _, embed = self.send_link()
+        self.assertEqual((640, 360), (embed["video"]["width"], embed["video"]["height"]))
+
+
+class EmbedImagemTest(EmbedTestCase):
+    def test_embed_vem_com_a_imagem_em_base64(self):
+        _, embed = self.send_link()
+        status, body = self.login("ana").call("GET", f"/embeds/{embed['id']}")
+        self.assertEqual(200, status)
+        self.assertEqual(embed["id"], body["id"])
+        self.assertTrue(base64.b64decode(body["image_data"]).startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertIsNone(body["author_image_data"])
+
+    def test_embed_que_nao_existe_e_404_e_sem_sessao_e_401(self):
+        _, embed = self.send_link()
+        self.assertEqual(404, self.login("ana").call("GET", f"/embeds/{uuid.uuid4()}")[0])
+        for path in (f"/embeds/{embed['id']}", f"/embeds/{embed['id']}/video"):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5)
+            caught.exception.close()
+            self.assertEqual(401, caught.exception.code, path)
+
+
+class RelayTest(EmbedTestCase):
+    def test_sem_range_serve_o_video_semeado_inteiro_com_o_tipo_do_embed(self):
+        _, embed = self.send_link()
+        status, headers, body = self.relay(embed)
+        self.assertEqual((200, CLIP), (status, body))
+        self.assertEqual(("video/mp4", "bytes", str(len(CLIP))), (headers["Content-Type"], headers["Accept-Ranges"], headers["Content-Length"]))
+
+    def test_trecho_devolve_206_com_content_range_e_416_fora_do_arquivo(self):
+        _, embed = self.send_link()
+        status, headers, body = self.relay(embed, {"Range": "bytes=100-199"})
+        self.assertEqual((206, CLIP[100:200], "bytes 100-199/64000"), (status, body, headers["Content-Range"]))
+        status, headers, _ = self.relay(embed, {"Range": "bytes=64000-"})
+        self.assertEqual((416, "bytes */64000"), (status, headers["Content-Range"]))
+        self.assertEqual(416, self.relay(embed, {"Range": "bytes=abc"})[0])
+
+    def test_serve_o_semeado_de_mesmo_nome_e_senao_o_primeiro_do_mesmo_tipo(self):
+        _, webm = self.send_link("https://videos.example.com/outro.webm")
+        status, headers, body = self.relay(webm)
+        self.assertEqual((200, "video/webm", OTHER), (status, headers["Content-Type"], body))
+        _, unknown = self.send_link("https://videos.example.com/nao-semeado.mp4")
+        self.assertEqual(CLIP, self.relay(unknown)[2])
+
+    def test_sem_semente_do_tipo_o_embed_existe_mas_o_relay_responde_404(self):
+        # Só há .mp4 e .webm semeados: um link .ogv anuncia video/ogg e não tem o que servir.
+        _, embed = self.send_link("https://videos.example.com/teora.ogv")
+        self.assertEqual("video/ogg", embed["video"]["mime_type"])
+        status, headers, body = self.relay(embed)
+        self.assertEqual((404, "application/problem+json", "vídeo de embed não encontrado"),
+                         (status, headers["Content-Type"], json.loads(body)["detail"]))
+
+    def test_embed_que_nao_existe_e_404_no_relay(self):
+        self.assertEqual(404, self.login("ana").fetch(f"/embeds/{uuid.uuid4()}/video")[0])
+
+
+class RelayLogTest(EmbedTestCase):
+    stderr = subprocess.PIPE
+
+    def test_o_log_mostra_o_pedido_ao_relay_com_o_range_e_o_status(self):
+        _, embed = self.send_link()
+        self.assertEqual(206, self.relay(embed, {"Range": "bytes=10-19"})[0])
+        self.process.kill()
+        log = self.process.communicate()[1].decode()
+        self.assertIn(f"GET /embeds/{embed['id']}/video Range: bytes=10-19 -> 206", log)
+
+
+class RelayNaoLidoTest(EmbedTestCase):
+    permissions = "demo"
+
+    def test_quem_nao_le_o_canal_nao_ve_o_embed_nem_o_video(self):
+        # `equipe` só é lido por Moderação (bia); `ana` é Leitores e nem recebe o evento, então o embed vem pela leitura de bia.
+        bia = self.login("bia")
+        watcher = self.watch(bia)
+        status, sent = bia.send(self.channel("equipe", bia)["id"], self.CLIP_LINK)
+        self.assertEqual(201, status)
+        _, event = self.updates_of(watcher, sent["id"])
+        embed = event["embeds"][0]
+        ana = self.login("ana")
+        self.assertEqual(404, ana.call("GET", f"/embeds/{embed['id']}")[0])
+        self.assertEqual(404, ana.fetch(f"/embeds/{embed['id']}/video")[0])
+        self.assertEqual(200, bia.call("GET", f"/embeds/{embed['id']}")[0])
+        self.assertEqual(200, bia.fetch(f"/embeds/{embed['id']}/video")[0])
+
+
+class Relay502Test(EmbedTestCase):
+    env = {"FAKE_RELAY_502": "1"}
+
+    def test_relay_responde_502_com_problem_json_e_o_embed_segue_normal(self):
+        _, embed = self.send_link()
+        for headers in (None, {"Range": "bytes=0-9"}):
+            status, response, body = self.relay(embed, headers)
+            self.assertEqual((502, "application/problem+json", "Mídia indisponível"),
+                             (status, response["Content-Type"], json.loads(body)["title"]))
+        # A imagem não passa pelo relay.
+        self.assertEqual(200, self.login("ana").call("GET", f"/embeds/{embed['id']}")[0])
+
+    def test_embed_sem_semente_continua_404_e_nao_502(self):
+        _, embed = self.send_link("https://videos.example.com/teora.ogv")
+        self.assertEqual(404, self.relay(embed)[0])
+
+
+class Relay502ZeroTest(EmbedTestCase):
+    env = {"FAKE_RELAY_502": "0"}
+
+    def test_zero_nao_liga(self):
+        _, embed = self.send_link()
+        self.assertEqual(200, self.relay(embed)[0])
+
+
+class RelayVelocidadeTest(EmbedTestCase):
+    env = {"FAKE_VIDEO_KBPS": "128"}
+
+    def test_relay_tambem_e_entregue_devagar(self):
+        _, embed = self.send_link()
+        started = time.monotonic()
+        status, _, body = self.relay(embed, {"Range": "bytes=0-39999"})
+        elapsed = time.monotonic() - started
+        self.assertEqual((206, CLIP[:40000]), (status, body))
+        self.assertGreaterEqual(elapsed, 0.2)  # 40000 bytes a 128 KB/s: 0,31 s; o último pedaço sai antes disso
+
+
+class RelaySessaoVencidaTest(EmbedTestCase):
+    env = {"FAKE_VIDEO_401_ONCE": "2"}
+
+    def test_o_pedido_do_relay_conta_entre_os_de_video(self):
+        _, embed = self.send_link()
+        ana = self.login("ana")
+        path = f"/embeds/{embed['id']}/video"
+        self.assertEqual(206, ana.fetch(path, {"Range": "bytes=0-9"})[0])
+        self.assertEqual(401, ana.fetch(path, {"Range": "bytes=10-19"})[0])
+        self.assertEqual(206, ana.fetch(path, {"Range": "bytes=10-19"})[0])
+
+
 class ArquivoInvalidoTest(unittest.TestCase):
     def run_with(self, spec):
         with tempfile.TemporaryDirectory() as folder:

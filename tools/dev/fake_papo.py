@@ -49,6 +49,15 @@ o `Range` e o status de cada pedido, para conferir que buscar no vídeo pede só
     FAKE_VIDEO_KBPS=500       entrega os vídeos a 500 KB/s, para o player ter o que bufferizar
     FAKE_VIDEO_401_ONCE=N     responde 401 uma vez, no N-ésimo pedido de vídeo desde a partida (1 = o primeiro): o
                               cliente renova a sessão (`POST /auth/refresh`, que aqui segue valendo) e repete
+
+Vídeos de embed (ligados por um link, sem variável). Uma mensagem com `https://videos.example.com/...` recebe, ~1 s
+depois de criada, um `message_embeds_update` com um embed `opengraph`: título (o nome do arquivo do link), imagem
+(`GET /embeds/{id}`, com `image_data`) e `video` com `mime_type` pela extensão (.webm, .ogv; senão `video/mp4`) e a URL
+do link. `GET /embeds/{id}/video` é o relay: serve, com `Range` como o anexo, o vídeo semeado por `FAKE_VIDEO_DIR` de
+mesmo nome que o fim do link, ou o primeiro do mesmo tipo; sem semente, 404 (o que o relay real faz com um vídeo que não
+serve). O relay segue `FAKE_VIDEO_KBPS` e `FAKE_VIDEO_401_ONCE`, que contam os pedidos dele junto com os dos anexos.
+
+    FAKE_RELAY_502=1          o relay responde 502 (falha na origem, ou as vagas globais do servidor cheias) a todo pedido
 """
 import base64
 import hashlib
@@ -67,7 +76,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 from email.parser import BytesParser
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(sys.argv[1])
@@ -152,6 +161,13 @@ VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".ogv": "video/ogg"}
 GENERIC_TYPES = {"", "application/octet-stream"}
 VIDEO = {"kbps": 0.0, "expire_at": 0, "requests": 0}   # FAKE_VIDEO_KBPS, FAKE_VIDEO_401_ONCE e os pedidos de vídeo vistos
 CHUNK = 16384
+SEEDED = []     # vídeos semeados por FAKE_VIDEO_DIR: (nome, bytes, mime, largura, altura)
+
+# Embeds de vídeo: um link do `videos.example.com` vira um embed depois de um atraso, como o crawl em segundo plano do servidor.
+EMBED_LINK = re.compile(r"https://videos\.example\.com/[^\s<>\"]*", re.IGNORECASE)
+EMBED_DELAY = 1.0
+EMBEDS = {}     # embed_id -> {"view": o embed como o servidor o descreve, "channel_id", "image": bytes, "seed": vídeo semeado ou None}
+RELAY = {"fail": False}   # FAKE_RELAY_502
 
 
 def sniffed_mime(declared, file_name):
@@ -232,6 +248,7 @@ def seed_videos(folder):
         width, height = video_dimensions(path)
         loaded.append((path.name, path.read_bytes(), VIDEO_TYPES[path.suffix.lower()], width, height))
         new_message(PAPO, uid("bia"), "vídeo %s" % path.name, attachments=[video_attachment(*loaded[-1])])
+    SEEDED[:] = loaded
     # Do menor arquivo (e, empatando, do de nome mais curto): as variações não pesam quando alguém as toca.
     name, data, mime, width, height = min(loaded, key=lambda f: (len(f[1]), len(f[0])))
     for label, change in (("sensível", {"moderation": "sensitive"}), ("em retrato (360x640)", {"width": 360, "height": 640}),
@@ -254,6 +271,50 @@ def video_session_expires():
     with LOCK:
         VIDEO["requests"] += 1
         return VIDEO["requests"] == VIDEO["expire_at"]
+
+
+def embed_seed(link):
+    """O vídeo semeado que o relay serve para o link e o MIME que o embed anuncia: o de mesmo nome que o fim do link, senão o
+    primeiro do tipo da extensão (mp4 se a extensão não é de vídeo). Sem semente, (None, mime)."""
+    name = unquote(urlparse(link).path.rsplit("/", 1)[-1])
+    mime = VIDEO_TYPES.get(os.path.splitext(name)[1].lower(), "video/mp4")
+    seed = next((v for v in SEEDED if v[0] == name), None) or next((v for v in SEEDED if v[2] == mime), None)
+    return seed, mime
+
+
+def new_embed(channel_id, link):
+    """Registra o embed de um link e devolve a forma que o servidor manda nas mensagens e no evento (sem `image_data`)."""
+    seed, mime = embed_seed(link)
+    name = unquote(urlparse(link).path.rsplit("/", 1)[-1])
+    embed = {"id": str(uuid.uuid4()), "source_type": "link", "fetch_method": "opengraph", "provider": None,
+             "site_name": "videos.example.com", "url": link, "title": name or "Vídeo de teste",
+             "description": "Vídeo de teste, servido pelo relay do fake.",
+             "thumbnail": {"mime_type": "image/png", "width": 320, "height": 180}, "image": None,
+             "video": {"url": link, "mime_type": mime, "width": seed[3] if seed else None, "height": seed[4] if seed else None},
+             "created_at": now(), "fetched_at": now()}
+    EMBEDS[embed["id"]] = {"view": embed, "channel_id": channel_id, "image": png(35, 120, 200, 320, 180), "seed": seed}
+    return embed
+
+
+def publish_embeds(channel_id, message_id, links):
+    """O fim do crawl: guarda os embeds na mensagem e avisa quem lê o canal, a menos que ela já tenha sido apagada."""
+    with LOCK:
+        message = next((m for m in MESSAGES.get(channel_id, []) if m["id"] == message_id), None)
+        if message is None:
+            return
+        message["embeds"] = [new_embed(channel_id, link) for link in links]
+        embeds = list(message["embeds"])
+    emit({"type": "message_embeds_update", "channel_id": channel_id, "message_id": message_id, "embeds": embeds},
+         only=audience(channel_id))
+
+
+def crawl_links(message):
+    """Agenda o embed dos links de vídeo da mensagem (os distintos, na ordem do texto); sem link, nada acontece."""
+    links = list(dict.fromkeys(EMBED_LINK.findall(message["content"] or "")))
+    if links:
+        timer = threading.Timer(EMBED_DELAY, publish_embeds, (message["channel_id"], message["id"], links))
+        timer.daemon = True
+        timer.start()
 
 
 def stamp():
@@ -712,6 +773,26 @@ class Handler(BaseHTTPRequestHandler):
         if video and video_session_expires():
             sys.stderr.write("401 simulado por FAKE_VIDEO_401_ONCE\n")
             return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+        self.serve(mime, data, VIDEO["kbps"] if video else 0)
+
+    def embed(self, embed_id, relay, me):
+        """`GET /embeds/{id}` (o embed com `image_data`) e `GET /embeds/{id}/video` (o relay, que serve o vídeo semeado com
+        `Range`). Embed de canal que o usuário não lê, sem vídeo semeado ou desconhecido é 404; FAKE_RELAY_502 faz o relay responder 502."""
+        if relay and video_session_expires():
+            sys.stderr.write("401 simulado por FAKE_VIDEO_401_ONCE\n")
+            return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+        found = EMBEDS.get(embed_id)
+        if found is None or not has_channel_flag(found["channel_id"], me, "read_channel") or (relay and found["seed"] is None):
+            return self.problem(404, "Recurso não encontrado", "vídeo de embed não encontrado" if relay else "embed não encontrado")
+        if not relay:
+            return self.send(200, dict(found["view"], image_data=base64.b64encode(found["image"]).decode(), author_image_data=None))
+        if RELAY["fail"]:
+            return self.problem(502, "Mídia indisponível", "falha ao carregar vídeo do embed")
+        _, data, mime, _, _ = found["seed"]
+        self.serve(mime, data, VIDEO["kbps"])
+
+    def serve(self, mime, data, kbps):
+        """Responde com `data` como o `http.ServeContent`: 200, 206 ou 416, e `Accept-Ranges`; a `kbps` KB/s se for maior que 0."""
         size = len(data)
         kind, span = byte_range(self.headers.get("Range", ""), size)
         if kind in ("invalid", "unsatisfiable"):
@@ -732,7 +813,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Range", "bytes %d-%d/%d" % (first, last, size))
         self.send_header("Content-Length", str(last - first + 1))
         self.end_headers()
-        self.stream(data, first, last + 1, VIDEO["kbps"] if video else 0)
+        self.stream(data, first, last + 1, kbps)
 
     def stream(self, data, start, stop, kbps):
         """Escreve data[start:stop], no ritmo de `kbps` KB/s se for maior que 0. Quem desiste no meio (buscar em outro ponto
@@ -828,9 +909,16 @@ class Handler(BaseHTTPRequestHandler):
             self.attachment(m.group(1))
             return True
         s = SESSIONS.get(self.cookie())
+        embed = re.fullmatch(r"/embeds/([^/]+)(/video)?", path)
+        if embed and s is None:
+            self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+            return True
         if s is None:
             return False
         me = uid(s["user"])
+        if embed:
+            self.embed(embed.group(1), bool(embed.group(2)), me)
+            return True
         if path == "/channels":
             out = []
             for c in CHANNELS:
@@ -969,6 +1057,7 @@ class Handler(BaseHTTPRequestHandler):
             READS[(me, m["channel_id"])] = m["id"]
             event = {k: m[k] for k in ("id", "channel_id", "author_id", "content", "reply_to", "attachments", "created_at")}
             emit(dict(event, type="message"), only=audience(m["channel_id"]))
+            crawl_links(m)
             if m["channel_id"] in DMS:
                 for u in set(DMS[m["channel_id"]]):
                     emit({"type": "dm_update", "dm": dm_view(m["channel_id"], u)}, only={u})
@@ -1325,6 +1414,7 @@ if __name__ == "__main__":
             moment = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=i // 2, microseconds=(i % 4) * 250000)
             react(crowd, keys[i % 3], uid(name), nano(moment))
     video_settings()
+    RELAY["fail"] = os.environ.get("FAKE_RELAY_502", "") not in ("", "0")
     if os.environ.get("FAKE_VIDEO_DIR"):
         seed_videos(os.environ["FAKE_VIDEO_DIR"])
     if os.environ.get("FAKE_PERMISSIONS"):
