@@ -46,6 +46,15 @@ release notes in [releases/](../releases/) describe each version's changes.
   accents, and messages that mention you or reply to you are highlighted.
 - Tap a reply to go to the original message, swipe a message to reply to it and
   double tap it to react with 👍. Copy a message or select part of its text.
+- The conversation is a panel over the channel list, as in Discord. Swipe it to
+  the right to see the channels, with a strip of the conversation left at the
+  edge; swipe it back to the left, or tap the strip, to return to it. The panel
+  follows your finger and settles open or closed when you let go, and the back
+  button and gesture close it too. Each account keeps its own last conversation,
+  and after the app locks no conversation waits at the edge: the channel list
+  shows. Messages that arrive in a conversation waiting at the edge stay unread.
+  A message swiped to the left still replies, and areas that scroll sideways,
+  such as the attachment previews, take the swipe first.
 - Hold a reaction, or choose "Ver reações" in a message's actions, to see who
   reacted, with a list for each emoji. The list is read when it opens; open it
   again to refresh it. Reading it only needs permission to read the channel.

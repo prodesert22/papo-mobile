@@ -69,6 +69,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
@@ -243,6 +244,11 @@ fun ChatScreen(
     onOpenProfile: (String) -> Unit,
     /** Abre a lista de membros do servidor. Só é oferecida em canal: numa conversa direta o título já leva ao perfil. */
     onOpenMembers: () -> Unit,
+    /**
+     * A conversa está à vista. Com o painel dela fechado (a lista de canais por cima), ela segue montada mas não é lida:
+     * mensagens novas contam como não lidas, nada é marcado como lido e o vídeo que tocava para.
+     */
+    active: Boolean = true,
 ) {
     val chat = session.chat
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -364,9 +370,10 @@ fun ChatScreen(
         // Num trecho antigo, a "mais nova" é só a última carregada: não há conversa a acompanhar.
         if (newest != null && !detached && wasAtBottom) listState.scrollToItem(0)
     }
-    LaunchedEffect(newest?.id, atBottom, detached) {
+    LaunchedEffect(newest?.id, atBottom, detached, active) {
         // O fim de um trecho antigo não é o fim da conversa: marcar ali faria a leitura voltar no tempo.
-        if (newest != null && atBottom && !detached) viewModel.markRead(newest)
+        // Estacionada, a conversa não está sendo lida: o que chega fica como não lido na lista.
+        if (newest != null && atBottom && !detached && active) viewModel.markRead(newest)
     }
     // Chegou ao fim (ou foi para um trecho antigo, que tem aviso próprio): não há mais o que anunciar.
     LaunchedEffect(atBottom, detached) {
@@ -398,10 +405,14 @@ fun ChatScreen(
         }
     }
     // Outra conversa pode ter sido aberta por cima desta (busca → mensagem): ao voltar, é esta que está na tela.
-    LifecycleResumeEffect(viewModel) {
-        viewModel.onVisible()
+    // Estacionada ou fora da composição, ela deixa de ser a que está na tela, e o que chega nela conta como não lido.
+    LifecycleResumeEffect(viewModel, active) {
+        if (active) viewModel.onVisible() else viewModel.onHidden()
         onPauseOrDispose {}
     }
+    DisposableEffect(viewModel) { onDispose { viewModel.onHidden() } }
+    // O vídeo que tocava no cartão não segue tocando atrás da lista de canais.
+    LaunchedEffect(active) { if (!active) videos = InlineVideos() }
     // Mensagem pedida ao abrir: rola até ela quando entra na lista e a destaca por alguns segundos.
     val focusIndex = state.focusId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
     LaunchedEffect(state.focusId, focusIndex >= 0) {

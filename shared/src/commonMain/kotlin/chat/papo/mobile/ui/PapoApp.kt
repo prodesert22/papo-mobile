@@ -19,7 +19,10 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -30,12 +33,14 @@ import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.AppSession
+import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.OpenConversation
 import chat.papo.mobile.media.AudioTrack
 import chat.papo.mobile.resources.Res
@@ -56,7 +61,12 @@ import chat.papo.mobile.ui.components.AudioBar
 import chat.papo.mobile.ui.components.LocalAudioPlayback
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.PlatformUi
+import chat.papo.mobile.ui.home.ConversationPanelHost
+import chat.papo.mobile.ui.home.ConversationPanelState
 import chat.papo.mobile.ui.home.HomeScreen
+import chat.papo.mobile.ui.home.ParkedChat
+import chat.papo.mobile.ui.home.ParkedChatStores
+import chat.papo.mobile.ui.home.rememberConversationPanelState
 import chat.papo.mobile.ui.lock.LockScreen
 import chat.papo.mobile.ui.members.MembersDrawer
 import chat.papo.mobile.ui.profile.ProfileScreen
@@ -92,15 +102,6 @@ private data object AppSettingsRoute
 @Serializable
 private data object CallRoute
 
-/** [messageId] e [messageAt] pedem para abrir a conversa numa mensagem, como um resultado de busca. */
-@Serializable
-private data class ChatRoute(
-    val accountId: String,
-    val channelId: String,
-    val messageId: String? = null,
-    val messageAt: String? = null,
-)
-
 /** Busca na conta; [channelId] já abre com o filtro daquela conversa. */
 @Serializable
 private data class SearchRoute(val accountId: String, val channelId: String? = null)
@@ -114,7 +115,7 @@ private data class ProfileRoute(val accountId: String, val userId: String)
 private data class SwitcherRoute(val accountId: String? = null, val channelId: String? = null)
 
 /** A conversa do áudio [track], aberta na mensagem dele. */
-private fun chatRouteOf(track: AudioTrack) = ChatRoute(track.accountId, track.channelId, track.messageId, track.messageAtIso)
+private fun parkedChatOf(track: AudioTrack) = ParkedChat(track.channelId, MessageTarget(track.messageId, track.messageAtIso))
 
 @Composable
 fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
@@ -122,15 +123,21 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
     val wiped by graph.lock.dataWasWiped.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) { graph.lock.start() }
+    // Fica fora da tela principal para sobreviver a girar o aparelho; é esvaziado ao travar.
+    val chatStores = viewModel { ParkedChatStores() }
 
     CompositionLocalProvider(LocalPlatformUi provides platformUi) {
       PapoTheme {
         when (val current = state) {
             LockState.Starting -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
-            is LockState.Locked -> LockScreen(graph.lock, current)
+            is LockState.Locked -> {
+                // Nada de uma conversa fica em memória com o app travado; ao destravar a lista aparece.
+                LaunchedEffect(Unit) { chatStores.clear() }
+                LockScreen(graph.lock, current)
+            }
             is LockState.Unlocked -> {
                 val session = current.session as AppSession
-                CompositionLocalProvider(LocalAudioPlayback provides session.audio) { Unlocked(session, graph.lock, graph.appVersion) }
+                CompositionLocalProvider(LocalAudioPlayback provides session.audio) { Unlocked(session, graph.lock, graph.appVersion, chatStores) }
             }
         }
         if (wiped) {
@@ -148,10 +155,13 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
 }
 
 @Composable
-private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
+private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, chatStores: ParkedChatStores) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val loaded by session.accounts.loaded.collectAsStateWithLifecycle()
     val navController = rememberNavController()
+    // A conversa de cada conta e o painel dela ficam acima da navegação: o perfil ou a busca por cima da tela principal
+    // não os perdem, e girar o aparelho os guarda.
+    val panel = rememberConversationPanelState()
 
     if (!loaded) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
@@ -167,6 +177,14 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                 session.accounts.sessionMap.value.values.forEach { runCatching { it.chat.notifyActivity() } }
             }
         }
+    }
+
+    // Mostra a conversa [chat] da conta [accountId] no painel da tela principal, saindo das telas que estavam por cima dela.
+    // A conta da conversa passa a ser a ativa; ao fechar o painel se chega na lista dela.
+    val openChat = { accountId: String, chat: ParkedChat ->
+        session.accounts.select(accountId)
+        navController.popBackStack(HomeRoute, inclusive = false)
+        panel.open(accountId, chat)
     }
 
     // Uma tela nova entra deslizando da borda direita por cima da anterior, que fica parada embaixo, e sai pelo mesmo
@@ -188,29 +206,49 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                 val vm = viewModel(key = "first-server") { AddServerViewModel(session.accounts, null, null) }
                 AddServerScreen(vm, canLeave = false, onLeave = {}, onDone = {})
             } else {
-                HomeScreen(
-                    session = session,
-                    onAddServer = { navController.navigate(AddServerRoute()) },
-                    onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
-                    onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
-                    onSearch = { navController.navigate(SearchRoute(it.id)) },
-                    onSwitch = { navController.navigate(SwitcherRoute()) },
-                    onAppSettings = { navController.navigate(AppSettingsRoute) },
-                    content = { account ->
-                        val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
-                        sessions[account.id]?.let { accountSession ->
-                            Column {
-                                CallBar(session) { navController.navigate(CallRoute) }
-                                AudioBar(onOpen = { navController.navigate(chatRouteOf(it)) })
-                                ChannelListPane(
-                                    session = accountSession,
-                                    onOpen = { channelId -> navController.navigate(ChatRoute(account.id, channelId)) },
-                                    onJoinVoice = { channelId ->
-                                        session.calls.join(accountSession, channelId)
-                                        navController.navigate(CallRoute)
-                                    },
-                                )
-                            }
+                val activeId by session.accounts.activeId.collectAsStateWithLifecycle()
+                val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+                val chats = panel.chats
+                // Conta que saiu leva a conversa; armazém de conversa que já não é a última de uma conta, o ViewModel dela.
+                LaunchedEffect(sessions) { panel.retain(sessions.keys) }
+                SideEffect { chatStores.retain(ParkedChatStores.liveKeys(chats, sessions)) }
+                // A conta que a tela principal mostra é a mesma que ela escolhe; a conversa estacionada é a dela.
+                val selected = accounts.firstOrNull { it.id == activeId } ?: accounts.firstOrNull()
+                val selectedSession = selected?.let { sessions[it.id] }
+                val parked = selected?.let { chats[it.id] }?.takeIf { selectedSession != null }
+                ConversationPanelHost(
+                    panel = panel,
+                    parked = parked,
+                    home = {
+                        HomeScreen(
+                            session = session,
+                            onAddServer = { navController.navigate(AddServerRoute()) },
+                            onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
+                            onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
+                            onSearch = { navController.navigate(SearchRoute(it.id)) },
+                            onSwitch = { navController.navigate(SwitcherRoute()) },
+                            onAppSettings = { navController.navigate(AppSettingsRoute) },
+                            content = { account ->
+                                sessions[account.id]?.let { accountSession ->
+                                    Column {
+                                        CallBar(session) { navController.navigate(CallRoute) }
+                                        AudioBar(onOpen = { openChat(it.accountId, parkedChatOf(it)) })
+                                        ChannelListPane(
+                                            session = accountSession,
+                                            onOpen = { channelId -> panel.open(account.id, ParkedChat(channelId)) },
+                                            onJoinVoice = { channelId ->
+                                                session.calls.join(accountSession, channelId)
+                                                navController.navigate(CallRoute)
+                                            },
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    },
+                    chat = { chat, active ->
+                        if (selected != null && selectedSession != null) {
+                            ParkedChatContent(session, selected.id, selectedSession, chat, active, chatStores, panel, navController, openChat)
                         }
                     },
                 )
@@ -225,54 +263,6 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                 onLeave = { navController.popBackStack() },
                 onDone = { navController.popBackStack(HomeRoute, inclusive = false) },
             )
-        }
-        composable<ChatRoute> { entry ->
-            val route = entry.toRoute<ChatRoute>()
-            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
-            val accountSession = sessions[route.accountId]
-            if (accountSession == null) {
-                // A conta saiu (removida ou sessão trocada) com a conversa aberta.
-                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
-            } else {
-                val vm = viewModel(key = "${route.accountId}/${route.channelId}/${route.messageId}/${accountSession.hashCode()}") {
-                    val target = if (route.messageId != null && route.messageAt != null) MessageTarget(route.messageId, route.messageAt) else null
-                    ChatViewModel(accountSession, route.channelId, target)
-                }
-                val openProfile = { userId: String ->
-                    navController.navigate(ProfileRoute(route.accountId, userId)) { launchSingleTop = true }
-                }
-                // A gaveta fica dentro do destino: o voltar do sistema a fecha antes de sair da conversa.
-                val members = rememberDrawerState(DrawerValue.Closed)
-                val membersScope = rememberCoroutineScope()
-                MembersDrawer(session = accountSession, state = members, onOpenProfile = openProfile) {
-                    ChatScreen(
-                        session = accountSession,
-                        viewModel = vm,
-                        onBack = { navController.popBackStack() },
-                        onSearch = { navController.navigate(SearchRoute(route.accountId, route.channelId)) },
-                        onSwitch = { navController.navigate(SwitcherRoute(route.accountId, route.channelId)) },
-                        onOpenAudio = { track ->
-                            // O áudio é desta mesma conversa: a lista rola até a mensagem, sem empilhar outra cópia da conversa.
-                            if (track.accountId == route.accountId && track.channelId == route.channelId) {
-                                vm.showMessage(MessageTarget(track.messageId, track.messageAtIso))
-                            } else {
-                                navController.navigate(chatRouteOf(track))
-                            }
-                        },
-                        onJoinCall = if (session.calls.supported) {
-                            {
-                                session.calls.join(accountSession, route.channelId)
-                                // Se a chamada já está aberta por baixo desta conversa, a conversa sai da frente dela.
-                                navController.navigate(CallRoute) { popUpTo<CallRoute> { inclusive = true } }
-                            }
-                        } else {
-                            null
-                        },
-                        onOpenProfile = openProfile,
-                        onOpenMembers = { membersScope.launch { members.open() } },
-                    )
-                }
-            }
         }
         composable<ProfileRoute> { entry ->
             val route = entry.toRoute<ProfileRoute>()
@@ -289,11 +279,8 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                     session = accountSession,
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
-                    onOpenChat = { channelId ->
-                        val chat = ChatRoute(route.accountId, channelId)
-                        // Veio desta conversa (o título da conversa direta leva ao perfil): volta a ela em vez de empilhar outra igual.
-                        if (!navController.popBackStack(chat, inclusive = false)) navController.navigate(chat)
-                    },
+                    // Veio desta conversa (o título da conversa direta leva ao perfil) ou da lista: ela abre no painel.
+                    onOpenChat = { channelId -> openChat(route.accountId, ParkedChat(channelId)) },
                 )
             }
         }
@@ -312,7 +299,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                     session = accountSession,
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
-                    onOpen = { hit -> navController.navigate(ChatRoute(route.accountId, hit.channelId, hit.id, hit.createdAtIso)) },
+                    onOpen = { hit -> openChat(route.accountId, ParkedChat(hit.channelId, MessageTarget(hit.id, hit.createdAtIso))) },
                 )
             }
         }
@@ -321,7 +308,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                 session,
                 // Volta a quem abriu a chamada: a lista de conversas ou o chat do canal de voz.
                 onBack = { navController.popBackStack(CallRoute, inclusive = true) },
-                onOpenChat = { accountId, channelId -> navController.navigate(ChatRoute(accountId, channelId)) },
+                onOpenChat = { accountId, channelId -> openChat(accountId, ParkedChat(channelId)) },
             )
         }
         composable<AccountSettingsRoute> { entry ->
@@ -338,13 +325,65 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                 viewModel = vm,
                 accounts = accounts,
                 onBack = { navController.popBackStack() },
-                onOpen = { target ->
-                    // A conta da conversa passa a ser a ativa; ao voltar do chat se chega na tela principal dela.
-                    session.accounts.select(target.accountId)
-                    navController.navigate(ChatRoute(target.accountId, target.channelId)) {
-                        popUpTo<HomeRoute> { inclusive = false }
+                onOpen = { target -> openChat(target.accountId, ParkedChat(target.channelId)) },
+            )
+        }
+    }
+}
+
+/**
+ * A conversa do painel: o ViewModel dela, a tela e a gaveta de membros por cima. Uma conversa por vez, e cada uma na
+ * própria composição ([key]): o que uma tem (a rolagem, o campo, a mídia aberta) não passa à seguinte.
+ */
+@Composable
+private fun ParkedChatContent(
+    session: AppSession,
+    accountId: String,
+    accountSession: AccountSession,
+    chat: ParkedChat,
+    active: Boolean,
+    stores: ParkedChatStores,
+    panel: ConversationPanelState,
+    navController: NavHostController,
+    openChat: (accountId: String, chat: ParkedChat) -> Unit,
+) {
+    val storeKey = ParkedChatStores.keyOf(accountId, chat, accountSession)
+    key(storeKey) {
+        // O ViewModel mora no armazém da conversa, que sobrevive a girar o aparelho e sai quando ela deixa de ser a última da conta.
+        val owner = remember(stores, storeKey) { stores.owner(storeKey) }
+        val vm = viewModel(viewModelStoreOwner = owner, key = storeKey) { ChatViewModel(accountSession, chat.channelId, chat.target) }
+        val openProfile = { userId: String ->
+            navController.navigate(ProfileRoute(accountId, userId)) { launchSingleTop = true }
+        }
+        // A gaveta fica dentro da conversa: o voltar do sistema a fecha antes de fechar o painel.
+        val members = rememberDrawerState(DrawerValue.Closed)
+        val membersScope = rememberCoroutineScope()
+        MembersDrawer(session = accountSession, state = members, onOpenProfile = openProfile) {
+            ChatScreen(
+                session = accountSession,
+                viewModel = vm,
+                onBack = panel::close,
+                onSearch = { navController.navigate(SearchRoute(accountId, chat.channelId)) },
+                onSwitch = { navController.navigate(SwitcherRoute(accountId, chat.channelId)) },
+                onOpenAudio = { track ->
+                    // O áudio é desta mesma conversa: a lista rola até a mensagem, sem abrir outra cópia da conversa.
+                    if (track.accountId == accountId && track.channelId == chat.channelId) {
+                        vm.showMessage(MessageTarget(track.messageId, track.messageAtIso))
+                    } else {
+                        openChat(track.accountId, parkedChatOf(track))
                     }
                 },
+                onJoinCall = if (session.calls.supported) {
+                    {
+                        session.calls.join(accountSession, chat.channelId)
+                        navController.navigate(CallRoute) { launchSingleTop = true }
+                    }
+                } else {
+                    null
+                },
+                onOpenProfile = openProfile,
+                onOpenMembers = { membersScope.launch { members.open() } },
+                active = active,
             )
         }
     }
