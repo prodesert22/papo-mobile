@@ -93,6 +93,8 @@
     <string name="profile_edit_pick_banner">Escolher banner</string>
     <string name="profile_edit_remove_banner">Remover banner</string>
     <string name="profile_edit_banner_removal">O banner será removido ao salvar.</string>
+    <string name="profile_edit_unsaved">Você tem alterações não salvas.</string>
+    <string name="profile_edit_discard_all">Descartar</string>
     <string name="profile_edit_discard">Desfazer escolha</string>
     <string name="profile_edit_save">Salvar</string>
     <string name="profile_edit_saving">Salvando…</string>

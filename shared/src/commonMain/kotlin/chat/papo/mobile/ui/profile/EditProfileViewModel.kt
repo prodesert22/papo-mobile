@@ -93,6 +93,9 @@ data class EditProfileState(
     val textChanged: Boolean get() = draft.trimmed() != saved
     val hasBanner: Boolean get() = (load as? EditLoad.Ready)?.profile?.bannerSha != null
 
+    /** O usuário mudou algo que ainda não foi salvo: um texto, um avatar escolhido ou o banner. */
+    val hasUnsavedChanges: Boolean get() = ready && (textChanged || avatar != null || banner != BannerChange.Keep)
+
     /** Há o que salvar, tudo cabe nos limites e nada está em andamento. */
     val canSave: Boolean
         get() = ready && !saving && reducing == null && overLimit.isEmpty() &&
@@ -190,6 +193,22 @@ class EditProfileViewModel(
                     }
                 }
             }
+        }
+    }
+
+    /** Desiste de tudo o que não foi salvo: volta os textos ao que o servidor tem e solta o avatar e o banner escolhidos. */
+    fun discardAll() {
+        if (_state.value.saving) return
+        pickJob?.cancel()
+        _state.update {
+            it.copy(
+                draft = it.saved,
+                avatar = null,
+                banner = BannerChange.Keep,
+                reducing = null,
+                refusals = emptyMap(),
+                outcomes = emptyMap(),
+            )
         }
     }
 
