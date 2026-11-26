@@ -139,6 +139,7 @@ import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.ReactionSummaryDto
+import chat.papo.mobile.media.AudioTrack
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
@@ -190,6 +191,7 @@ import chat.papo.mobile.resources.presence_busy
 import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.switcher_title
+import chat.papo.mobile.ui.components.AudioBar
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.media.InlineVideos
@@ -226,6 +228,8 @@ fun ChatScreen(
     onSwitch: () -> Unit,
     /** Entra na chamada do canal de voz; null onde não há chamada. Só é oferecido em canal de voz. */
     onJoinCall: (() -> Unit)?,
+    /** Leva à mensagem do áudio que a barra de áudio mostra (é a conversa desta tela ou outra). */
+    onOpenAudio: (AudioTrack) -> Unit,
 ) {
     val chat = session.chat
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -453,6 +457,8 @@ fun ChatScreen(
     ) { padding ->
         // O espaço de baixo (teclado, gaveta de emoji ou barra de navegação) é do compositor.
         Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).onSizeChanged { columnPx = it.height }) {
+            // O áudio que toca com o cartão fora da tela (outra conversa, ou aqui, mais acima na lista).
+            AudioBar(onOpen = onOpenAudio)
             // Sem leitura não há lista nem compositor; o rascunho continua guardado para quando o acesso voltar.
             if (access.readDenied) {
                 NoAccessPane(Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)))

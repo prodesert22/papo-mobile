@@ -27,6 +27,7 @@ import androidx.navigation.toRoute
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.AppSession
 import chat.papo.mobile.chat.OpenConversation
+import chat.papo.mobile.media.AudioTrack
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.wiped_body
@@ -41,6 +42,8 @@ import chat.papo.mobile.ui.chat.ChannelListPane
 import chat.papo.mobile.ui.chat.ChatScreen
 import chat.papo.mobile.ui.chat.ChatViewModel
 import chat.papo.mobile.ui.chat.MessageTarget
+import chat.papo.mobile.ui.components.AudioBar
+import chat.papo.mobile.ui.components.LocalAudioPlayback
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.PlatformUi
 import chat.papo.mobile.ui.home.HomeScreen
@@ -87,6 +90,9 @@ private data class SearchRoute(val accountId: String, val channelId: String? = n
 @Serializable
 private data class SwitcherRoute(val accountId: String? = null, val channelId: String? = null)
 
+/** A conversa do áudio [track], aberta na mensagem dele. */
+private fun chatRouteOf(track: AudioTrack) = ChatRoute(track.accountId, track.channelId, track.messageId, track.messageAtIso)
+
 @Composable
 fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
     val state by graph.lock.state.collectAsStateWithLifecycle()
@@ -99,7 +105,10 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
         when (val current = state) {
             LockState.Starting -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
             is LockState.Locked -> LockScreen(graph.lock, current)
-            is LockState.Unlocked -> Unlocked(current.session as AppSession, graph.lock, graph.appVersion)
+            is LockState.Unlocked -> {
+                val session = current.session as AppSession
+                CompositionLocalProvider(LocalAudioPlayback provides session.audio) { Unlocked(session, graph.lock, graph.appVersion) }
+            }
         }
         if (wiped) {
             AlertDialog(
@@ -157,6 +166,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                         sessions[account.id]?.let { accountSession ->
                             Column {
                                 CallBar(session) { navController.navigate(CallRoute) }
+                                AudioBar(onOpen = { navController.navigate(chatRouteOf(it)) })
                                 ChannelListPane(
                                     session = accountSession,
                                     onOpen = { channelId -> navController.navigate(ChatRoute(account.id, channelId)) },
@@ -199,6 +209,14 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                     onBack = { navController.popBackStack() },
                     onSearch = { navController.navigate(SearchRoute(route.accountId, route.channelId)) },
                     onSwitch = { navController.navigate(SwitcherRoute(route.accountId, route.channelId)) },
+                    onOpenAudio = { track ->
+                        // O áudio é desta mesma conversa: a lista rola até a mensagem, sem empilhar outra cópia da conversa.
+                        if (track.accountId == route.accountId && track.channelId == route.channelId) {
+                            vm.showMessage(MessageTarget(track.messageId, track.messageAtIso))
+                        } else {
+                            navController.navigate(chatRouteOf(track))
+                        }
+                    },
                     onJoinCall = if (session.calls.supported) {
                         {
                             session.calls.join(accountSession, route.channelId)

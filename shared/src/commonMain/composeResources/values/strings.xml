@@ -353,5 +353,25 @@
     <string name="embed_youtube_player">Player do YouTube</string>
     <string name="embed_youtube_stopped">O player do YouTube parou. Use Abrir no YouTube.</string>
     <!-- 02 · trilha A · onda 3 (áudio) -->
+    <string name="audio_default_title">Áudio</string>
+    <string name="audio_play">Tocar áudio</string>
+    <string name="audio_pause">Pausar áudio</string>
+    <string name="audio_loading">Carregando o áudio</string>
+    <string name="audio_position">Posição do áudio</string>
+    <string name="audio_time">%1$s / %2$s</string>
+    <string name="audio_speed_normal">1×</string>
+    <string name="audio_speed_fast">1,5×</string>
+    <string name="audio_speed_faster">2×</string>
+    <string name="audio_speed_change">Velocidade do áudio: %1$s</string>
+    <string name="audio_failed_session_ended">Sua sessão terminou. Entre de novo para ouvir o áudio.</string>
+    <string name="audio_failed_forbidden">Você não tem acesso a este áudio.</string>
+    <string name="audio_failed_not_found">Este áudio não está mais disponível.</string>
+    <string name="audio_failed_gone">Este áudio foi removido ou mudou.</string>
+    <string name="audio_failed_rate_limited">O servidor pediu um tempo. Espere um pouco e tente de novo.</string>
+    <string name="audio_failed_unavailable">O servidor não conseguiu enviar o áudio agora.</string>
+    <string name="audio_failed_unsupported">Formato de áudio não suportado neste aparelho. Baixe o arquivo para ouvir em outro aplicativo.</string>
+    <string name="audio_failed_network">Não foi possível carregar o áudio. Confira a sua conexão.</string>
+    <string name="audio_bar_open">Ir para o áudio na conversa</string>
+    <string name="audio_bar_stop">Parar o áudio</string>
     <!-- 02 · trilha B · onda 3 (links, teclado) -->
 </resources>

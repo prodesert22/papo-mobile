@@ -168,6 +168,17 @@ class ChatViewModel(
 
     fun dismissReplyNotReached() = _state.update { it.copy(replyNotReached = null) }
 
+    /**
+     * Leva a tela à mensagem [target] desta conversa (a barra de áudio), procurando-a no histórico se ela não está carregada.
+     * Uma procura por vez: com outra em andamento, ou sem acesso à leitura, nada acontece.
+     */
+    fun showMessage(target: MessageTarget) {
+        val s = _state.value
+        if (s.locating || s.returning || readDenied) return
+        _state.update { it.copy(locating = true, replyNotReached = null, focusId = null) }
+        viewModelScope.launch { locate(target) }
+    }
+
     private fun searchOriginal(id: String) {
         val s = _state.value
         // Uma procura por vez, e a original já dada como apagada não se procura de novo.

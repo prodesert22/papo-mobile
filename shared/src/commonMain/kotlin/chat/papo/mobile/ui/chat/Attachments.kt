@@ -39,18 +39,21 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.Message
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.ModerationView
 import chat.papo.mobile.media.aspectOrNull
 import chat.papo.mobile.media.guardGone
 import chat.papo.mobile.media.moderationView
 import chat.papo.mobile.media.playableAttachment
+import chat.papo.mobile.media.playableAudio
 import chat.papo.mobile.media.sniffImage
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.attachment_blocked
 import chat.papo.mobile.resources.attachment_gif_badge
 import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.msg_download
+import chat.papo.mobile.ui.components.LocalAudioPlayback
 import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.rememberMediaPainter
 import chat.papo.mobile.ui.components.rememberedPainter
@@ -59,14 +62,15 @@ import chat.papo.mobile.ui.media.rememberAttachmentDownload
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * Um anexo da mensagem [messageId]: imagem com miniatura (um GIF anima), vídeo que o player toca (cartão com ▶) ou, para
- * o resto, o cartão de arquivo com **Baixar**. Um anexo que a moderação bloqueou ([ModerationView.Blocked]) vira o aviso e
- * nada é pedido ao servidor.
+ * Um anexo da [message]: imagem com miniatura (um GIF anima), áudio que o player toca (cartão com ▶ e barra de busca), vídeo
+ * que o player toca (cartão com ▶) ou, para o resto, o cartão de arquivo com **Baixar**. O áudio vem antes do vídeo, como no
+ * web: uma gravação de voz que o servidor farejou como `video/webm` é um áudio. Um anexo que a moderação bloqueou
+ * ([ModerationView.Blocked]) vira o aviso e nada é pedido ao servidor.
  */
 @Composable
 internal fun MessageAttachment(
     session: AccountSession,
-    messageId: String,
+    message: Message,
     attachment: AttachmentDto,
     onOpenImage: (AttachmentDto) -> Unit,
     videos: VideoHost,
@@ -75,10 +79,14 @@ internal fun MessageAttachment(
         BlockedAttachment()
         return
     }
+    // Sem motor de áudio na plataforma o áudio cai no cartão de arquivo.
+    val audio = LocalAudioPlayback.current
+    val audioMedia = audio?.let { playableAudio(session.client.server, attachment) }
     val video = playableAttachment(session.client.server, attachment)
     when {
-        attachment.isImage && attachment.thumbnailId != null -> ImageAttachment(session, messageId, attachment, onOpen = { onOpenImage(attachment) })
-        video != null -> VideoAttachment(session, messageId, attachment, video, videos)
+        attachment.isImage && attachment.thumbnailId != null -> ImageAttachment(session, message.id, attachment, onOpen = { onOpenImage(attachment) })
+        audio != null && audioMedia != null -> AudioAttachment(session, message, attachment, audioMedia, audio)
+        video != null -> VideoAttachment(session, message.id, attachment, video, videos)
         else -> FileAttachment(session, attachment)
     }
 }
