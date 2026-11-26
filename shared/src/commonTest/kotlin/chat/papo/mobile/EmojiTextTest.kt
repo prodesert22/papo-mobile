@@ -1,5 +1,6 @@
 package chat.papo.mobile
 
+import chat.papo.mobile.chat.EmojiMatch
 import chat.papo.mobile.chat.EmojiPiece
 import chat.papo.mobile.chat.EmojiText
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
@@ -28,6 +29,25 @@ class EmojiTextTest {
             ),
             EmojiText.split("oi :party_parrot: e :ok:", names),
         )
+    }
+
+    @Test
+    fun matchesDevolveOndeCadaEmojiFicaNoTexto() {
+        assertEquals(
+            listOf(EmojiMatch(3, 17, "party_parrot", "id1"), EmojiMatch(18, 22, "ok", "id2")),
+            EmojiText.matches("oi :party_parrot: :ok: :nao:", names),
+        )
+        assertTrue(EmojiText.matches(":ok:", emptyMap()).isEmpty())
+        assertTrue(EmojiText.matches("sem emoji", names).isEmpty())
+    }
+
+    @Test
+    fun matchesPulaOQueCaiEmTrechoLiteral() {
+        // `:ok:` fica nas posições 0 a 3; um trecho que toque qualquer uma delas o deixa como texto.
+        assertTrue(EmojiText.matches(":ok:", names, listOf(0..0)).isEmpty())
+        assertTrue(EmojiText.matches(":ok:", names, listOf(3..9)).isEmpty())
+        assertEquals(1, EmojiText.matches(":ok: x", names, listOf(4..5)).size)
+        assertEquals(1, EmojiText.matches("x :ok:", names, listOf(0..1)).size)
     }
 
     @Test

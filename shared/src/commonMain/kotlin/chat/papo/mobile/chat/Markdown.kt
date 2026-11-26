@@ -62,6 +62,32 @@ object Markdown {
         if (content.isEmpty()) emptyList() else Scanner(structured = true).scan(logicalLines(content))
 
     /**
+     * Onde [content] é texto literal e um `:nome:` não vira emoji: código em bloco e em linha, links nomeados e endereços
+     * soltos. Usa o mesmo leitor de [blocks] (a cerca de três crases e [inline]); só marca os trechos, em unidades
+     * UTF-16 de [content], em vez de montar os spans. O compositor usa isso para mostrar como imagem o mesmo
+     * que a mensagem vai mostrar.
+     */
+    fun literalRanges(content: String): List<IntRange> {
+        val out = ArrayList<IntRange>()
+        fun lines(from: Int, to: Int) {
+            var start = from
+            while (start <= to) {
+                val end = content.indexOf('\n', start).let { if (it < 0 || it > to) to else it }
+                inline(content.substring(start, end), TextSpan(""), ArrayList(), out, start)
+                start = end + 1
+            }
+        }
+        var cursor = 0
+        for (block in fence.findAll(content)) {
+            lines(cursor, block.range.first)
+            out += block.range
+            cursor = block.range.last + 1
+        }
+        lines(cursor, content.length)
+        return out
+    }
+
+    /**
      * Os [spans] com o `@everyone` de volta como texto comum, fundido ao vizinho de mesmo estilo: o que se vê
      * quando o autor não pode usá-lo, igual a antes de o Markdown o reconhecer.
      */
@@ -314,7 +340,11 @@ object Markdown {
 
     private val delimiters = listOf("***", "___", "**", "__", "~~", "*", "_")
 
-    private fun inline(text: String, style: TextSpan, out: MutableList<TextSpan>) {
+    /**
+     * Lê o texto de uma linha em spans. Com [literals], anota também onde ficam o código e os links, em unidades
+     * UTF-16 do texto de origem, que começa em [base] ([literalRanges]).
+     */
+    private fun inline(text: String, style: TextSpan, out: MutableList<TextSpan>, literals: MutableList<IntRange>? = null, base: Int = 0) {
         val plain = StringBuilder()
         fun flush() {
             if (plain.isNotEmpty()) {
@@ -337,6 +367,7 @@ object Markdown {
                 if (close > i + 1) {
                     flush()
                     out += style.copy(text = text.substring(i + 1, close), code = true)
+                    literals?.add(base + i..base + close)
                     i = close + 1
                     continue
                 }
@@ -361,6 +392,7 @@ object Markdown {
                 if (m != null) {
                     flush()
                     out += style.copy(text = m.groupValues[1], link = m.groupValues[2])
+                    literals?.add(base + i until base + i + m.value.length)
                     i += m.value.length
                     continue
                 }
@@ -371,6 +403,7 @@ object Markdown {
                     val address = m.value.trimEnd('.', ',', ')', '!', '?', ';', ':', '*', '_', '~')
                     flush()
                     out += style.copy(text = address, link = address)
+                    literals?.add(base + i until base + i + address.length)
                     i += address.length
                     continue
                 }
@@ -388,7 +421,7 @@ object Markdown {
                         "~~" -> style.copy(strike = true)
                         else -> style.copy(italic = true)
                     }
-                    inline(text.substring(i + delimiter.length, close), inner, out)
+                    inline(text.substring(i + delimiter.length, close), inner, out, literals, base + i + delimiter.length)
                     i = close + delimiter.length
                     continue
                 }

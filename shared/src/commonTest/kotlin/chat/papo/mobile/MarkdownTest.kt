@@ -174,4 +174,38 @@ class MarkdownTest {
         assertSame(plain, Markdown.withoutEveryone(plain))
         assertEquals(emptyList(), Markdown.withoutEveryone(emptyList()))
     }
+
+    // literalRanges: onde o texto é literal e um `:nome:` não vira emoji.
+
+    @Test
+    fun codigoEmLinhaEUmTrechoLiteralComAsCrases() {
+        assertEquals(listOf(0..5), Markdown.literalRanges("`:ok:` e"))
+        assertEquals(listOf(2..7), Markdown.literalRanges("a `b :c` d"))
+    }
+
+    @Test
+    fun blocoDeCodigoEUmTrechoLiteralComAsCercas() {
+        assertEquals(listOf(2..10), Markdown.literalRanges("a\n```\nb\n```\nc"))
+    }
+
+    @Test
+    fun linkNomeadoEEnderecoSoltoSaoLiterais() {
+        assertEquals(listOf(0..17), Markdown.literalRanges("[x](https://a.com) y"))
+        // O ponto do fim da frase não faz parte do endereço.
+        assertEquals(listOf(5..19), Markdown.literalRanges("veja https://a.com/x."))
+    }
+
+    @Test
+    fun trechosDentroDeEnfaseEEmOutraLinhaContamDoInicioDoTexto() {
+        assertEquals(listOf(4..6), Markdown.literalRanges("**a `b` c**"))
+        assertEquals(listOf(2..7), Markdown.literalRanges("x\n`:ok:`"))
+    }
+
+    @Test
+    fun semCodigoNemLinkNaoHaTrechoLiteral() {
+        assertEquals(emptyList(), Markdown.literalRanges("oi :ok: e **negrito**"))
+        assertEquals(emptyList(), Markdown.literalRanges(""))
+        assertEquals(emptyList(), Markdown.literalRanges("`sem fechar"))
+        assertEquals(emptyList(), Markdown.literalRanges("\\`escapada\\` e `` vazia"))
+    }
 }
