@@ -247,7 +247,9 @@ internal fun MediaViewer(session: AccountSession, message: Message, viewing: Vie
                     item = item,
                     onScreen = index == pager.currentPage,
                     viewing = viewing,
-                    onControlsVisible = { controlsVisible = it },
+                    // Só a página atual manda na barra: o player da página que saiu ainda avisa que os controles sumiram
+                    // (ao ser solto) depois da troca, e esconderia a barra de uma imagem, que não tem como trazê-la de volta.
+                    onControlsVisible = { visible -> if (index == pager.currentPage) controlsVisible = visible },
                     onDismiss = onDismiss,
                 )
             }
