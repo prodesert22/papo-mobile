@@ -668,17 +668,30 @@ class VideoTestCase(FakeTestCase):
 
 
 class VideoSementesTest(VideoTestCase):
-    def test_uma_mensagem_por_video_da_pasta_e_tres_variacoes_do_menor(self):
+    def test_uma_mensagem_por_video_da_pasta_e_quatro_variacoes_do_menor(self):
         found = {content: a for content, a in self.attachments()}
         self.assertEqual({"vídeo clip.mp4", "vídeo outro.webm", "vídeo clip.mp4 sensível",
-                          "vídeo clip.mp4 em retrato (360x640)", "vídeo clip.mp4 sem dimensões"}, set(found))
+                          "vídeo clip.mp4 em retrato (360x640)", "vídeo clip.mp4 sem dimensões",
+                          "vídeo clip.mp4 com miniatura do servidor"}, set(found))
         self.assertEqual(("video/mp4", len(CLIP)), (found["vídeo clip.mp4"]["mime_type"], found["vídeo clip.mp4"]["size_bytes"]))
         self.assertEqual(("video/webm", len(OTHER)), (found["vídeo outro.webm"]["mime_type"], found["vídeo outro.webm"]["size_bytes"]))
         self.assertEqual("sensitive", found["vídeo clip.mp4 sensível"]["moderation_status"])
         self.assertEqual((360, 640), (found["vídeo clip.mp4 em retrato (360x640)"]["width"], found["vídeo clip.mp4 em retrato (360x640)"]["height"]))
         self.assertEqual((None, None), (found["vídeo clip.mp4 sem dimensões"]["width"], found["vídeo clip.mp4 sem dimensões"]["height"]))
-        # Vídeo não tem miniatura (o servidor só gera para imagem).
+        # Vídeo não tem miniatura (o servidor só gera para imagem), salvo a variação feita para o app mostrar uma.
+        with_thumbnail = found.pop("vídeo clip.mp4 com miniatura do servidor")
         self.assertTrue(all(a["thumbnail_id"] is None for a in found.values()))
+        self.assertEqual((with_thumbnail["id"], 96, 64, None, None),
+                         (with_thumbnail["thumbnail_id"], with_thumbnail["thumbnail_width"], with_thumbnail["thumbnail_height"],
+                          with_thumbnail["width"], with_thumbnail["height"]))
+
+    def test_a_miniatura_do_video_e_um_png_e_o_arquivo_segue_sendo_o_video(self):
+        ana = self.login("ana")
+        attachment = next(a for c, a in self.attachments() if c == "vídeo clip.mp4 com miniatura do servidor")
+        status, headers, body = ana.fetch(f"/attachments/{attachment['id']}/thumbnail")
+        self.assertEqual((200, "image/png"), (status, headers["Content-Type"]))
+        self.assertTrue(body.startswith(b"\x89PNG"))
+        self.assertEqual(CLIP, ana.fetch(f"/attachments/{attachment['id']}")[2])
 
     def test_cada_semente_tem_o_proprio_arquivo(self):
         ids = [a["id"] for _, a in self.attachments()]

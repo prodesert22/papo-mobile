@@ -44,8 +44,9 @@ trecho fora do arquivo e 416 para um `Range` ilegível; sempre com `Accept-Range
 o `Range` e o status de cada pedido, para conferir que buscar no vídeo pede só o trecho novo.
 
     FAKE_VIDEO_DIR=<pasta>    semeia no `papo` uma mensagem de `bia` para cada .mp4, .webm e .ogv da pasta (com
-                              largura e altura lidas pelo `ffprobe`, se existir) e mais três do menor arquivo:
-                              sensível, em retrato (360x640) e sem dimensões
+                              largura e altura lidas pelo `ffprobe`, se existir) e mais quatro do menor arquivo:
+                              sensível, em retrato (360x640), sem dimensões e sem dimensões com uma miniatura do servidor
+                              (`thumbnail_id`, 96x64, que o servidor real só gera para imagem)
     FAKE_VIDEO_KBPS=500       entrega os vídeos a 500 KB/s, para o player ter o que bufferizar
     FAKE_VIDEO_401_ONCE=N     responde 401 uma vez, no N-ésimo pedido de vídeo desde a partida (1 = o primeiro): o
                               cliente renova a sessão (`POST /auth/refresh`) e repete com o cookie novo
@@ -112,6 +113,7 @@ READS = {}       # (user_id, channel_id) -> message_id
 DMS = {}         # dm_id -> (user_a, user_b)
 PINS = {}        # channel_id -> [message_id]
 FILES = {}       # attachment_id -> (mime, bytes)
+THUMBS = {}      # attachment_id -> (mime, bytes): miniatura de um anexo que não é imagem (o servidor real só gera para imagem)
 EMOJIS = []      # emojis do servidor, na ordem de criação: {id, name, format, image_blob, created_at}
 EMOJI_BUCKETS = {}  # cookie -> [fichas, instante]: limite de taxa como o padrão do backend (10/s, rajada 20)
 SOCKETS = []     # [(user_id, wfile, lock)]
@@ -239,16 +241,20 @@ def video_dimensions(path):
         return None, None
 
 
-def video_attachment(name, data, mime, width, height, moderation="clean"):
-    """Registra o arquivo de um vídeo e devolve o anexo como o servidor o descreve: sem miniatura, com as dimensões."""
+def video_attachment(name, data, mime, width, height, moderation="clean", thumbnail=False):
+    """Registra o arquivo de um vídeo e devolve o anexo como o servidor o descreve: sem miniatura (o servidor só a gera
+    para imagem), com as dimensões. Com `thumbnail` o anexo ganha uma miniatura PNG de 96x64, só para o app mostrá-la."""
     aid = str(uuid.uuid4())
     FILES[aid] = (mime, data)
+    if thumbnail:
+        THUMBS[aid] = ("image/png", png(255, 178, 56))
     return {"id": aid, "mime_type": mime, "original_file_name": name, "size_bytes": len(data), "width": width, "height": height,
-            "thumbnail_id": None, "thumbnail_width": None, "thumbnail_height": None, "moderation_status": moderation}
+            "thumbnail_id": aid if thumbnail else None, "thumbnail_width": 96 if thumbnail else None,
+            "thumbnail_height": 64 if thumbnail else None, "moderation_status": moderation}
 
 
 def seed_videos(folder):
-    """FAKE_VIDEO_DIR: uma mensagem de `bia` no `papo` para cada vídeo da pasta, e três variações dos metadados do menor."""
+    """FAKE_VIDEO_DIR: uma mensagem de `bia` no `papo` para cada vídeo da pasta, e quatro variações dos metadados do menor."""
     root = Path(folder)
     files = sorted(p for p in root.iterdir() if p.suffix.lower() in VIDEO_TYPES) if root.is_dir() else []
     if not files:
@@ -262,7 +268,8 @@ def seed_videos(folder):
     # Do menor arquivo (e, empatando, do de nome mais curto): as variações não pesam quando alguém as toca.
     name, data, mime, width, height = min(loaded, key=lambda f: (len(f[1]), len(f[0])))
     for label, change in (("sensível", {"moderation": "sensitive"}), ("em retrato (360x640)", {"width": 360, "height": 640}),
-                          ("sem dimensões", {"width": None, "height": None})):
+                          ("sem dimensões", {"width": None, "height": None}),
+                          ("com miniatura do servidor", {"width": None, "height": None, "thumbnail": True})):
         fields = {"width": width, "height": height, "moderation": "clean", **change}
         new_message(PAPO, uid("bia"), "vídeo %s %s" % (name, label), attachments=[video_attachment(name, data, mime, **fields)])
 
@@ -823,10 +830,11 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
         return s
 
-    def attachment(self, file_id):
+    def attachment(self, file_id, thumbnail=False):
         """`GET /attachments/{id}` como o `http.ServeContent` do servidor: 200, 206, 416 e `Accept-Ranges`. Vídeo pode ser
-        entregue devagar (FAKE_VIDEO_KBPS) e ter um 401 simulado (FAKE_VIDEO_401_ONCE)."""
-        mime, data = FILES[file_id]
+        entregue devagar (FAKE_VIDEO_KBPS) e ter um 401 simulado (FAKE_VIDEO_401_ONCE). Com `thumbnail` (`/thumbnail`) serve a
+        miniatura própria do anexo, se ele tem uma; senão o próprio arquivo, como o fake sempre fez para imagens."""
+        mime, data = THUMBS[file_id] if thumbnail and file_id in THUMBS else FILES[file_id]
         video = mime.startswith("video/")
         if video and video_session_expires():
             sys.stderr.write("401 simulado por FAKE_VIDEO_401_ONCE\n")
@@ -964,7 +972,7 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
             return True
         if m and m.group(1) in FILES:
-            self.attachment(m.group(1))
+            self.attachment(m.group(1), thumbnail=m.group(2) is not None)
             return True
         s = session_of(self.cookie())
         embed = re.fullmatch(r"/embeds/([^/]+)(/video)?", path)
