@@ -1,4 +1,4 @@
-"""Testes dos cargos e permissões de tools/dev/fake_papo.py. Rode com: python3 -m unittest discover -s tools/tests -v
+"""Testes dos cargos, das permissões e de quem reagiu em tools/dev/fake_papo.py. Rode com: python3 -m unittest discover -s tools/tests -v
 
 Cada teste sobe um fake novo numa porta livre, então nenhum depende do estado deixado por outro.
 """
@@ -18,6 +18,7 @@ import unittest
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 FAKE = Path(__file__).resolve().parent.parent / "dev" / "fake_papo.py"
@@ -33,9 +34,15 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
+def moment(text):
+    """O instante de um RFC 3339 com `Z`; a fração pode ter qualquer tamanho (o Go corta os zeros à direita)."""
+    whole, _, fraction = text.rstrip("Z").partition(".")
+    return datetime.strptime(whole, "%Y-%m-%dT%H:%M:%S") + timedelta(microseconds=int((fraction + "000000")[:6]))
+
+
 def start_fake(extra_env):
     """Sobe o fake numa porta livre e espera o `/health`; devolve (processo, porta). Tenta outra porta se a escolhida foi tomada."""
-    env = {k: v for k, v in os.environ.items() if k != "FAKE_PERMISSIONS"}
+    env = {k: v for k, v in os.environ.items() if k not in ("FAKE_PERMISSIONS", "FAKE_MANY_REACTORS")}
     env.update({"FAKE_EMOJI_SMALL": "1", **extra_env})
     for _ in range(5):
         port = free_port()
@@ -155,9 +162,10 @@ class Watcher:
 
 class FakeTestCase(unittest.TestCase):
     permissions = None  # valor de FAKE_PERMISSIONS, ou None para o fake sem permissões
+    env = {}  # o resto do ambiente do fake (FAKE_MANY_REACTORS, ...)
 
     def setUp(self):
-        self.process, self.port = start_fake({"FAKE_PERMISSIONS": self.permissions} if self.permissions else {})
+        self.process, self.port = start_fake({**({"FAKE_PERMISSIONS": self.permissions} if self.permissions else {}), **self.env})
         self.addCleanup(self.stop)
         self.watchers = []
         self.addCleanup(lambda: [w.close() for w in self.watchers])
@@ -210,6 +218,47 @@ class SemPermissoesTest(FakeTestCase):
         watcher.send({"type": "heartbeat"})
         seen = watcher.wait(lambda e: e["type"] == "heartbeat_ack")
         self.assertFalse([e for e in seen if e["type"] == "error"])
+
+
+class EmojisAnimadosTest(FakeTestCase):
+    """Os emojis do servidor falso incluem um GIF e um WebP animados, para ver a animação do app."""
+
+    def emojis(self):
+        ana, found, last_id = self.login("ana"), [], None
+        while True:
+            status, page = ana.call("GET", "/emojis" + (f"?last_id={last_id}" if last_id else ""))
+            self.assertEqual(200, status)
+            found += page["emojis"]
+            if not page["has_more"]:
+                return found
+            last_id = page["emojis"][-1]["id"]
+
+    def test_o_total_continua_duzentos_e_so_dois_nao_sao_png(self):
+        emojis = self.emojis()
+        self.assertEqual(200, len(emojis))
+        self.assertEqual({"party_gif": "GIF", "wave_webp": "WEBP"}, {e["name"]: e["format"] for e in emojis if e["format"] != "PNG"})
+
+    def test_o_gif_tem_tres_quadros_e_cabe_em_quatro_kb(self):
+        blob = base64.b64decode(next(e for e in self.emojis() if e["name"] == "party_gif")["image_blob"])
+        self.assertTrue(blob.startswith(b"GIF89a"))
+        self.assertLessEqual(len(blob), 4096)
+        # Cada quadro tem um bloco de controle gráfico (extensão 0xF9) ligado ao descritor de imagem (0x2C).
+        self.assertEqual(3, blob.count(b"\x21\xf9\x04"))
+
+    def test_o_webp_tem_animacao_ligada_e_tres_quadros_e_cabe_em_quatro_kb(self):
+        blob = base64.b64decode(next(e for e in self.emojis() if e["name"] == "wave_webp")["image_blob"])
+        self.assertEqual((b"RIFF", b"WEBP", b"VP8X"), (blob[:4], blob[8:12], blob[12:16]))
+        self.assertTrue(blob[20] & 0x02, "bit de animação do VP8X")
+        self.assertLessEqual(len(blob), 4096)
+        self.assertEqual(3, blob.count(b"ANMF"))
+
+    def test_as_mensagens_de_exemplo_usam_os_dois(self):
+        ana = self.login("ana")
+        papo = self.channel("papo", ana)["id"]
+        _, body = ana.call("GET", f"/channels/{papo}/messages")
+        texts = [m["content"] for m in body["messages"]]
+        self.assertTrue(any(":party_gif:" in t and ":wave_webp:" in t for t in texts))
+        self.assertIn(":party_gif:", texts)
 
 
 class CenarioDemoTest(FakeTestCase):
@@ -352,6 +401,18 @@ class CenarioDemoTest(FakeTestCase):
         self.assertEqual(201, bia.call("POST", path, {"unicode": "👍"})[0])
         self.assertEqual(204, ana.call("DELETE", path, {"unicode": "👍"})[0])
         self.assertEqual(403, self.login("caio").call("DELETE", path, {"unicode": "👍"})[0])
+
+    def test_ver_quem_reagiu_exige_read_channel_e_nao_send_messages(self):
+        ana, bia, caio = self.login("ana"), self.login("bia"), self.login("caio")
+        avisos = self.channel("avisos", ana)["id"]
+        _, sent = bia.send(avisos, "reaja")
+        bia.call("POST", f"/channels/{avisos}/messages/{sent['id']}/reactions", {"unicode": "👍"})
+        path = f"/channels/{avisos}/messages/{sent['id']}/reactions"
+        # A ana só lê o canal (não pode reagir) e vê quem reagiu; o caio, sem cargo, não lê e leva 403.
+        status, body = ana.call("GET", path)
+        self.assertEqual(200, status)
+        self.assertEqual([bia.id], [u["user_id"] for g in body["reactions"] for u in g["users"]])
+        self.assertEqual(403, caio.call("GET", path)[0])
 
     def test_busca_so_acha_canais_legiveis(self):
         bia, caio = self.login("bia"), self.login("caio")
@@ -524,6 +585,148 @@ class SemDonoTest(FakeTestCase):
         self.assertEqual(403, bia.call("POST", pin)[0])
         # Sem dono, ninguém exclui a mensagem alheia em canal aberto.
         self.assertEqual(403, ana.call("DELETE", f"/messages/{sent['id']}")[0])
+
+
+class QuemReagiuTest(FakeTestCase):
+    """`GET .../reactions` do fake sem permissões: o que o app lê para mostrar quem reagiu."""
+
+    def seeded(self, session):
+        """A mensagem do `papo` com 🔥 de caio e o emoji do servidor de bia e caio, e o caminho das reações dela."""
+        papo = self.channel("papo", session)["id"]
+        _, body = session.call("GET", f"/channels/{papo}/messages?limit=100")
+        message = next(m for m in body["messages"] if m["content"] == "reaja com um emoji do servidor")
+        return papo, message, f"/channels/{papo}/messages/{message['id']}/reactions"
+
+    def test_agrupa_por_emoji_da_reacao_mais_nova_para_a_mais_antiga(self):
+        bia, caio = self.login("bia"), self.login("caio")
+        _, message, path = self.seeded(bia)
+        status, body = bia.call("GET", path)
+        self.assertEqual(200, status)
+        self.assertEqual(message["id"], body["message_id"])
+        self.assertFalse(body["has_more"])
+        # A mais nova é o 🔥 de caio: o primeiro grupo é o da primeira linha da página, e o emoji do servidor vem depois.
+        self.assertEqual([None, message["reactions"][0]["emoji_id"]], [g["emoji_id"] for g in body["reactions"]])
+        fire, parrot = body["reactions"]
+        self.assertEqual("🔥", fire["unicode"])
+        self.assertEqual([(1, caio.id)], [(fire["count"], u["user_id"]) for u in fire["users"]])
+        self.assertEqual([caio.id, bia.id], [u["user_id"] for u in parrot["users"]])
+        self.assertEqual(2, parrot["count"])
+        # O horário vai como o Go o escreve: sem os zeros à direita da fração, e sem fração quando ela é zero.
+        self.assertEqual(["2026-11-24T12:30:02.25Z"], [u["created_at"] for u in fire["users"]])
+        self.assertEqual(["2026-11-24T12:30:01.5Z", "2026-11-24T12:30:00Z"], [u["created_at"] for u in parrot["users"]])
+
+    def test_order_asc_inverte_a_ordem(self):
+        bia = self.login("bia")
+        _, _, path = self.seeded(bia)
+        _, body = bia.call("GET", path + "?order=asc")
+        self.assertEqual([None, "🔥"], [g["unicode"] for g in body["reactions"]])
+        self.assertEqual(["2026-11-24T12:30:00Z", "2026-11-24T12:30:01.5Z"], [u["created_at"] for u in body["reactions"][0]["users"]])
+
+    def test_cursor_since_e_last_id_pega_so_o_que_vem_depois_na_ordem(self):
+        bia, caio = self.login("bia"), self.login("caio")
+        _, _, path = self.seeded(bia)
+        _, body = bia.call("GET", path)
+        parrot = body["reactions"][1]["users"]
+        newest_parrot = next(u for u in parrot if u["user_id"] == caio.id)
+        _, older = bia.call("GET", f"{path}?order=desc&since={newest_parrot['created_at']}&last_id={newest_parrot['id']}")
+        self.assertEqual([[bia.id]], [[u["user_id"] for u in g["users"]] for g in older["reactions"]])
+        self.assertFalse(older["has_more"])
+        # `since` sozinho, como no servidor, é "criado depois" mesmo em desc; `last_id` sozinho não filtra nada.
+        _, alone = bia.call("GET", f"{path}?order=desc&since={newest_parrot['created_at']}")
+        self.assertEqual(["🔥"], [g["unicode"] for g in alone["reactions"]])
+        _, no_since = bia.call("GET", f"{path}?last_id={newest_parrot['id']}")
+        self.assertEqual(body, no_since)
+
+    def own_reactions(self, session, channel_id, message_id):
+        _, body = session.call("GET", f"/channels/{channel_id}/messages?limit=100")
+        return next(m for m in body["messages"] if m["id"] == message_id)["user_reactions"]
+
+    def test_reagir_guarda_horario_e_id_que_a_mensagem_e_a_lista_mostram(self):
+        ana = self.login("ana")
+        papo, message, path = self.seeded(ana)
+        self.assertEqual(201, ana.call("POST", path, {"unicode": "👍"})[0])
+        _, body = ana.call("GET", path)
+        mine = next(g for g in body["reactions"] if g["unicode"] == "👍")["users"][0]
+        self.assertEqual(ana.id, mine["user_id"])
+        self.assertRegex(mine["created_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d*[1-9])?Z$")
+        self.assertEqual([mine["id"]], [r["id"] for r in self.own_reactions(ana, papo, message["id"]) if r["unicode"] == "👍"])
+        # Reagir de novo (a rota é idempotente) não troca o id nem o horário; tirar a reação a tira da lista.
+        ana.call("POST", path, {"unicode": "👍"})
+        self.assertEqual(body, ana.call("GET", path)[1])
+        self.assertEqual(204, ana.call("DELETE", path, {"unicode": "👍"})[0])
+        self.assertNotIn("👍", [g["unicode"] for g in ana.call("GET", path)[1]["reactions"]])
+        self.assertEqual([], [r for r in self.own_reactions(ana, papo, message["id"]) if r["unicode"] == "👍"])
+
+    def test_pedidos_invalidos(self):
+        bia = self.login("bia")
+        papo, _, path = self.seeded(bia)
+        self.assertEqual(400, bia.call("GET", path + "?order=sideways")[0])
+        self.assertEqual(400, bia.call("GET", path + "?since=ontem&last_id=x")[0])
+        outro = self.channel("avisos", bia)["id"]
+        _, message = bia.send(papo, "outra")
+        self.assertEqual(404, bia.call("GET", f"/channels/{outro}/messages/{message['id']}/reactions")[0])
+        self.assertEqual(404, bia.call("GET", f"/channels/{papo}/messages/{uuid.uuid4()}/reactions")[0])
+        self.assertEqual(404, bia.call("GET", f"/channels/{uuid.uuid4()}/messages/{message['id']}/reactions")[0])
+
+
+class MuitosReagiramTest(FakeTestCase):
+    """`FAKE_MANY_REACTORS=1`: 130 usuários, três emojis intercalados, duas páginas."""
+
+    env = {"FAKE_MANY_REACTORS": "1"}
+
+    def setUp(self):
+        super().setUp()
+        self.bia = self.login("bia")
+        papo = self.channel("papo", self.bia)["id"]
+        _, body = self.bia.call("GET", f"/channels/{papo}/messages?limit=500")
+        message = next(m for m in body["messages"] if m["content"] == "muita gente reagiu a esta mensagem")
+        self.path = f"/channels/{papo}/messages/{message['id']}/reactions"
+        self.counts = {(r["emoji_id"], r["unicode"]): r["count"] for r in message["reactions"]}
+
+    def rows(self, body):
+        return [(u["created_at"], u["id"], u["user_id"], g["unicode"] or g["emoji_id"]) for g in body["reactions"] for u in g["users"]]
+
+    def test_a_primeira_pagina_traz_cem_e_a_segunda_o_resto(self):
+        _, first = self.bia.call("GET", self.path)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(100, len(self.rows(first)))
+        self.assertEqual(3, len(first["reactions"]))
+        self.assertEqual(100, sum(g["count"] for g in first["reactions"]))
+        self.assertEqual({"🔥", "❤", None}, {g["unicode"] for g in first["reactions"]})
+
+    def test_o_cursor_da_pagina_e_a_linha_mais_antiga_de_todos_os_grupos(self):
+        _, first = self.bia.call("GET", self.path)
+        rows = self.rows(first)
+        oldest = min(rows, key=lambda r: (moment(r[0]), r[1]))
+        # Os dados obrigam o caso difícil: a reação mais antiga não é a última do último grupo da página.
+        self.assertNotEqual(oldest[1], first["reactions"][-1]["users"][-1]["id"])
+        _, second = self.bia.call("GET", f"{self.path}?order=desc&since={oldest[0]}&last_id={oldest[1]}")
+        self.assertFalse(second["has_more"])
+        self.assertEqual(30, len(self.rows(second)))
+        self.assertTrue(all((moment(r[0]), r[1]) < (moment(oldest[0]), oldest[1]) for r in self.rows(second)))
+        # Nada se repete entre as páginas, e as duas juntas são as 130 reações, todas de usuários diferentes.
+        both = rows + self.rows(second)
+        self.assertEqual(130, len({r[1] for r in both}))
+        self.assertEqual(130, len({r[2] for r in both}))
+        # Cada emoji continua na segunda página, e os totais batem com os da mensagem.
+        self.assertEqual(3, len(second["reactions"]))
+        totals = {}
+        for row in both:
+            totals[row[3]] = totals.get(row[3], 0) + 1
+        self.assertEqual(sorted(self.counts.values()), sorted(totals.values()))
+
+    def test_os_horarios_tem_fracoes_de_tamanhos_diferentes(self):
+        _, first = self.bia.call("GET", self.path)
+        stamps = [r[0] for r in self.rows(first)]
+        self.assertTrue(any("." not in t for t in stamps))
+        self.assertTrue(any(t.endswith(".5Z") for t in stamps))
+        self.assertTrue(any(t.endswith(".25Z") for t in stamps))
+        self.assertTrue(any(t.endswith(".75Z") for t in stamps))
+
+    def test_os_usuarios_inventados_aparecem_na_lista_de_usuarios(self):
+        _, users = self.bia.call("GET", "/users")
+        nicknames = {u["nickname"] for u in users["users"]}
+        self.assertTrue({"Pessoa 001", "Pessoa 130"} <= nicknames)
 
 
 class ArquivoInvalidoTest(unittest.TestCase):

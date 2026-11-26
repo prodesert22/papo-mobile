@@ -67,7 +67,6 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -149,6 +148,7 @@ import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.OutgoingFile
+import chat.papo.mobile.data.api.ReactionSummaryDto
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
@@ -196,6 +196,7 @@ import chat.papo.mobile.resources.msg_pin
 import chat.papo.mobile.resources.msg_reply
 import chat.papo.mobile.resources.msg_select
 import chat.papo.mobile.resources.msg_unpin
+import chat.papo.mobile.resources.msg_view_reactions
 import chat.papo.mobile.resources.presence_away
 import chat.papo.mobile.resources.presence_busy
 import chat.papo.mobile.resources.presence_offline
@@ -278,6 +279,7 @@ fun ChatScreen(
     var columnPx by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
     var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
+    var reactorsOf by remember { mutableStateOf<ReactorsRequest?>(null) }
     // Perder a leitura com uma folha ou diálogo aberto: eles agiriam sobre uma conversa que a pessoa já não vê.
     LaunchedEffect(access.readDenied) {
         if (access.readDenied) {
@@ -286,6 +288,7 @@ fun ChatScreen(
             selecting = null
             confirmDelete = null
             viewing = null
+            reactorsOf = null
         }
     }
     val listState = rememberLazyListState()
@@ -506,6 +509,7 @@ fun ChatScreen(
                                 onLongPress = { if (messageActionOffer(access, message, session.userId).any) actionsFor = message },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
                                 onOpenImage = { viewing = it },
+                                onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
                             )
                         }
                     }
@@ -623,6 +627,7 @@ fun ChatScreen(
             onDelete = { confirmDelete = message },
             onTogglePin = { viewModel.setPinned(message, !isPinned) },
             onSelectText = { selecting = message },
+            onShowReactors = { message.reactions.firstOrNull()?.let { reactorsOf = ReactorsRequest(message.id, it) } },
         )
     }
     selecting?.let { message ->
@@ -661,9 +666,21 @@ fun ChatScreen(
             onDismiss = { reactingTo = null },
         )
     }
+    reactorsOf?.let { request ->
+        // As bolinhas da folha seguem a mensagem viva; se ela foi apagada, não há mais o que mostrar.
+        val message = byId[request.messageId]
+        if (message == null) {
+            LaunchedEffect(request) { reactorsOf = null }
+        } else {
+            ReactorsSheet(session, message, users, request.first) { reactorsOf = null }
+        }
+    }
     viewing?.let { ImageViewer(session, it) { viewing = null } }
     state.pinnedList?.takeUnless { access.readDenied }?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
 }
+
+/** Quem reagiu a uma mensagem, pedido pela bolinha em que se tocou ou pela folha de ações (a primeira). */
+private data class ReactorsRequest(val messageId: String, val first: ReactionSummaryDto)
 
 /** Quantos itens acima do fim a lista precisa estar para oferecer o atalho sem contagem. */
 private const val FAR_FROM_BOTTOM_ITEMS = 10
@@ -958,8 +975,11 @@ private fun Composer(
     val emojiSuggestions = remember(emojiQuery?.text, emojiCatalog, serverEmojis) {
         if (emojiQuery == null) emptyList() else emojiSuggestions(emojiQuery.text, emojiCatalog, serverEmojis)
     }
+    // Os `:nome:` de emojis do servidor aparecem como imagem no campo, mas o texto do rascunho continua `:nome:`.
+    val draftEmojis = remember(serverEmojis.idByName) { DraftEmojis(serverEmojis.idByName) }
     // `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos (nome de emoji do servidor fica como texto).
-    val onChange: (TextFieldValue) -> Unit = { value ->
+    val onChange: (TextFieldValue) -> Unit = { typed ->
+        val value = draftEmojis.settle(draft, typed)
         val edit = if (emojiCatalog != null && value.composition == null && value.selection.collapsed) {
             EmojiCompletion.closeShortcode(draft.text, value.text, value.selection.start, emojiCatalog, serverEmojis.idByName.keys)
         } else {
@@ -1029,7 +1049,7 @@ private fun Composer(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             suggestion.unicode?.let { Text(it.char, fontSize = 22.sp) }
-                            suggestion.server?.let { EmojiImage(session, it.id, Modifier.size(24.dp)) }
+                            suggestion.server?.let { EmojiImage(session, it.id, Modifier.size(24.dp), animate = false) }
                             Spacer(Modifier.width(6.dp))
                             Text(suggestion.label, style = MaterialTheme.typography.labelLarge)
                         }
@@ -1096,12 +1116,13 @@ private fun Composer(
                     // O campo ocuparia o lugar do clipe: a folga mantém o recuo de quando ele existe.
                     Spacer(Modifier.width(8.dp))
                 }
-                TextField(
+                DraftTextField(
+                    session = session,
                     value = draft,
                     onValueChange = onChange,
+                    emojis = draftEmojis,
                     placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     enabled = !state.savingEdit,
-                    maxLines = 6,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     shape = RoundedCornerShape(22.dp),
                     colors = TextFieldDefaults.colors(
@@ -1308,6 +1329,7 @@ private fun MessageActionsSheet(
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
     onSelectText: () -> Unit,
+    onShowReactors: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
@@ -1343,6 +1365,9 @@ private fun MessageActionsSheet(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
+            }
+            if (offer.reactors) {
+                SheetAction(Icons.Filled.EmojiEmotions, stringResource(Res.string.msg_view_reactions)) { onShowReactors(); onDismiss() }
             }
             if (offer.reply) {
                 SheetAction(Icons.AutoMirrored.Filled.Reply, stringResource(Res.string.msg_reply)) { onReply(); onDismiss() }

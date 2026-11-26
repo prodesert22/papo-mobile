@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.User
 import kotlinx.coroutines.CancellationException
@@ -43,6 +45,40 @@ fun rememberMediaImage(session: AccountSession, name: String?, fetch: suspend ()
             null
         }
     }
+
+/**
+ * Como [rememberMediaImage], mas decodificada pela plataforma ([PlatformUi.decodeImage]), então uma
+ * imagem animada anima. Esta função é a dona da imagem: fecha-a ao trocar ou sair da composição, e só
+ * a deixa animar com a tela à vista (para em segundo plano, ou com outra tela por cima). Quem desenha usa
+ * [rememberedPainter]. Com [animate] falso mostra o primeiro quadro, sem custo de animação.
+ */
+@Composable
+fun rememberMediaPainter(
+    session: AccountSession,
+    name: String,
+    maxPx: Int,
+    animate: Boolean,
+    fetch: suspend () -> ByteArray?,
+): State<PlatformImage?> {
+    val platform = LocalPlatformUi.current
+    val image = produceState<PlatformImage?>(null, session.accountId, name, maxPx, animate) {
+        value = null
+        value = try {
+            session.media.get(name, fetch)?.let { platform.decodeImage(it, maxPx, animate) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            null
+        }
+    }
+    val current = image.value
+    DisposableEffect(current) { onDispose { current?.close() } }
+    LifecycleStartEffect(current) {
+        current?.start()
+        onStopOrDispose { current?.stop() }
+    }
+    return image
+}
 
 @Composable
 fun UserAvatar(session: AccountSession, user: User?, modifier: Modifier = Modifier, size: Dp = 40.dp, fallbackName: String = "?") {

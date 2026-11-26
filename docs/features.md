@@ -37,6 +37,9 @@ release notes in [releases/](../releases/) describe each version's changes.
   accents, and messages that mention you or reply to you are highlighted.
 - Tap a reply to go to the original message, swipe a message to reply to it and
   double tap it to react with 👍. Copy a message or select part of its text.
+- Hold a reaction, or choose "Ver reações" in a message's actions, to see who
+  reacted, with a list for each emoji. The list is read when it opens; open it
+  again to refresh it. Reading it only needs permission to read the channel.
 - The app follows the server's permissions: it hides channels you cannot read and
   offers only the actions you may take; `@everyone` is offered and highlighted for
   those allowed to use it.
@@ -48,7 +51,12 @@ release notes in [releases/](../releases/) describe each version's changes.
   same person within 10 minutes show under one name.
 - Emoji: a searchable picker with every Unicode emoji and the server's own,
   suggestions as you type `:name`, the server's emoji shown inside messages,
-  and larger emoji in messages that have nothing else.
+  and larger emoji in messages that have nothing else. The server's emoji in
+  GIF and WebP move in messages, reactions and the picker; they stay on their
+  first frame in the suggestions, and when the phone has animations removed. In
+  the message box the server's emoji show as images too, and the text stays
+  `:name:`: that is what is sent, saved and copied, and each emoji counts as one
+  character when you move the cursor, delete or select.
 
 ## Voice, camera and screen sharing
 
@@ -66,8 +74,8 @@ release notes in [releases/](../releases/) describe each version's changes.
   administration.
 - In calls: no sound from a shared screen, no per-person volume and no Bluetooth
   headset selection.
-- Video attachments play only after being downloaded, and GIFs and animated
-  emoji show only their first frame.
+- Video attachments play only after being downloaded, and attached GIFs, link
+  preview images and APNG emoji show only their first frame.
 - Messages waiting to be sent, and files attached to a draft, are lost when the
   app locks or closes.
 - The interface is in Portuguese.

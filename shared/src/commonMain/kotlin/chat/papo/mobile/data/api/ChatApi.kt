@@ -146,6 +146,21 @@ class ChatApi(private val client: PapoClient) {
         }.requireSuccess()
 
     /**
+     * Uma página de quem reagiu, da reação mais nova à mais antiga: o servidor manda até 100 por página, sem
+     * `limit` nem filtro por emoji. A página seguinte leva o cursor da anterior, [since] e [lastId], que vão
+     * juntos ou nenhum: `since` sozinho, mesmo em `desc`, o servidor lê como "criado depois" e volta ao começo.
+     */
+    suspend fun reactions(channelId: String, messageId: String, since: String? = null, lastId: String? = null): ReactionListDto =
+        http.get {
+            url(path("/channels/$channelId/messages/$messageId/reactions"))
+            parameter("order", "desc")
+            if (since != null && lastId != null) {
+                parameter("since", since)
+                parameter("last_id", lastId)
+            }
+        }.bodyOrThrow()
+
+    /**
      * Busca mensagens no servidor, até 100 por página. A página seguinte leva o
      * `created_at` e o `id` do último resultado; o servidor recusa o cursor pela metade.
      */

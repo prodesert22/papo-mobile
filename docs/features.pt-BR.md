@@ -39,6 +39,9 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Toque numa resposta para ir à mensagem original, deslize uma mensagem para
   respondê-la e toque duas vezes para reagir com 👍. Copie uma mensagem ou
   selecione parte do texto.
+- Segure uma reação, ou escolha "Ver reações" nas ações de uma mensagem, para ver
+  quem reagiu, com uma lista para cada emoji. A lista é lida quando abre; abra de
+  novo para atualizá-la. Para vê-la basta poder ler o canal.
 - O app segue as permissões do servidor: esconde os canais que você não pode ler e
   só oferece as ações que você pode fazer; o `@everyone` aparece e é destacado para
   quem tem permissão.
@@ -49,7 +52,12 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   Mensagens da mesma pessoa em até 10 minutos aparecem sob um só nome.
 - Emojis: seletor com busca com todos os emojis Unicode e os do servidor,
   sugestões ao digitar `:nome`, emojis do servidor dentro das mensagens e emojis
-  maiores nas mensagens que só têm emojis.
+  maiores nas mensagens que só têm emojis. Os emojis do servidor em GIF e WebP se
+  mexem nas mensagens, nas reações e no seletor; ficam no primeiro quadro nas
+  sugestões, e quando o celular está com as animações removidas. No campo de
+  mensagem os emojis do servidor também aparecem como imagem, e o texto continua
+  `:nome:`: é o que se envia, se guarda e se copia, e cada emoji conta como um
+  caractere ao mover o cursor, apagar ou selecionar.
 
 ## Voz, câmera e transmissão de tela
 
@@ -67,8 +75,8 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   de usuários e administração do servidor.
 - Nas chamadas: sem o som da tela transmitida, sem volume por pessoa e sem
   escolha de fone Bluetooth.
-- Vídeos anexados só tocam depois de baixados, e GIFs e emojis animados mostram
-  só o primeiro quadro.
+- Vídeos anexados só tocam depois de baixados, e GIFs anexados, imagens de prévia
+  de links e emojis em APNG mostram só o primeiro quadro.
 - Mensagens que esperam para sair e arquivos anexados a um rascunho se perdem
   quando o app trava ou fecha.
 - A interface está em português.

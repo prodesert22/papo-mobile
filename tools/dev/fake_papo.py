@@ -26,6 +26,11 @@ Canal sem `entries` é aberto. O cenário `demo`: dono `dona` (Senha@000); `bia`
 cargo; `avisos` (Leitores só lê), `equipe` (só Moderação) e a voz `Palco` (Leitores lê, mas não entra); `papo` e
 "Sala de voz" abertos; `@everyone` de `bia` (pode), `caio` (não pode) e `dona` (dona) no `papo`.
 
+Quem reagiu: cada reação guarda quando foi feita e um id, e `GET /channels/{id}/messages/{id}/reactions` pagina como o
+servidor (100 reações por página, cursor `since` + `last_id`, `order`, grupos na ordem da primeira aparição). Com
+`FAKE_MANY_REACTORS=1` o `papo` ganha uma mensagem com 130 usuários inventados ("Pessoa 001"…) reagindo com três emojis
+intercalados: o grupo de cada emoji se parte entre as duas páginas, e os horários têm frações de tamanhos diferentes.
+
 Para mudar ao vivo, entre como o dono e use as rotas da OpenAPI (com cookie), que mandam os eventos como o servidor:
 `POST /roles`, `PUT`/`DELETE /roles/{id}` (estes dois, como no servidor, **não** mandam evento),
 `POST /users/{id}/roles` e `DELETE /users/{id}/roles/{role_id}` (`role_add`/`role_remove`),
@@ -96,6 +101,35 @@ def noisy_png(r, g, b, size=96):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+# Emojis animados do servidor falso: três quadros de 64x64 (um disco vermelho, amarelo e verde sobre fundo transparente),
+# com menos de 1 KB cada. O GIF vem do Pillow (`save_all`, `loop=0`, `disposal=2`) e o WebP do ffmpeg
+# (`-framerate 4 -i f%d.png -c:v libwebp_anim -lossless 1 -loop 0`).
+ANIMATED_EMOJIS = {
+    "party_gif": ("GIF", (
+        "R0lGODlhQABAAIEAAAAAAP9GRgAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQJGQAAACwAAAAAQABAAAAI2AABCBxIsKDB"
+        "gwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyARBhhJkmTIiSVTqjzZUKXLlSwPvpwJM6ZAmjhL2gSQs+fImD6DngxKFCTR"
+        "ox6PKu2oFOnGpks1QnWKcWrUi1apWsxaFCvXrhW/gqUoVujWsj29osWpdu3Mtm5dwo2bci5dk3bpZrxb8yxfvFX/BngqmONf"
+        "pnyT6v0YdyhaoGJ3ft150yplgk0vy/SpeeHbzqBDix5NujRlwVM3o76KeTXrga5fV45ttiDtsbBvczbNu3fogAAh+QQJGQAA"
+        "ACwAAAAAQABAAIEAAAD/yCgAAAAAAAAI2AABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyAhBhhJkmTIiSVT"
+        "qjzZUKXLlSwPvpwJM6ZAmjhL2gSQs+fImD6DngxKFCTRox6PKu2oFOnGpks1QnWKcWrUi1apWsxaFCvXrhW/gqUoVujWsj29"
+        "osWpdu3Mtm5dwo2bci5dk3bpZrxb8yxfvFX/BngqmONfpnyT6v0YdyhaoGJ3ft150yplgk0vy/SpeeHbzqBDix5NujRjwVA3"
+        "o76KeTXrga5fV45ttiDtsbBvczbNu3fogAAh+QQJGQAAACwAAAAAQABAAIEAAAA8yHgAAAAAAAAI2AABCBxIsKDBgwgTKlzI"
+        "sKHDhxAjSpxIsaLFixgzatzIsaPHjyAxBhhJkmTIiSVTqjzZUKXLlSwPvpwJM6ZAmjhL2gSQs+fImD6DngxKFCTRox6PKu2o"
+        "FOnGpks1QnUqcipVi1avVsxa9CLXrli/+qwqNifZsjTPon2pdm3NrW5nto1r0itdlxnvvoWrt67dvj/zAn46mPBdpnqT0jXq"
+        "dihaoGJ3ft150yplgk0vyxyrWaHczqBDix5NuvRfwFELooa6ebXWyq7BYo4teyDt2rBvmzXNu3fogAA7"
+    )),
+    "wave_webp": ("WEBP", (
+        "UklGRt4BAABXRUJQVlA4WAoAAAASAAAAPwAAPwAAQU5JTQYAAAD/////AABBTk1GjAAAAAIAAAQAADgAADQAAPoAAAJWUDhM"
+        "cwAAAC84AA0QDzBG8z9G8x/wcBNJkiP1a3MhDJSDdgvtoCyEMV+X0fP6AUT0fwKkDJV3ig4bG9AsIewIk11htjtgACup2+aZ"
+        "xQ7PDGvvSIt/MKy9Y7HDM902z8hWku6AJF1htiNMlhA2oFmHjemOyozqW6lX3wcAQU5NRowAAAACAAAEAAA4AAA0AAD6AAAC"
+        "VlA4THMAAAAvOAANEA8wyPM/KPMf8HATSZIj9WtzIQyUg3YL7aAshDFfl9Hz+gFE9H8CJGWovFN02NiAZglhR5jsCrPdAQNY"
+        "Sd02zyx2eGZYe0da/INh7R2LHZ7ptnlGtpJ0ByTpCrMdYbKEsAHNOmxMd1RmVF9Kvfo+AEFOTUaKAAAAAgAABAAAOwAANAAA"
+        "+gAAAlZQOExyAAAALzsADRAPMMjDM3jzH/BwFEmS4/QZSc+FsFAO2i20g7IQ5ilfjx55AYjo/wRIUlSld5IGk3UoFlDtCItd"
+        "YbU7YACD1Gx6ZrPDM93KO+Jv9Ldtdnim2fSMbJB0ByTpCqsdYbGAah2KNZhMd5RGzb6TfPg+"
+    )),
+}
 
 
 def stamp():
@@ -188,10 +222,57 @@ def search_messages(data, query, me):
 
 def view(m, user_id=None):
     out = {k: v for k, v in m.items() if k != "reactions"}
-    # A chave de cada reação é (emoji_id, unicode); um dos dois é None.
+    # A chave de cada reação é (emoji_id, unicode); um dos dois é None. Os usuários: {user_id: (created_at, reaction_id)}.
     out["reactions"] = [{"emoji_id": k[0], "unicode": k[1], "count": len(us)} for k, us in m["reactions"].items() if us] or None
-    out["user_reactions"] = [{"id": str(uuid.uuid4()), "emoji_id": k[0], "unicode": k[1]} for k, us in m["reactions"].items() if user_id in us]
+    out["user_reactions"] = [{"id": us[user_id][1], "emoji_id": k[0], "unicode": k[1]} for k, us in m["reactions"].items() if user_id in us]
     return out
+
+
+def nano(moment):
+    """Um instante UTC como o Go escreve RFC 3339 Nano: a fração sem zeros à direita, e nenhuma quando é zero."""
+    fraction = ".%06d" % moment.microsecond if moment.microsecond else ""
+    return moment.strftime("%Y-%m-%dT%H:%M:%S") + fraction.rstrip("0") + "Z"
+
+
+def instant(text):
+    """O instante de um RFC 3339 com `Z` e fração de 0 a 9 dígitos (como `nano` escreve). ValueError se não for."""
+    found = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?Z", text or "")
+    if not found:
+        raise ValueError(text)
+    return datetime.fromisoformat(found.group(1) + "." + (found.group(2) or "").ljust(6, "0")[:6] + "+00:00")
+
+
+def react(message, key, user_id, at=None):
+    """Põe a reação de `user_id` em `message` com o emoji `key`; reagir de novo não muda nada (a rota é idempotente)."""
+    message["reactions"].setdefault(key, {}).setdefault(user_id, (at or nano(datetime.now(timezone.utc)), str(uuid.uuid4())))
+
+
+REACTION_PAGE = 100
+
+
+def reaction_page(message, query):
+    """`GET .../reactions` como o servidor (`storage/reactions.go`): 100 linhas por página em (created_at, id), com o
+    cursor exato `since` + `last_id`. `since` sem `last_id` filtra `created_at > since` em qualquer ordem, e `last_id`
+    sem `since` é ignorado. Devolve o corpo, ou None se `order` ou `since` são inválidos."""
+    order, since, last_id = query.get("order", ["desc"])[0], query.get("since", [""])[0], query.get("last_id", [""])[0]
+    if order not in ("asc", "desc"):
+        return None
+    try:
+        after = instant(since) if since else None
+    except ValueError:
+        return None
+    rows = [(instant(at), rid, user_id, key, at) for key, users in message["reactions"].items() for user_id, (at, rid) in users.items()]
+    rows.sort(reverse=order == "desc")
+    if after is not None and last_id:
+        rows = [r for r in rows if ((r[0], r[1]) < (after, last_id) if order == "desc" else (r[0], r[1]) > (after, last_id))]
+    elif after is not None:
+        rows = [r for r in rows if r[0] > after]
+    page = rows[:REACTION_PAGE]
+    groups = {}
+    for _, rid, user_id, key, created_at in page:
+        groups.setdefault(key, []).append({"id": rid, "user_id": user_id, "created_at": created_at})
+    return {"message_id": message["id"], "has_more": len(rows) > REACTION_PAGE,
+            "reactions": [{"emoji_id": k[0], "unicode": k[1], "count": len(u), "users": u} for k, u in groups.items()]}
 
 
 def audience(channel_id):
@@ -631,6 +712,22 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             byid = {x["id"]: x for x in MESSAGES.get(cid, [])}
             self.send(200, {"channel_id": cid, "pinned": [view(byid[i], me) for i in PINS.get(cid, []) if i in byid]})
+        elif re.fullmatch(r"/channels/[^/]+/messages/[^/]+/reactions", path):
+            cid, mid = path.split("/")[2], path.split("/")[4]
+            # A ordem do servidor: canal, mensagem do canal, depois a permissão de leitura.
+            msg = self.find(mid)
+            if not any(c["id"] == cid for c in CHANNELS) and cid not in DMS:
+                self.problem(404, "Recurso não encontrado", "canal não encontrado")
+            elif msg is None or msg["channel_id"] != cid:
+                self.problem(404, "Recurso não encontrado", "mensagem não encontrada neste canal")
+            elif not has_channel_flag(cid, me, "read_channel"):
+                self.forbidden("usuário não tem permissão para ler o canal")
+            else:
+                body = reaction_page(msg, query)
+                if body is None:
+                    self.problem(400, "Parâmetro inválido", "order deve ser asc ou desc; since deve ser um timestamp ISO 8601")
+                else:
+                    self.send(200, body)
         elif re.fullmatch(r"/channels/[^/]+/messages", path):
             cid = path.split("/")[2]
             if not has_channel_flag(cid, me, "read_channel"):
@@ -763,8 +860,11 @@ class Handler(BaseHTTPRequestHandler):
             if method != "POST" and not has_channel_flag(msg["channel_id"], me, "read_channel"):
                 return self.forbidden("usuário não tem permissão para ler o canal")
             key = (data.get("emoji_id"), data.get("unicode"))
-            users = msg["reactions"].setdefault(key, set())
-            users.add(me) if method == "POST" else users.discard(me)
+            users = msg["reactions"].setdefault(key, {})
+            if method == "POST":
+                react(msg, key, me)
+            else:
+                users.pop(me, None)
             emit({"type": "react_update", "message_id": msg["id"], "emoji_id": key[0], "unicode": key[1], "count": len(users)}, only=audience(msg["channel_id"]))
             return self.send(201 if method == "POST" else 204, {"message_id": msg["id"]} if method == "POST" else None)
         if ACCESS["on"] and self.access_write(method, path, data, me):
@@ -1006,7 +1106,7 @@ if __name__ == "__main__":
     new_message(PAPO, uid("bia"), "Vi sim, @mention(<@%s>) acompanhou comigo.\nSegue o print:" % uid("ana"), reply_to=first["id"],
                 attachments=[{"id": aid, "mime_type": "image/png", "original_file_name": "print.png", "size_bytes": len(FILES[aid][1]),
                               "thumbnail_id": aid, "thumbnail_width": 96, "thumbnail_height": 64, "moderation_status": "clean"}])
-    first["reactions"][(None, "👍")] = {uid("bia")}
+    react(first, (None, "👍"), uid("bia"))
     new_message(CHANNELS[2]["id"], uid("bia"), "Manutenção no sábado às 10h.")
     # Uma conversa direta já existente: a busca geral não a alcança, só a busca com channel_id.
     dm = str(uuid.uuid4())
@@ -1017,21 +1117,45 @@ if __name__ == "__main__":
     # Emojis do servidor: 5 com nome de verdade e o resto para passar de duas páginas.
     palette = [(255, 99, 71), (60, 179, 113), (65, 105, 225), (218, 165, 32), (186, 85, 211)]
     # 200 emojis: 8 páginas, uns 8 s de carga no app (que espaça as páginas), para ver o carregamento.
-    names = ["party_parrot", "ok_hand", "blob_wave", "cat_vibe", "check_ok"] + ["emoji_%03d" % i for i in range(6, 201)]
+    # Os dois animados (GIF e WebP) ocupam as vagas 6 e 7 e não mudam o total de 200.
+    names = ["party_parrot", "ok_hand", "blob_wave", "cat_vibe", "check_ok", *ANIMATED_EMOJIS] + ["emoji_%03d" % i for i in range(8, 201)]
+    # FAKE_ANIMATED_EMOJIS=N faz dos N primeiros `emoji_NNN` animados (GIF e WebP em alternância), para medir o seletor com
+    # uma grade cheia de animações.
+    many_animated = int(os.environ.get("FAKE_ANIMATED_EMOJIS", "0"))
     for i, name in enumerate(names):
         r, g, b = palette[i % len(palette)]
-        EMOJIS.append({"id": str(uuid.uuid4()), "name": name, "format": "PNG",
-                       # FAKE_EMOJI_SMALL=1 usa imagens minúsculas, para separar o custo dos dados do resto da carga.
-                       "image_blob": base64.b64encode(png(r, g, b, 32, 32) if os.environ.get("FAKE_EMOJI_SMALL") else noisy_png((r + i * 7) % 256, g, b)).decode(),
+        if name in ANIMATED_EMOJIS:
+            image_format, image_blob = ANIMATED_EMOJIS[name]
+        elif 7 <= i < 7 + many_animated:
+            image_format, image_blob = list(ANIMATED_EMOJIS.values())[i % 2]
+        else:
+            image_format = "PNG"
+            # FAKE_EMOJI_SMALL=1 usa imagens minúsculas, para separar o custo dos dados do resto da carga.
+            image_blob = base64.b64encode(png(r, g, b, 32, 32) if os.environ.get("FAKE_EMOJI_SMALL") else noisy_png((r + i * 7) % 256, g, b)).decode()
+        EMOJIS.append({"id": str(uuid.uuid4()), "name": name, "format": image_format, "image_blob": image_blob,
                        "created_at": "2026-02-%02dT10:%02d:%02dZ" % (1 + i // 60, (i // 60) % 60, i % 60)})
     parrot, ok = EMOJIS[0]["id"], EMOJIS[1]["id"]
     new_message(PAPO, uid("bia"), "Chegou o emoji novo :party_parrot: e este também :ok_hand: mas :nao_existe: não")
     new_message(PAPO, uid("caio"), ":party_parrot:")
     new_message(PAPO, uid("bia"), "😀🎉👍")
+    # Emojis animados (GIF e WebP): no meio do texto, e sozinhos, quando aparecem maiores.
+    new_message(PAPO, uid("bia"), "Agora o emoji anima :party_gif: no meio do texto e também :wave_webp: de outro formato")
+    new_message(PAPO, uid("caio"), ":party_gif:")
     new_message(PAPO, uid("caio"), "em código `:party_parrot:` não vira imagem, **negrito :ok_hand:** vira")
     reacted = new_message(PAPO, uid("bia"), "reaja com um emoji do servidor")
-    reacted["reactions"][(parrot, None)] = {uid("bia"), uid("caio")}
-    reacted["reactions"][(None, "🔥")] = {uid("caio")}
+    react(reacted, (parrot, None), uid("bia"), "2026-11-24T12:30:00Z")
+    react(reacted, (parrot, None), uid("caio"), "2026-11-24T12:30:01.5Z")
+    react(reacted, (None, "🔥"), uid("caio"), "2026-11-24T12:30:02.25Z")
+    if os.environ.get("FAKE_MANY_REACTORS"):
+        # Três emojis intercalados: cada grupo continua na segunda página, e a ordem do cursor precisa de todos os grupos.
+        crowd = new_message(PAPO, uid("bia"), "muita gente reagiu a esta mensagem")
+        keys = [(None, "🔥"), (None, "❤"), (parrot, None)]
+        for i in range(1, 131):
+            name = "pessoa%03d" % i
+            USERS[name] = {"id": str(uuid.uuid4()), "password": "Senha@555", "created": "2026-01-04T00:00:00Z", "nickname": "Pessoa %03d" % i}
+            # Frações de 0, .25, .5 e .75 s: o Go corta os zeros à direita, então os textos têm tamanhos diferentes.
+            moment = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=i // 2, microseconds=(i % 4) * 250000)
+            react(crowd, keys[i % 3], uid(name), nano(moment))
     if os.environ.get("FAKE_PERMISSIONS"):
         setup_access(permission_spec(os.environ["FAKE_PERMISSIONS"]))
         announce_access()

@@ -25,6 +25,14 @@ interface PlatformUi {
 
     /** Grava um arquivo na pasta de downloads do usuário. */
     suspend fun saveToDownloads(name: String, mimeType: String, bytes: ByteArray): Boolean
+
+    /**
+     * Decodifica [bytes] em memória, sem criar arquivo, e reduz o lado maior a [maxPx] (nunca amplia).
+     * Com [animate] uma imagem animada anima; sem ele, ou com "remover animações" ligado no sistema,
+     * devolve o primeiro quadro. Null quando [bytes] não é uma imagem. Roda fora da thread principal,
+     * não altera [bytes] (o `ByteArray` do cache é compartilhado) e não deixa nada aberto se for cancelada.
+     */
+    suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage?
 }
 
 val LocalPlatformUi = staticCompositionLocalOf<PlatformUi> { error("PlatformUi não fornecido") }

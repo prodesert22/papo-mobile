@@ -116,4 +116,5 @@ dependencies {
     androidTestImplementation(libs.kotlin.test)
     androidTestImplementation(libs.coroutines.test)
     androidTestImplementation(libs.sqldelight.android.driver)
+    androidTestImplementation(libs.accompanist.drawablepainter)
 }

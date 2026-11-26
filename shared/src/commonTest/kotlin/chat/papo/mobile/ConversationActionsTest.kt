@@ -3,6 +3,7 @@ package chat.papo.mobile
 import chat.papo.mobile.chat.ChannelType
 import chat.papo.mobile.chat.ConversationAccess
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.data.api.ReactionSummaryDto
 import chat.papo.mobile.ui.chat.MessageActionOffer
 import chat.papo.mobile.ui.chat.composerOffered
 import chat.papo.mobile.ui.chat.messageActionOffer
@@ -18,7 +19,12 @@ class ConversationActionsTest {
     private val me = "me"
     private val bia = "bia"
 
-    private fun message(authorId: String?, content: String = "oi", webhookId: String? = null) = Message(
+    private fun message(
+        authorId: String?,
+        content: String = "oi",
+        webhookId: String? = null,
+        reactions: List<ReactionSummaryDto> = emptyList(),
+    ) = Message(
         id = "m1",
         channelId = "c1",
         authorId = authorId,
@@ -31,7 +37,7 @@ class ConversationActionsTest {
         externalAuthor = null,
         attachments = emptyList(),
         embeds = emptyList(),
-        reactions = emptyList(),
+        reactions = reactions,
         userReactions = emptyList(),
     )
 
@@ -51,7 +57,7 @@ class ConversationActionsTest {
     @Test
     fun semRestricaoMinhaMensagemOfereceTudo() {
         val offer = messageActionOffer(ConversationAccess.Unrestricted, message(me), me)
-        assertEquals(MessageActionOffer(react = true, reply = true, pin = true, edit = true, delete = true, text = true), offer)
+        assertEquals(MessageActionOffer(react = true, reply = true, pin = true, edit = true, delete = true, text = true, reactors = false), offer)
     }
 
     @Test
@@ -102,7 +108,7 @@ class ConversationActionsTest {
     @Test
     fun somenteLeituraEmMensagemAlheiaSoOfereceCopiarESelecionar() {
         val offer = messageActionOffer(readOnly, message(bia), me)
-        assertEquals(MessageActionOffer(react = false, reply = false, pin = false, edit = false, delete = false, text = true), offer)
+        assertEquals(MessageActionOffer(react = false, reply = false, pin = false, edit = false, delete = false, text = true, reactors = false), offer)
         assertTrue(offer.any)
     }
 
@@ -126,19 +132,53 @@ class ConversationActionsTest {
     fun folhaSemAcaoNenhumaNaoAbre() {
         // Anexo sem texto, de outra pessoa, num canal só de leitura: nada a oferecer.
         val offer = messageActionOffer(readOnly, message(bia, content = ""), me)
-        assertEquals(MessageActionOffer(false, false, false, false, false, false), offer)
+        assertEquals(MessageActionOffer(false, false, false, false, false, false, false), offer)
         assertFalse(offer.any)
     }
 
     @Test
     fun umaAcaoSozinhaBastaParaAFolhaAbrir() {
-        val none = MessageActionOffer(false, false, false, false, false, false)
+        val none = MessageActionOffer(false, false, false, false, false, false, false)
+        assertFalse(none.any)
         assertTrue(none.copy(react = true).any)
         assertTrue(none.copy(reply = true).any)
         assertTrue(none.copy(pin = true).any)
         assertTrue(none.copy(edit = true).any)
         assertTrue(none.copy(delete = true).any)
         assertTrue(none.copy(text = true).any)
+        assertTrue(none.copy(reactors = true).any)
+    }
+
+    // Ver reações
+
+    private val fire = listOf(ReactionSummaryDto(unicode = "🔥", count = 2))
+
+    @Test
+    fun mensagemComReacoesOfereceVerReacoes() {
+        assertTrue(messageActionOffer(ConversationAccess.Unrestricted, message(bia, reactions = fire), me).reactors)
+    }
+
+    @Test
+    fun mensagemSemReacoesNaoOfereceVerReacoes() {
+        assertFalse(messageActionOffer(ConversationAccess.Unrestricted, message(bia), me).reactors)
+    }
+
+    @Test
+    fun verReacoesPedeLeituraENaoReacao() {
+        // Quem só lê não reage, mas vê quem reagiu.
+        val offer = messageActionOffer(readOnly, message(bia, reactions = fire), me)
+        assertFalse(offer.react)
+        assertTrue(offer.reactors)
+        // Sem leitura nem isso.
+        assertFalse(messageActionOffer(readOnly.copy(read = false), message(bia, reactions = fire), me).reactors)
+    }
+
+    @Test
+    fun verReacoesSozinhoBastaParaAFolhaAbrir() {
+        // Anexo sem texto, de outra pessoa, num canal só de leitura: só sobra "Ver reações".
+        val offer = messageActionOffer(readOnly, message(bia, content = "", reactions = fire), me)
+        assertEquals(MessageActionOffer(false, false, false, false, false, false, true), offer)
+        assertTrue(offer.any)
     }
 
     // Bolinhas de reação

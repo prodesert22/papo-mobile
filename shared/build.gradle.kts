@@ -71,6 +71,7 @@ kotlin {
             implementation(libs.webrtc.android)
             implementation(libs.androidx.fragment)
             implementation(libs.androidx.sqlite)
+            implementation(libs.accompanist.drawablepainter)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
