@@ -29,16 +29,23 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelReplyTest {
     private lateinit var session: AccountSession
+    private lateinit var server: PagedChannel
 
     private fun TestScope.viewModel(server: PagedChannel): ChatViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        this@ChatViewModelReplyTest.server = server
         session = TestResources.session(server.engine, this)
         return ChatViewModel(session, "c1")
     }
 
-    /** O servidor falso responde em outra thread: espera a primeira leitura do canal terminar. */
+    /**
+     * O servidor falso responde em outra thread: espera a primeira leitura do canal terminar e o pedido das
+     * fixadas, que sai em paralelo com ela, chegar ao servidor. Sem isso ele pode chegar depois de o teste
+     * contar os pedidos.
+     */
     private suspend fun ChatViewModel.loaded() {
         state.first { it.loadedOnce }
+        TestResources.waitUntil { "GET /channels/c1/pinned" in server.requests }
     }
 
     private suspend fun ChatViewModel.message(id: String): Message = messages.first { list -> list.any { it.id == id } }.first { it.id == id }

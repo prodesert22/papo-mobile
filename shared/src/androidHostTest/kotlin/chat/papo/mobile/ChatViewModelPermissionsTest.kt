@@ -43,8 +43,8 @@ import kotlin.test.assertTrue
 /**
  * O [ChatViewModel] com as permissões ligadas: o que `access` calcula, o que a conversa deixa de pedir ao servidor
  * quando a leitura é negada, o envio sem permissão e o 403. Motor HTTP simulado e banco em memória; o motor responde
- * em outra thread, então os testes esperam o efeito no estado, e quem confere que algo não foi pedido espera antes
- * uma requisição de controle, que sai depois das outras e só volta quando elas já passaram pelo motor.
+ * em outra thread, então os testes esperam o efeito no estado ou o pedido chegar ao motor, e quem confere que algo
+ * não foi pedido espera antes uma requisição de controle, que sai depois das outras.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelPermissionsTest {
@@ -139,7 +139,11 @@ class ChatViewModelPermissionsTest {
         chat.handle(WsEvent.RoleRemoved("me", role))
     }
 
-    /** Uma requisição que sai depois das já feitas: quando ela volta, o motor já viu as anteriores. */
+    /**
+     * Uma requisição que sai depois das já feitas, para conferir que algo não foi pedido. Ela não garante que
+     * as anteriores já chegaram ao motor: um pedido que sai em paralelo pode chegar depois dela. Quem confere
+     * que algo foi pedido espera por ele antes, com [TestResources.waitUntil].
+     */
     private suspend fun TestScope.flush(account: Account) {
         runCurrent()
         account.chat.refreshLatest("controle")
@@ -157,6 +161,7 @@ class ChatViewModelPermissionsTest {
         account.session.drafts.flush()
         vm.showPinned() // a lista de fixadas está aberta quando a leitura se perde
         vm.state.first { it.pinnedList != null }
+        TestResources.waitUntil { count("GET /channels/c2/pinned") >= 2 } // a de quando abriu sai em paralelo
         account.restrict("c2")
         vm.access.first { it.readDenied }
         vm.messages.first { it.isEmpty() }
@@ -183,6 +188,7 @@ class ChatViewModelPermissionsTest {
 
         // O histórico volta pela leitura do fim, e as fixadas também são lidas de novo.
         assertEquals(2, count("GET /channels/c2/messages"))
+        TestResources.waitUntil { count("GET /channels/c2/pinned") >= 3 }
         flush(account)
         assertEquals(3, count("GET /channels/c2/pinned"))
         assertEquals("rascunho", vm.draft.text)
@@ -270,6 +276,7 @@ class ChatViewModelPermissionsTest {
         val vm = ChatViewModel(account.session, "c1")
         vm.state.first { it.loadedOnce }
         vm.messages.first { it.isNotEmpty() }
+        TestResources.waitUntil { count("GET /channels/c1/pinned") >= 1 }
         flush(account)
 
         assertEquals(1, count("GET /channels/c1/pinned"))
@@ -286,6 +293,7 @@ class ChatViewModelPermissionsTest {
         val message = vm.messages.first { it.isNotEmpty() }.first()
 
         vm.markRead(message)
+        TestResources.waitUntil { count("PUT /channels/c1/read") >= 1 }
         flush(account)
 
         assertEquals(1, count("PUT /channels/c1/read"))

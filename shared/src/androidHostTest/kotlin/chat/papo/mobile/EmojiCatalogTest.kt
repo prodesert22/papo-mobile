@@ -18,6 +18,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -233,11 +234,16 @@ class EmojiCatalogTest {
         assertEquals(3, requests.size) // 2 páginas boas + a que falhou: erro que não é 429 não se repete
     }
 
+    /** Espera a carga em andamento acabar de vez: o estado final sai um instante antes de o trabalho dela terminar. */
+    private suspend fun idle() = scope.coroutineContext.job.children.toList().forEach { it.join() }
+
     @Test
     fun forcarRepeteDepoisDeUmaFalha() = runBlocking {
         val (catalog, _) = catalog(api(total = 5, failAtPage = 3))
         catalog.start()
         catalog.await { it.failed }
+        // Com a falha à vista e a carga ainda terminando, start() a vê em andamento e não faz nada.
+        idle()
         catalog.start(force = true)
         catalog.await { it.failed && requests.size >= 6 }
         assertTrue(requests.size >= 6)
