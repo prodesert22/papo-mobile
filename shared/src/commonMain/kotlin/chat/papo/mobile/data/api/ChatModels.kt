@@ -318,9 +318,6 @@ data class IceServerDto(val urls: List<String> = emptyList(), val username: Stri
 @Serializable
 data class IceServersResponse(@SerialName("ice_servers") val iceServers: List<IceServerDto> = emptyList())
 
-/** Arquivo escolhido pelo usuário para enviar. [read] abre o conteúdo do zero a cada chamada. */
-class OutgoingFile(val name: String, val mimeType: String, val size: Long, val read: () -> ByteArray)
-
 /**
  * Uma reação de alguém (`MessageReactionUser`). [createdAt] fica como o servidor mandou: junto de [id] é o cursor da
  * página seguinte, e o servidor compara o instante, não o texto.

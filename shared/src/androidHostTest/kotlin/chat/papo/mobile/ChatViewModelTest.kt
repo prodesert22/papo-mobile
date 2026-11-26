@@ -2,6 +2,7 @@ package chat.papo.mobile
 
 import androidx.compose.ui.text.input.TextFieldValue
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.AttachmentProblem
 import chat.papo.mobile.chat.PendingStatus
 import chat.papo.mobile.chat.SendFailure
 import chat.papo.mobile.data.api.OutgoingFile
@@ -305,7 +306,7 @@ class ChatViewModelTest {
     fun soComAnexoEnfileiraSemTextoELimpaOsArquivosDoCompositor() = runTest {
         val vm = viewModel()
         vm.loaded()
-        vm.addFiles(listOf(OutgoingFile("a.bin", "application/octet-stream", 3) { byteArrayOf(1, 2, 3) }))
+        vm.addFiles(listOf(bytesFile("a.bin", "application/octet-stream", byteArrayOf(1, 2, 3))))
         vm.type("   ")
 
         vm.submit()
@@ -317,6 +318,118 @@ class ChatViewModelTest {
         assertEquals(1, shown.files.size)
         session.chat.outbox.first { it.isEmpty() }
         assertNull(posted.single().field("content")) // mensagem só de anexo não manda o campo de texto
+    }
+
+    @Test
+    fun respostaComSoUmAnexoSaiComAReplyToESemTexto() = runTest {
+        val vm = viewModel()
+        vm.loaded()
+        val target = vm.messages.first { it.isNotEmpty() }.first()
+        vm.startReply(target)
+        vm.addFiles(listOf(bytesFile("foto.png", "image/png", byteArrayOf(1, 2, 3))))
+
+        vm.submit()
+
+        val shown = vm.pending.first { it.isNotEmpty() }.single()
+        assertEquals("", shown.content)
+        assertEquals(target.id, shown.replyToId)
+        assertNull(vm.state.value.replyTo)
+        session.chat.outbox.first { it.isEmpty() }
+        assertEquals(target.id, posted.single().field("reply_to"))
+        assertNull(posted.single().field("content"))
+    }
+
+    @Test
+    fun oDecimoPrimeiroArquivoERecusadoSemPerderORascunhoNemOsAnexos() = runTest {
+        val vm = viewModel()
+        vm.loaded()
+        vm.type("minha mensagem")
+        val ten = List(10) { sizedFile("f$it.bin", 100) }
+        vm.addFiles(ten)
+        assertNull(vm.state.value.attachProblem)
+
+        vm.addFiles(listOf(sizedFile("onze.bin", 100)))
+
+        assertEquals(AttachmentProblem.TooMany, vm.state.value.attachProblem)
+        assertEquals(ten, vm.state.value.files) // os dez de antes, na mesma ordem
+        assertEquals("minha mensagem", vm.draft.text)
+
+        // O aviso fecha por conta do usuário, e o envio dos dez segue como se nada tivesse acontecido.
+        vm.dismissAttachProblem()
+        assertNull(vm.state.value.attachProblem)
+        vm.submit()
+        assertEquals(10, vm.pending.first { it.isNotEmpty() }.single().files.size)
+    }
+
+    @Test
+    fun loteQueNaoCabeEntraAteOLimiteEOQueSobraFicaDeFora() = runTest {
+        val vm = viewModel()
+        val eight = List(8) { sizedFile("f$it.bin", 100) }
+        vm.addFiles(eight)
+
+        val batch = List(4) { sizedFile("novo$it.bin", 100) }
+        vm.addFiles(batch)
+
+        assertEquals(eight + batch.take(2), vm.state.value.files)
+        assertEquals(AttachmentProblem.TooMany, vm.state.value.attachProblem)
+    }
+
+    @Test
+    fun arquivoGrandeDemaisFicaDeForaEOsOutrosDoLoteEntram() = runTest {
+        val vm = viewModel()
+        val small = sizedFile("pequeno.bin", 10)
+        val huge = sizedFile("enorme.mp4", 101L * 1024 * 1024, "video/mp4")
+        val last = sizedFile("ultimo.bin", 20)
+
+        vm.addFiles(listOf(small, huge, last))
+
+        assertEquals(listOf(small, last), vm.state.value.files)
+        assertEquals(AttachmentProblem.FileTooLarge("enorme.mp4"), vm.state.value.attachProblem)
+    }
+
+    @Test
+    fun aSomaPassandoDeCentoECincoMegabytesRecusaOQueEstourouEAceitaOQueCabe() = runTest {
+        val mib = 1024L * 1024
+        val vm = viewModel()
+        val first = sizedFile("a.mp4", 100 * mib)
+        val over = sizedFile("b.mp4", 6 * mib)
+        val fits = sizedFile("c.png", 5 * mib)
+
+        vm.addFiles(listOf(first, over, fits))
+
+        assertEquals(listOf(first, fits), vm.state.value.files) // 105 MiB exatos
+        assertEquals(AttachmentProblem.TotalTooLarge, vm.state.value.attachProblem)
+    }
+
+    @Test
+    fun escolherDeNovoSemProblemaLimpaOAviso() = runTest {
+        val vm = viewModel()
+        vm.addFiles(listOf(sizedFile("enorme.bin", 200L * 1024 * 1024)))
+        assertEquals(AttachmentProblem.FileTooLarge("enorme.bin"), vm.state.value.attachProblem)
+
+        vm.addFiles(listOf(sizedFile("ok.bin", 10)))
+
+        assertNull(vm.state.value.attachProblem)
+        assertEquals(1, vm.state.value.files.size)
+    }
+
+    @Test
+    fun arquivoIndisponivelSeguraOEnvioAteSerRemovidoESemPerderOTexto() = runTest {
+        val vm = viewModel()
+        vm.loaded()
+        val gone = OutgoingFile("sumiu.jpg", "image/jpeg", null, open = { error("sem acesso") }, unavailable = true)
+        vm.type("com foto")
+        vm.addFiles(listOf(sizedFile("bom.bin", 10), gone))
+
+        vm.submit()
+
+        assertTrue(vm.pending.value.isEmpty())
+        assertEquals("com foto", vm.draft.text)
+        assertEquals(2, vm.state.value.files.size)
+
+        vm.removeFile(gone)
+        vm.submit()
+        assertEquals(1, vm.pending.first { it.isNotEmpty() }.single().files.size)
     }
 
     @Test

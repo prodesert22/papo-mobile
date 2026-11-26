@@ -321,6 +321,16 @@
 
     <!-- Embeds e mídia (0.6.0): cada trilha e onda escreve só no seu bloco, para os ramos mesclarem sem conflito. -->
     <!-- 02 · trilha A · onda 1 (galeria e envio) -->
+    <string name="attach_photo_video">Foto ou vídeo</string>
+    <string name="attach_file">Arquivo</string>
+    <string name="attach_badge_gif">GIF</string>
+    <string name="attach_unavailable">Arquivo indisponível</string>
+    <string name="attach_has_location">Esta foto tem a sua localização</string>
+    <string name="attach_problem_too_many">Uma mensagem leva até %1$s arquivos. O que passou disso não foi adicionado.</string>
+    <string name="attach_problem_file_too_large">“%1$s” passa de %2$s MB, o limite de cada arquivo, e não foi adicionado.</string>
+    <string name="attach_problem_total_too_large">Os arquivos passam de %1$s MB juntos. O que não coube não foi adicionado: mande o resto em outra mensagem.</string>
+    <string name="outbox_failed_too_large">Não enviada: os arquivos passam do limite de tamanho do servidor. Tire alguns e reenvie.</string>
+    <string name="outbox_failed_file_unavailable">Não enviada: “%1$s” não está mais disponível.</string>
     <!-- 02 · trilha B · onda 1 (embed completo, GIF, moderação) -->
     <!-- 02 · trilha A · onda 2 (visualizador) -->
     <!-- 02 · trilha B · onda 2 (vídeo no cartão, YouTube) -->

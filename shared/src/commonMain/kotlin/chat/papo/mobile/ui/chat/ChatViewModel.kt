@@ -8,6 +8,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.AttachmentProblem
 import chat.papo.mobile.chat.ConversationAccess
 import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Draft
@@ -16,6 +17,7 @@ import chat.papo.mobile.chat.Located
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.PendingMessage
 import chat.papo.mobile.chat.PermissionSnapshot
+import chat.papo.mobile.chat.checkLimits
 import chat.papo.mobile.chat.conversationAccess
 import chat.papo.mobile.chat.encodeMentions
 import chat.papo.mobile.chat.renderMentions
@@ -47,6 +49,8 @@ data class ChatUiState(
     val replyTo: Message? = null,
     val editing: Message? = null,
     val files: List<OutgoingFile> = emptyList(),
+    /** Por que o último lote de arquivos escolhidos não entrou por inteiro; some quando o usuário fecha o aviso ou escolhe de novo. */
+    val attachProblem: AttachmentProblem? = null,
     /** Salvando a edição de uma mensagem (editar segue síncrono; enviar não trava o compositor). */
     val savingEdit: Boolean = false,
     val loadingOlder: Boolean = false,
@@ -255,9 +259,25 @@ class ChatViewModel(
         pickedMentions[username] = userId
     }
 
-    fun addFiles(files: List<OutgoingFile>) = _state.update { it.copy(files = (it.files + files).take(MAX_FILES)) }
+    /**
+     * Põe os arquivos escolhidos no compositor, um a um e na ordem: o que respeita os limites de uma mensagem entra, o
+     * que não respeita fica de fora e o primeiro motivo vira [ChatUiState.attachProblem]. O texto e o que já estava
+     * anexado ficam como estavam.
+     */
+    fun addFiles(picked: List<OutgoingFile>) = _state.update { state ->
+        var accepted = state.files
+        var problem: AttachmentProblem? = null
+        for (file in picked) {
+            val candidate = accepted + file
+            val refused = checkLimits(candidate)
+            if (refused == null) accepted = candidate else if (problem == null) problem = refused
+        }
+        state.copy(files = accepted, attachProblem = problem)
+    }
 
     fun removeFile(file: OutgoingFile) = _state.update { it.copy(files = it.files - file) }
+
+    fun dismissAttachProblem() = _state.update { it.copy(attachProblem = null) }
 
     fun startReply(message: Message) {
         if (_state.value.editing != null) finishEdit()
@@ -381,6 +401,8 @@ class ChatViewModel(
         val s = _state.value
         val text = draft.text
         if (s.savingEdit || (text.isBlank() && s.files.isEmpty())) return
+        // Arquivo que o provedor já perdeu não vai: o usuário o tira antes, e o que escreveu fica onde está.
+        if (s.files.any { it.unavailable }) return
         // Sem permissão de envio só se edita: o servidor deixa o autor editar a própria mensagem sem olhar o envio.
         if (s.editing == null && !access.value.send) return
         val content = encodeMentions(text, pickedMentions, chat.users.value.values)
@@ -388,7 +410,7 @@ class ChatViewModel(
         if (editing == null) {
             chat.enqueue(channelId, content, s.replyTo?.id, s.files)
             pickedMentions.clear()
-            _state.update { it.copy(replyTo = null, files = emptyList(), error = null) }
+            _state.update { it.copy(replyTo = null, files = emptyList(), attachProblem = null, error = null) }
             draft = TextFieldValue("")
             session.drafts.save(channelId, null)
             session.drafts.flush()
@@ -455,7 +477,6 @@ class ChatViewModel(
 
     private companion object {
         const val PAGE = 60L
-        const val MAX_FILES = 10
     }
 }
 

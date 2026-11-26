@@ -7,6 +7,7 @@ import chat.papo.mobile.chat.SendFailure
 import chat.papo.mobile.chat.classifySendFailure
 import chat.papo.mobile.chat.matchPending
 import chat.papo.mobile.data.api.ApiException
+import chat.papo.mobile.data.api.FileUnavailableException
 import chat.papo.mobile.data.api.OutgoingFile
 import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.client.plugins.HttpRequestTimeoutException
@@ -35,7 +36,7 @@ private val NOW = Instant.parse("2026-03-01T12:00:00Z")
 
 private fun api(status: Int, title: String? = null, detail: String? = null) = ApiException(status, title, detail, null)
 
-private fun file(name: String = "a.bin") = OutgoingFile(name, "application/octet-stream", 3) { byteArrayOf(1, 2, 3) }
+private fun file(name: String = "a.bin") = bytesFile(name, "application/octet-stream", byteArrayOf(1, 2, 3))
 
 class SendFailureTest {
     @Test
@@ -45,9 +46,25 @@ class SendFailureTest {
 
     @Test
     fun recusasDoServidorViramRejectedComOTextoDele() {
-        for (status in listOf(400, 403, 404, 413, 415, 422, 409)) {
+        for (status in listOf(400, 403, 404, 415, 422, 409)) {
             assertEquals(PendingStatus.Failed(SendFailure.Rejected, "motivo"), classifySendFailure(api(status, "Título", "motivo")), "status $status")
         }
+    }
+
+    @Test
+    fun corpoGrandeDemaisEUmMotivoProprioSemOTextoDoServidor() {
+        // O servidor responde 413 sem ler o corpo: nada foi criado, e o motivo é o mesmo qualquer que seja o texto dele.
+        assertEquals(PendingStatus.Failed(SendFailure.TooLarge), classifySendFailure(api(413, "Payload muito grande", "corpo da requisição excede o tamanho máximo permitido")))
+        assertEquals(PendingStatus.Failed(SendFailure.TooLarge), classifySendFailure(api(413), bodyDelivered = false))
+    }
+
+    @Test
+    fun arquivoQueSumiuNuncaChegouAoServidorQualquerQueSejaOPontoDoEnvio() {
+        val lost = FileUnavailableException("foto.jpg", IOException("sumiu"))
+        val expected = PendingStatus.Failed(SendFailure.FileUnavailable, "foto.jpg")
+        assertEquals(expected, classifySendFailure(lost))
+        assertEquals(expected, classifySendFailure(lost, bodyDelivered = true))
+        assertEquals(expected, classifySendFailure(lost, bodyDelivered = false))
     }
 
     @Test
@@ -450,6 +467,23 @@ class OutboxTest {
         assertEquals(1f, outbox.pending.value[0].progress)
         fake.calls[1].onProgress(50, 100)
         assertNull(outbox.pending.value[1].progress)
+    }
+
+    @Test
+    fun comArquivoSemTamanhoOEnvioNaoTemPorcentagemMasQualquerByteJaContaComoEntregue() = runTest {
+        val outbox = outbox()
+        val unknown = sizedFile("a.bin", null)
+        val a = outbox.say("c1", "a", listOf(file(), unknown)) // um sem tamanho basta: o corpo não tem total
+        runCurrent()
+        assertEquals(PendingStatus.Sending, outbox.pending.value[0].status)
+        assertNull(outbox.pending.value[0].progress) // a tela mostra a barra indeterminada
+
+        fake.calls[0].onProgress(500, null)
+        assertNull(outbox.pending.value[0].progress)
+
+        outbox.withdraw(a)
+        runCurrent()
+        assertEquals(PendingStatus.Uncertain, outbox.pending.value.single().status) // sem total, cancelar já não garante nada
     }
 
     @Test

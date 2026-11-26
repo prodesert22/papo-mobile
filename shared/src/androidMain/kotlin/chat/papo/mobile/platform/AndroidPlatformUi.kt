@@ -6,13 +6,18 @@ import android.graphics.Paint
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Size
 import android.view.Gravity
 import android.widget.FrameLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
@@ -20,6 +25,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import chat.papo.mobile.chat.nameFor
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackFailure
@@ -30,8 +36,13 @@ import org.webrtc.VideoTrack
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.ui.components.PlatformImage
 import chat.papo.mobile.ui.components.PlatformUi
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.jvm.javaio.toByteReadChannel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.FileNotFoundException
 
 class AndroidPlatformUi(context: Context) : PlatformUi {
     private val app = context.applicationContext
@@ -44,10 +55,28 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
 
     @Composable
     override fun rememberFilePicker(onPicked: (List<OutgoingFile>) -> Unit): () -> Unit {
-        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-            if (uris.isNotEmpty()) onPicked(uris.map(::describe))
-        }
+        val describeAll = rememberDescribeAll(onPicked)
+        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents(), describeAll)
         return { launcher.launch("*/*") }
+    }
+
+    @Composable
+    override fun rememberMediaPicker(maxItems: Int, onPicked: (List<OutgoingFile>) -> Unit): () -> Unit {
+        val describeAll = rememberDescribeAll(onPicked)
+        // O contrato só aceita mais de um item; com uma vaga só o seletor deixa escolher dois e a tela recusa o que sobra.
+        val contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems.coerceAtLeast(2))
+        val launcher = rememberLauncherForActivityResult(contract, describeAll)
+        return { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
+    }
+
+    /** Descreve o que o seletor devolveu fora da thread principal (o provedor pode ser lento) e entrega a lista a [onPicked]. */
+    @Composable
+    private fun rememberDescribeAll(onPicked: (List<OutgoingFile>) -> Unit): (List<Uri>) -> Unit {
+        val scope = rememberCoroutineScope()
+        val latest by rememberUpdatedState(onPicked)
+        return { uris ->
+            if (uris.isNotEmpty()) scope.launch { latest(withContext(Dispatchers.IO) { uris.map(::describe) }) }
+        }
     }
 
     @Composable
@@ -95,19 +124,60 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
     @Composable
     override fun HideSystemBars() = HideSystemBarsInDialog()
 
+    /**
+     * Descreve o arquivo sem ler o conteúdo: nome, tipo e tamanho vêm do provedor. Abrir o arquivo uma vez já aqui
+     * mostra o que sumiu ou o acesso que o sistema não deu (vira [OutgoingFile.unavailable]) e dá o tamanho exato.
+     * O conteúdo só é lido no envio, direto do provedor, sem cópia em disco.
+     */
     private fun describe(uri: Uri): OutgoingFile {
-        var name = uri.lastPathSegment ?: "arquivo"
-        var size = 0L
-        app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                cursor.getString(0)?.let { name = it }
-                if (!cursor.isNull(1)) size = cursor.getLong(1)
+        val resolver = app.contentResolver
+        var displayName: String? = null
+        var size: Long? = null
+        var mime: String? = null
+        var unavailable = false
+        try {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) displayName = cursor.getString(0)
             }
+            mime = resolver.getType(uri)
+            val descriptor = resolver.openAssetFileDescriptor(uri, "r")
+            if (descriptor == null) unavailable = true
+            // Tamanho desconhecido (-1) ou zero: o provedor não sabe, e declarar o que não é lido estragaria o corpo.
+            descriptor?.use { size = it.length.takeIf { length -> length > 0 } }
+        } catch (e: Exception) {
+            // Sem permissão (SecurityException), arquivo que sumiu (FileNotFoundException) ou provedor que se recusa: o
+            // cartão avisa e o usuário decide, em vez de o envio descobrir depois.
+            unavailable = true
         }
-        val mime = app.contentResolver.getType(uri) ?: "application/octet-stream"
-        // O conteúdo só é lido na hora do envio, direto do provedor, sem cópia em disco.
-        return OutgoingFile(name, mime, size) {
-            app.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        val type = mime ?: "application/octet-stream"
+        val name = nameFor(displayName, type)
+        return OutgoingFile(
+            name = name,
+            mimeType = type,
+            size = size,
+            open = { openStream(uri, name) },
+            preview = { maxPx -> thumbnail(uri, maxPx) },
+            unavailable = unavailable,
+        )
+    }
+
+    private fun openStream(uri: Uri, name: String): ByteReadChannel {
+        val stream = app.contentResolver.openInputStream(uri) ?: throw FileNotFoundException("o provedor não abriu o arquivo")
+        return GuardedFileStream(stream, name).toByteReadChannel()
+    }
+
+    /**
+     * A miniatura que o sistema gera (reduzida na leitura: a foto inteira nunca vai para a memória), ou null se o
+     * provedor não sabe fazê-la. Um quadro só: um GIF aparece parado, e o selo diz o que ele é. Se o chamador cancela,
+     * a leitura em curso termina e o resultado é descartado.
+     */
+    private suspend fun thumbnail(uri: Uri, maxPx: Int): PlatformImage? = withContext(Dispatchers.IO) {
+        try {
+            StillImage(app.contentResolver.loadThumbnail(uri, Size(maxPx, maxPx), null))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null // sem prévia: o cartão mostra o ícone do tipo
         }
     }
 

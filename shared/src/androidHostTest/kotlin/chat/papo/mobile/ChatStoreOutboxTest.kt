@@ -19,6 +19,7 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
@@ -109,7 +110,7 @@ class ChatStoreOutboxTest {
         }
     }
 
-    private fun file() = OutgoingFile("a.bin", "application/octet-stream", 3) { byteArrayOf(1, 2, 3) }
+    private fun file() = bytesFile("a.bin", "application/octet-stream", byteArrayOf(1, 2, 3))
 
     @Test
     fun umCanalEnviaUmaPorVezNaOrdemEmQueAsMensagensForamMandadas() = runTest {
@@ -339,6 +340,44 @@ class ChatStoreOutboxTest {
         behavior = { created(it.content.orEmpty(), "s1") }
         assertTrue(chat.retry(id))
         chat.outbox.first { it.isEmpty() }
+    }
+
+    @Test
+    fun arquivoQueNaoAbreFalhaSemChegarAoServidorENaoVoltaSozinho() = runTest {
+        val chat = TestResources.session(engine, this).chat
+        var available = false
+        val photo = OutgoingFile(
+            "foto.jpg", "image/jpeg", 3,
+            open = { if (available) ByteReadChannel(byteArrayOf(1, 2, 3)) else throw java.io.FileNotFoundException("sumiu") },
+        )
+
+        val id = chat.enqueue("c1", "olha", null, listOf(photo))
+        chat.outbox.first { it.firstOrNull()?.status is PendingStatus.Failed }
+
+        // Nada foi criado (o corpo parou no meio) e nada é repetido por conta própria: só o usuário reenvia.
+        assertEquals(PendingStatus.Failed(SendFailure.FileUnavailable, "foto.jpg"), chat.outbox.value.single().status)
+        assertNull(chat.outbox.value.single().progress)
+        runCurrent()
+        assertEquals(1, posts.get())
+
+        available = true // o provedor voltou
+        assertTrue(chat.retry(id))
+        chat.outbox.first { it.isEmpty() }
+        assertEquals(2, posts.get())
+        assertEquals("olha", chat.messages("c1", 10).first().single().content)
+    }
+
+    @Test
+    fun corpoRecusadoPorTamanhoNaoCriouAMensagemEFicaComMotivoProprio() = runTest {
+        val chat = TestResources.session(engine, this).chat
+        behavior = { problem(HttpStatusCode.PayloadTooLarge, "corpo da requisição excede o tamanho máximo permitido") }
+
+        chat.enqueue("c1", "muito", null, listOf(file()))
+        chat.outbox.first { it.firstOrNull()?.status is PendingStatus.Failed }
+
+        assertEquals(PendingStatus.Failed(SendFailure.TooLarge), chat.outbox.value.single().status)
+        runCurrent()
+        assertEquals(1, posts.get()) // sem repetição automática, nem de um 413
     }
 
     @Test
