@@ -6,6 +6,7 @@ import chat.papo.mobile.chat.BlockList
 import chat.papo.mobile.chat.ChatStore
 import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
+import chat.papo.mobile.chat.NotificationPrefs
 import chat.papo.mobile.chat.ProfileCache
 import chat.papo.mobile.chat.RecentEmojis
 import chat.papo.mobile.chat.RecentSearchFilters
@@ -50,6 +51,8 @@ class AccountSession(
     val emojis = EmojiCatalog(api, media, db.metaQueries, scope, io, background)
     val recentEmojis = RecentEmojis(db.metaQueries, scope, io)
     val drafts = Drafts(db.metaQueries, scope, io)
+    /** Silêncio, nível e supressão das notificações desta conta; ficam no banco cifrado dela. */
+    val notificationPrefs = NotificationPrefs(db.metaQueries, scope, io)
     val recentSearches = RecentSearchFilters()
 
     val ws = WsClient(client, scope, sessionStillValid = ::sessionStillValid)
