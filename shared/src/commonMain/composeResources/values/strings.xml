@@ -210,7 +210,8 @@
     <string name="msg_delete_body">Ela some para todo mundo e não dá para desfazer.</string>
     <string name="msg_download">Baixar</string>
     <string name="video_play">Reproduzir vídeo</string>
-    <string name="video_failed_unauthorized">Você não tem acesso a este vídeo.</string>
+    <string name="video_failed_session_ended">Sua sessão terminou. Entre de novo para ver o vídeo.</string>
+    <string name="video_failed_forbidden">Você não tem acesso a este vídeo.</string>
     <string name="video_failed_not_found">Este vídeo não está mais disponível.</string>
     <string name="video_failed_gone">Este vídeo foi removido ou mudou.</string>
     <string name="video_failed_rate_limited">O servidor pediu um tempo. Espere um pouco e tente de novo.</string>

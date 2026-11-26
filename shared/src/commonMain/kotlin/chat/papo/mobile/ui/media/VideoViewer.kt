@@ -68,11 +68,12 @@ import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.resources.video_download_failed
 import chat.papo.mobile.resources.video_embed_failed_not_found
 import chat.papo.mobile.resources.video_embed_failed_unavailable
+import chat.papo.mobile.resources.video_failed_forbidden
 import chat.papo.mobile.resources.video_failed_gone
 import chat.papo.mobile.resources.video_failed_network
 import chat.papo.mobile.resources.video_failed_not_found
 import chat.papo.mobile.resources.video_failed_rate_limited
-import chat.papo.mobile.resources.video_failed_unauthorized
+import chat.papo.mobile.resources.video_failed_session_ended
 import chat.papo.mobile.resources.video_failed_unavailable
 import chat.papo.mobile.resources.video_failed_unsupported
 import chat.papo.mobile.resources.video_open_in_browser
@@ -147,15 +148,15 @@ internal data class FailureActions(val retry: Boolean, val download: Boolean, va
 
 /**
  * Repetir só faz sentido onde a falha pode passar sozinha ([PlaybackFailure.RateLimited], [PlaybackFailure.Unavailable]
- * e [PlaybackFailure.Network]); sem acesso, sem arquivo e formato sem suporte, o mesmo pedido falharia igual. Baixar
- * precisa de um arquivo no servidor ([canDownload]) e de um pedido que ainda possa dar certo, e é a saída do formato
- * que o aparelho não toca. O vídeo de embed não tem arquivo, e a saída dele é a página de origem no navegador
- * ([canOpenInBrowser]), onde o pedido não adianta repetir: relay que não serve o vídeo, vídeo que mudou ou formato
- * que o aparelho não toca. Sem acesso, nem a página resolve.
+ * e [PlaybackFailure.Network]); sem sessão ([PlaybackFailure.SessionEnded]), sem acesso, sem arquivo e formato sem
+ * suporte, o mesmo pedido falharia igual. Baixar precisa de um arquivo no servidor ([canDownload]) e de um pedido que
+ * ainda possa dar certo, e é a saída do formato que o aparelho não toca. O vídeo de embed não tem arquivo, e a saída
+ * dele é a página de origem no navegador ([canOpenInBrowser]), onde o pedido não adianta repetir: relay que não serve
+ * o vídeo, vídeo que mudou ou formato que o aparelho não toca. Sem sessão ou sem acesso, nem a página resolve.
  */
 internal fun failureActions(failure: PlaybackFailure, canDownload: Boolean, canOpenInBrowser: Boolean = false): FailureActions =
     when (failure) {
-        PlaybackFailure.Unauthorized -> FailureActions(retry = false, download = false)
+        PlaybackFailure.SessionEnded, PlaybackFailure.Forbidden -> FailureActions(retry = false, download = false)
         PlaybackFailure.NotFound, PlaybackFailure.Gone -> FailureActions(retry = false, download = false, browser = canOpenInBrowser)
         PlaybackFailure.Unsupported -> FailureActions(retry = false, download = canDownload, browser = canOpenInBrowser)
         PlaybackFailure.RateLimited, PlaybackFailure.Unavailable, PlaybackFailure.Network ->
@@ -167,7 +168,8 @@ internal fun failureActions(failure: PlaybackFailure, canDownload: Boolean, canO
  * vídeo) e 5xx (a origem falhou, ou as vagas do relay estão cheias) dizem isso, e não "enviar" como no anexo.
  */
 internal fun failureMessage(failure: PlaybackFailure, embed: Boolean): StringResource = when (failure) {
-    PlaybackFailure.Unauthorized -> Res.string.video_failed_unauthorized
+    PlaybackFailure.SessionEnded -> Res.string.video_failed_session_ended
+    PlaybackFailure.Forbidden -> Res.string.video_failed_forbidden
     PlaybackFailure.NotFound -> if (embed) Res.string.video_embed_failed_not_found else Res.string.video_failed_not_found
     PlaybackFailure.Gone -> Res.string.video_failed_gone
     PlaybackFailure.RateLimited -> Res.string.video_failed_rate_limited
@@ -202,9 +204,11 @@ internal fun VideoViewer(
     // A barra de título acompanha os controles do player: some com eles e deixa o vídeo limpo.
     var controlsVisible by remember { mutableStateOf(true) }
     val resume = remember { Resume(startAtMs) }
-    // Tela cheia de verdade: sem a largura padrão do diálogo e sem deixar a janela ao redor das barras do sistema (o
-    // player as esconde). A barra de título abaixo já respeita os recuos, então nada importante fica sob elas.
+    // Tela cheia de verdade: sem a largura padrão do diálogo e sem deixar a janela ao redor das barras do sistema. A
+    // barra de título abaixo já respeita os recuos, então nada importante fica sob elas.
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        // As barras ficam escondidas enquanto o visualizador está aberto, com o player ou com o painel de falha no lugar dele.
+        platform.HideSystemBars()
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             val failed = failure
             if (failed == null) {

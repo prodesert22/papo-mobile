@@ -259,12 +259,20 @@ class PlaybackTest {
 
     @Test
     fun statusDoContratoTemMotivoProprio() {
-        assertEquals(PlaybackFailure.Unauthorized, classify(401))
-        assertEquals(PlaybackFailure.Unauthorized, classify(403))
+        assertEquals(PlaybackFailure.SessionEnded, classify(401))
+        assertEquals(PlaybackFailure.Forbidden, classify(403))
         assertEquals(PlaybackFailure.NotFound, classify(404))
         assertEquals(PlaybackFailure.Gone, classify(410))
         assertEquals(PlaybackFailure.Gone, classify(416))
         assertEquals(PlaybackFailure.RateLimited, classify(429))
+    }
+
+    @Test
+    fun sessaoEncerradaE401ESemPermissaoE403ENuncaUmPeloOutro() {
+        assertEquals(PlaybackFailure.SessionEnded, classify(401, PlaybackErrorKind.Decoding))
+        assertEquals(PlaybackFailure.Forbidden, classify(403, PlaybackErrorKind.Decoding))
+        assertEquals(PlaybackFailure.SessionEnded, classify(401, PlaybackErrorKind.Io))
+        assertEquals(PlaybackFailure.Forbidden, classify(403, PlaybackErrorKind.Io))
     }
 
     @Test
@@ -324,7 +332,8 @@ class PlaybackTest {
     @Test
     fun osDemaisMotivosNuncaRepetem() {
         listOf(
-            PlaybackFailure.Unauthorized,
+            PlaybackFailure.SessionEnded,
+            PlaybackFailure.Forbidden,
             PlaybackFailure.NotFound,
             PlaybackFailure.Gone,
             PlaybackFailure.RateLimited,

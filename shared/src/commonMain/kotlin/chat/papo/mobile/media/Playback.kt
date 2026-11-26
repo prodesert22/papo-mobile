@@ -76,8 +76,14 @@ fun videoAspect(width: Int?, height: Int?): Float {
 
 /** Por que o vídeo não tocou. A tela comum escolhe o texto de cada um; o `androidMain` só informa o motivo. */
 enum class PlaybackFailure {
-    /** 401 (depois da renovação única de sessão) ou 403: sem sessão ou sem permissão para ler o canal. */
-    Unauthorized,
+    /**
+     * 401 depois da renovação única de sessão: a sessão da conta acabou. O app já trata isso (a conta passa a
+     * "Sessão encerrada"); o player só diz o motivo, sem tentar entrar de novo.
+     */
+    SessionEnded,
+
+    /** 403: a sessão vale, mas a conta não tem permissão para ler o canal da mensagem. */
+    Forbidden,
 
     /** 404, ou outro 4xx que o contrato não define: o arquivo não existe, ou o relay não serve este embed. */
     NotFound,
@@ -121,8 +127,9 @@ fun classifyPlayback(httpStatus: Int?, kind: PlaybackErrorKind): PlaybackFailure
  * Espera, em milissegundos, antes de repetir automaticamente depois de [failure], ou null se
  * não se repete. [attempt] é quantas repetições já foram feitas (0 na primeira falha). Só rede
  * e [PlaybackFailure.Unavailable] repetem, no máximo duas vezes (1 s e 3 s): o limite global
- * do servidor é de 10 pedidos por segundo por endereço e cada `Range` conta. Qualquer 4xx,
- * em especial o 429, nunca repete.
+ * do servidor é de 10 pedidos por segundo por endereço e cada `Range` conta. Qualquer 4xx
+ * nunca repete: o 429 por causa do limite e o 401 ([PlaybackFailure.SessionEnded]) porque o
+ * cliente já gastou a única renovação de sessão.
  */
 fun retryDelay(failure: PlaybackFailure, attempt: Int): Long? {
     if (failure !in RETRYABLE) return null
@@ -130,8 +137,8 @@ fun retryDelay(failure: PlaybackFailure, attempt: Int): Long? {
 }
 
 private val STATUS_FAILURES = mapOf(
-    401 to PlaybackFailure.Unauthorized,
-    403 to PlaybackFailure.Unauthorized,
+    401 to PlaybackFailure.SessionEnded,
+    403 to PlaybackFailure.Forbidden,
     404 to PlaybackFailure.NotFound,
     410 to PlaybackFailure.Gone,
     416 to PlaybackFailure.Gone,

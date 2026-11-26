@@ -11,9 +11,15 @@ import android.widget.FrameLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackFailure
@@ -86,6 +92,9 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
         onControlsVisible: (Boolean) -> Unit,
     ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure, onControlsVisible)
 
+    @Composable
+    override fun HideSystemBars() = HideSystemBarsInDialog()
+
     private fun describe(uri: Uri): OutgoingFile {
         var name = uri.lastPathSegment ?: "arquivo"
         var size = 0L
@@ -121,4 +130,21 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
     }
 
     override suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage? = images.decode(bytes, maxPx, animate)
+}
+
+/**
+ * Esconde as barras do sistema na janela do diálogo que contém a composição (tela cheia de verdade), com o gesto de
+ * deslizar da borda para vê-las de passagem. Fora de um diálogo não faz nada: a janela do app é da tela de conversa.
+ */
+@Composable
+private fun HideSystemBarsInDialog() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = (view.parent as? DialogWindowProvider)?.window
+        if (window == null) return@DisposableEffect onDispose { }
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        onDispose { controller.show(WindowInsetsCompat.Type.systemBars()) }
+    }
 }

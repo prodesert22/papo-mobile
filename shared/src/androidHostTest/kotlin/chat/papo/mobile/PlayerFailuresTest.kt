@@ -78,7 +78,8 @@ class PlayerFailuresTest {
     @Test
     fun statusHttpDecideOMotivoDoErroFinal() {
         val code = PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
-        assertEquals(PlaybackFailure.Unauthorized, failureOf(status(401), code))
+        assertEquals(PlaybackFailure.SessionEnded, failureOf(status(401), code))
+        assertEquals(PlaybackFailure.Forbidden, failureOf(status(403), code))
         assertEquals(PlaybackFailure.NotFound, failureOf(status(404), code))
         assertEquals(PlaybackFailure.RateLimited, failureOf(wrapped(status(429), 1), code))
         assertEquals(PlaybackFailure.Unavailable, failureOf(status(502), code))
@@ -139,6 +140,8 @@ class PlayerFailuresTest {
 
     @Test
     fun statusHttpNaCargaDecideOMotivo() {
+        assertEquals(PlaybackFailure.SessionEnded, loadFailureOf(status(401)))
+        assertEquals(PlaybackFailure.Forbidden, loadFailureOf(status(403)))
         assertEquals(PlaybackFailure.RateLimited, loadFailureOf(status(429)))
         assertEquals(PlaybackFailure.Unavailable, loadFailureOf(status(502)))
         assertEquals(PlaybackFailure.Gone, loadFailureOf(status(416)))

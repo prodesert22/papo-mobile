@@ -44,6 +44,14 @@ interface PlatformUi {
     )
 
     /**
+     * Esconde as barras do sistema (de estado e de navegação) enquanto esta composição estiver na tela, com o gesto
+     * de deslizar da borda para vê-las de passagem; elas voltam quando a composição sai. Vale para a janela do
+     * diálogo que contém a chamada: fora de um diálogo não faz nada, porque a janela do app não é de quem chama.
+     */
+    @Composable
+    fun HideSystemBars()
+
+    /**
      * A fonte de emojis do aparelho sabe desenhar [emoji]? Versões antigas do Android
      * não têm os emojis mais novos e mostrariam um quadrado vazio. Pode ser lento:
      * chame fora da thread principal.

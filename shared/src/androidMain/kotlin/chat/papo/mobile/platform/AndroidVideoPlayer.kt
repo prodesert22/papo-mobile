@@ -12,12 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -171,8 +166,6 @@ internal fun AndroidVideoPlayer(
         }
     }
 
-    HideSystemBarsInDialog()
-
     AndroidView(
         modifier = modifier,
         factory = { viewContext ->
@@ -185,6 +178,10 @@ internal fun AndroidVideoPlayer(
                 // `Range`, e o servidor limita os pedidos por endereço (10 por segundo). É o padrão do Media3;
                 // fica explícito porque ligar o "scrubbing" mandaria um pedido por movimento do dedo.
                 setTimeBarScrubbingEnabled(false)
+                // Com a animação, o Media3 esconde os controles em duas etapas (os botões, depois a barra de progresso
+                // sozinha) e só avisa o fim na segunda: a barra de título da tela ficaria à vista depois dos botões.
+                // Sem ela os controles somem de uma vez, e `onControlsVisible` acompanha o mesmo instante.
+                setControllerAnimationEnabled(false)
                 setControllerVisibilityListener(
                     PlayerView.ControllerVisibilityListener { visibility -> currentOnControlsVisible(visibility == View.VISIBLE) },
                 )
@@ -201,22 +198,4 @@ internal fun AndroidVideoPlayer(
         // O dono do player o libera; a view só precisa largá-lo antes.
         onRelease = { view -> view.player = null },
     )
-}
-
-/**
- * Esconde as barras do sistema na janela do diálogo que contém o player (tela cheia de verdade),
- * com o gesto de deslizar da borda para vê-las de passagem. Fora de um diálogo não faz nada: a
- * janela do app é da tela de conversa, não do player.
- */
-@Composable
-private fun HideSystemBarsInDialog() {
-    val view = LocalView.current
-    DisposableEffect(view) {
-        val window = (view.parent as? DialogWindowProvider)?.window
-        if (window == null) return@DisposableEffect onDispose { }
-        val controller = WindowCompat.getInsetsController(window, view)
-        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        controller.hide(WindowInsetsCompat.Type.systemBars())
-        onDispose { controller.show(WindowInsetsCompat.Type.systemBars()) }
-    }
 }

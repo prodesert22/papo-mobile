@@ -11,11 +11,12 @@ import chat.papo.mobile.media.PlaybackFailure
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.video_embed_failed_not_found
 import chat.papo.mobile.resources.video_embed_failed_unavailable
+import chat.papo.mobile.resources.video_failed_forbidden
 import chat.papo.mobile.resources.video_failed_gone
 import chat.papo.mobile.resources.video_failed_network
 import chat.papo.mobile.resources.video_failed_not_found
 import chat.papo.mobile.resources.video_failed_rate_limited
-import chat.papo.mobile.resources.video_failed_unauthorized
+import chat.papo.mobile.resources.video_failed_session_ended
 import chat.papo.mobile.resources.video_failed_unavailable
 import chat.papo.mobile.resources.video_failed_unsupported
 import chat.papo.mobile.ui.media.AttachmentDownload
@@ -40,6 +41,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
@@ -280,8 +282,8 @@ class VideoViewerTest {
     // failureActions
 
     @Test
-    fun semAcessoSemArquivoOuMudadoNaoHaOQueRepetirNemBaixar() {
-        for (failure in listOf(PlaybackFailure.Unauthorized, PlaybackFailure.NotFound, PlaybackFailure.Gone)) {
+    fun semSessaoSemAcessoSemArquivoOuMudadoNaoHaOQueRepetirNemBaixar() {
+        for (failure in listOf(PlaybackFailure.SessionEnded, PlaybackFailure.Forbidden, PlaybackFailure.NotFound, PlaybackFailure.Gone)) {
             assertEquals(FailureActions(retry = false, download = false), failureActions(failure, canDownload = true), "$failure")
             assertEquals(FailureActions(retry = false, download = false), failureActions(failure, canDownload = false), "$failure")
         }
@@ -329,8 +331,14 @@ class VideoViewerTest {
     }
 
     @Test
-    fun semAcessoNemAPaginaResolve() {
-        assertEquals(FailureActions(retry = false, download = false), failureActions(PlaybackFailure.Unauthorized, canDownload = true, canOpenInBrowser = true))
+    fun semSessaoOuSemAcessoNemAPaginaResolve() {
+        for (failure in listOf(PlaybackFailure.SessionEnded, PlaybackFailure.Forbidden)) {
+            assertEquals(
+                FailureActions(retry = false, download = false, browser = false),
+                failureActions(failure, canDownload = true, canOpenInBrowser = true),
+                "$failure",
+            )
+        }
     }
 
     @Test
@@ -356,9 +364,16 @@ class VideoViewerTest {
     }
 
     @Test
+    fun sessaoEncerradaETextoProprioDiferenteDeSemAcesso() {
+        assertNotSame(failureMessage(PlaybackFailure.SessionEnded, embed = false), failureMessage(PlaybackFailure.Forbidden, embed = false))
+        assertNotSame(failureMessage(PlaybackFailure.SessionEnded, embed = true), failureMessage(PlaybackFailure.Forbidden, embed = true))
+    }
+
+    @Test
     fun asDemaisFalhasTemOMesmoTextoNoAnexoENoEmbed() {
         val expected = mapOf(
-            PlaybackFailure.Unauthorized to Res.string.video_failed_unauthorized,
+            PlaybackFailure.SessionEnded to Res.string.video_failed_session_ended,
+            PlaybackFailure.Forbidden to Res.string.video_failed_forbidden,
             PlaybackFailure.Gone to Res.string.video_failed_gone,
             PlaybackFailure.RateLimited to Res.string.video_failed_rate_limited,
             PlaybackFailure.Unsupported to Res.string.video_failed_unsupported,
