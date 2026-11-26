@@ -55,6 +55,7 @@ import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.embedMediaAspect
 import chat.papo.mobile.chat.fieldRows
+import chat.papo.mobile.chat.hasViewableImage
 import chat.papo.mobile.chat.isGifEmbed
 import chat.papo.mobile.chat.safeLink
 import chat.papo.mobile.chat.youTubeId
@@ -70,6 +71,7 @@ import chat.papo.mobile.media.hasAuthorIcon
 import chat.papo.mobile.media.hasImage
 import chat.papo.mobile.media.relayVideo
 import chat.papo.mobile.resources.Res
+import chat.papo.mobile.resources.embed_image_open
 import chat.papo.mobile.resources.embed_open_link
 import chat.papo.mobile.resources.embed_show_less
 import chat.papo.mobile.resources.embed_show_more
@@ -109,6 +111,9 @@ private const val PLACEHOLDER_ASPECT = 16f / 9f
  * Cartão de um embed. O de GIF ([isGifEmbed]) é só a imagem animada, o provedor e o título; os outros são o cartão
  * completo de [LinkEmbedCard]. Nada é pedido ao relay de vídeo antes do toque: nem autoplay nem pré-carga, porque cada
  * vídeo aberto prende uma das poucas vagas do relay no servidor. [videos] guarda qual vídeo toca.
+ *
+ * A imagem que o cartão mostra abre no visualizador de mídia por [onOpenImage] quando [hasViewableImage]; a de um embed com
+ * vídeo (do relay ou do YouTube) segue com o gesto do vídeo.
  */
 @Composable
 internal fun EmbedCard(
@@ -119,11 +124,12 @@ internal fun EmbedCard(
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
     videos: VideoHost,
+    onOpenImage: (EmbedDto) -> Unit,
 ) {
     if (isGifEmbed(embed)) {
-        GifEmbedCard(session, embed)
+        GifEmbedCard(session, embed, onOpenImage)
     } else {
-        LinkEmbedCard(session, messageId, embed, users, emojiIds, unicodeEmojis, videos)
+        LinkEmbedCard(session, messageId, embed, users, emojiIds, unicodeEmojis, videos, onOpenImage)
     }
 }
 
@@ -134,7 +140,8 @@ internal fun EmbedCard(
  * ([relayVideo]), a caixa da imagem leva o ▶, que o toca ali mesmo, e tocar fora dele abre a tela cheia ([VideoBox]). Um
  * embed do YouTube ([youTubeId]) tem a mídia própria de [YouTubeMedia], que não passa pelo relay.
  *
- * O servidor serve uma imagem por embed (a `thumbnail` ou, sem ela, a `image`) e não serve o ícone do rodapé.
+ * O servidor serve uma imagem por embed (a `thumbnail` ou, sem ela, a `image`) e não serve o ícone do rodapé. Sem vídeo, tocar
+ * na imagem, depois que ela chegou, a abre no visualizador ([onOpenImage]).
  */
 @Composable
 private fun LinkEmbedCard(
@@ -145,6 +152,7 @@ private fun LinkEmbedCard(
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
     videos: VideoHost,
+    onOpenImage: (EmbedDto) -> Unit,
 ) {
     val video = relayVideo(session.client.server, embed)
     val youtubeId = youTubeId(embed)
@@ -178,7 +186,8 @@ private fun LinkEmbedCard(
             YouTubeMedia(messageId, youtubeId, image, videos, Modifier.padding(top = 4.dp))
         } else if (video != null || embed.hasImage()) {
             val aspect = embedMediaAspect(embed) ?: image?.let { aspectOrNull(it.width, it.height) } ?: PLACEHOLDER_ASPECT
-            EmbedMediaBox(session, messageId, image, aspect, video, videos, Modifier.padding(top = 4.dp))
+            val onOpen = { onOpenImage(embed) }.takeIf { hasViewableImage(session.client.server, embed) }
+            EmbedMediaBox(session, messageId, image, aspect, video, videos, onOpen, Modifier.padding(top = 4.dp))
         }
         embed.footer?.text?.takeIf { it.isNotBlank() }?.let {
             Text(
@@ -194,16 +203,18 @@ private fun LinkEmbedCard(
 
 /**
  * Cartão de um embed de GIF (Tenor, GIPHY, KLIPY): a imagem animada em laço e sem som, do tamanho que o servidor deu
- * (até [GifCardMaxWidth]), com o provedor e o título embaixo. Tocar abre a página do GIF no navegador. Com as animações do
- * sistema removidas a imagem fica no primeiro quadro.
+ * (até [GifCardMaxWidth]), com o provedor e o título embaixo. Tocar na imagem, depois que ela chegou, a abre no visualizador
+ * ([onOpenImage]); o provedor e o título, na cor de link, abrem a página do GIF no navegador. Com as animações do sistema
+ * removidas a imagem fica no primeiro quadro.
  */
 @Composable
-private fun GifEmbedCard(session: AccountSession, embed: EmbedDto) {
+private fun GifEmbedCard(session: AccountSession, embed: EmbedDto, onOpenImage: (EmbedDto) -> Unit) {
     val image = rememberEmbedImage(session, embed)
     val uriHandler = LocalUriHandler.current
     val link = safeLink(embed.url)
     val aspect = embedMediaAspect(embed) ?: image?.let { aspectOrNull(it.width, it.height) } ?: PLACEHOLDER_ASPECT
-    val openLabel = stringResource(Res.string.embed_open_link)
+    val openImageLabel = stringResource(Res.string.embed_image_open)
+    val openLinkLabel = stringResource(Res.string.embed_open_link)
     val provider = (embed.provider ?: embed.siteName)?.takeIf { it.isNotBlank() }
     val title = embed.title?.takeIf { it.isNotBlank() }
     Column(
@@ -211,19 +222,35 @@ private fun GifEmbedCard(session: AccountSession, embed: EmbedDto) {
         Modifier
             .width(minOf(GifCardMaxWidth, MediaMaxHeight * aspect))
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .then(if (link != null) Modifier.clickable(onClickLabel = openLabel, role = Role.Button) { openInBrowser(uriHandler, link) } else Modifier),
+            .background(MaterialTheme.colorScheme.surfaceContainer),
     ) {
         Box(
-            Modifier.fillMaxWidth().aspectRatio(aspect).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(aspect)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .then(if (image != null) Modifier.clickable(onClickLabel = openImageLabel, role = Role.Button) { onOpenImage(embed) } else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             image?.let { Image(it.rememberedPainter(), title, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
         }
         if (provider != null || title != null) {
-            Column(Modifier.padding(horizontal = CardPadding, vertical = 6.dp)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (link != null) Modifier.clickable(onClickLabel = openLinkLabel, role = Role.Button) { openInBrowser(uriHandler, link) } else Modifier)
+                    .padding(horizontal = CardPadding, vertical = 6.dp),
+            ) {
                 provider?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                title?.let { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                title?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (link != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -325,7 +352,8 @@ private fun EmbedFields(fields: List<EmbedFieldDto>) {
  * A caixa da imagem do embed: com a proporção [aspect] (a lista não pula quando a imagem chega), na largura do cartão e
  * no máximo [MediaMaxHeight] de altura, e a imagem inteira dentro dela (`Fit`, sem cortar as laterais nem o topo). Com
  * [video] a caixa é a de um vídeo tocável ([VideoBox]): o ▶ o toca ali mesmo e o resto da caixa abre a tela cheia; antes da
- * imagem chegar, e sem ela, o fundo do cartão.
+ * imagem chegar, e sem ela, o fundo do cartão. Sem [video], [onOpen] (se não é nulo) abre a imagem inteira, mas só depois que
+ * ela chegou: a caixa vazia não promete nada, e o visualizador a lê do cache em que o cartão a pôs.
  */
 @Composable
 private fun EmbedMediaBox(
@@ -335,14 +363,18 @@ private fun EmbedMediaBox(
     aspect: Float,
     video: PlayableMedia?,
     videos: VideoHost,
+    onOpen: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val openLabel = stringResource(Res.string.embed_image_open)
+    val open = onOpen.takeIf { video == null && image != null }
     Box(
         modifier
             .heightIn(max = MediaMaxHeight)
             .aspectRatio(aspect)
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .then(if (open != null) Modifier.clickable(onClickLabel = openLabel, role = Role.Button, onClick = open) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         val cover: @Composable BoxScope.() -> Unit = {

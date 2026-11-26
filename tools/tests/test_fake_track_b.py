@@ -124,6 +124,27 @@ class EmbedsSementesTest(FakeTestCase):
         self.assertEqual({"mime_type": "image/png"}, {k: v for k, v in embed["thumbnail"].items() if v is not None})
         self.assertEqual((1200, 630), png_size(self.media_of(embed)[1]))
 
+    def test_mensagem_com_um_anexo_e_varios_embeds_para_o_visualizador(self):
+        message = self.messages["vários embeds com imagem e um anexo"]
+        self.assertEqual(["anexo.png"], [a["original_file_name"] for a in message["attachments"]])
+        embeds = {e["title"]: e for e in message["embeds"]}
+        self.assertEqual(7, len(message["embeds"]))   # o servidor aceita até 10 por mensagem
+        self.assertEqual((1200, 630), png_size(self.media_of(embeds["Imagem 1 da galeria"])[1]))
+        self.assertEqual((600, 900), png_size(self.media_of(embeds["Imagem 2 da galeria"])[1]))
+        # Só com `image`: o servidor a serve no lugar da thumbnail.
+        only_image = embeds["Só com image"]
+        self.assertIsNone(only_image["thumbnail"])
+        self.assertEqual((512, 512), png_size(self.media_of(only_image)[1]))
+        self.assertEqual("gif", embeds["Gato dançando"]["fetch_method"])
+        self.assertGreaterEqual(gif_frames(self.media_of(embeds["Gato dançando"])[1]), 3)
+        # Com thumbnail e image, `GET /embeds/{id}` serve uma imagem só: a thumbnail. A image não chega ao app.
+        both = embeds["Com thumbnail e image"]
+        self.assertEqual(((800, 450), (600, 600)), ((both["thumbnail"]["width"], both["thumbnail"]["height"]), (both["image"]["width"], both["image"]["height"])))
+        self.assertEqual((800, 450), png_size(self.media_of(both)[1]))
+        # Fora do visualizador: o embed com vídeo e o que não tem imagem.
+        self.assertEqual("video/mp4", embeds["Embed com vídeo (fora do visualizador)"]["video"]["mime_type"])
+        self.assertIsNone(self.media_of(embeds["Sem imagem (fora do visualizador)"])[1])
+
     def test_anexos_em_cada_estado_de_moderacao(self):
         def attachment(prefix):
             content = next(c for c in self.messages if c.startswith(prefix))

@@ -530,6 +530,7 @@ fun ChatScreen(
                                 onLongPress = { if (messageActionOffer(access, message, session.userId).any) actionsFor = message },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
                                 onOpenImage = { viewing = ViewingMedia.image(message.id, it) },
+                                onOpenEmbedImage = { viewing = ViewingMedia.embedImage(message.id, it.id) },
                                 onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
                                 videos = videoHost,
                             )
