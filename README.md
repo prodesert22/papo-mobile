@@ -1,6 +1,6 @@
-<h1 align="center">Papo Mobile</h1>
+<div align="center">
 
-<p align="center">
+# Papo Mobile
 
 [![CI](https://github.com/prodesert22/papo-mobile/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/prodesert22/papo-mobile/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/prodesert22/papo-mobile?label=release)](https://github.com/prodesert22/papo-mobile/releases/latest)
@@ -9,9 +9,9 @@
 [![Android 11+](https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white)](#install)
 [![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)](#build)
 
-</p>
-
 [Leia em português](README.pt-BR.md)
+
+</div>
 
 Android client for [Papo](https://github.com/prodesert22/papo-backend), a
 self-hosted chat service with text, voice and video. Sign in to several servers
