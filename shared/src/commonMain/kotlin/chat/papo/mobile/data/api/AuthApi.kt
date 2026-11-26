@@ -98,7 +98,12 @@ data class ServerDto(
     @SerialName("owner_username") val ownerUsername: String? = null,
     @SerialName("channel_count") val channelCount: Int = 0,
     @SerialName("member_count") val memberCount: Int = 0,
+    @SerialName("role_count") val roleCount: Int = 0,
+    @SerialName("created_at") val createdAt: String? = null,
 )
+
+@Serializable
+data class PasswordResetRequest(val token: String, val password: String)
 
 class AuthApi(private val client: PapoClient) {
     private val http get() = client.http
@@ -140,6 +145,19 @@ class AuthApi(private val client: PapoClient) {
     }
 
     suspend fun whoami(): WhoamiResponse = http.get { url(path("/auth/whoami")) }.bodyOrThrow()
+
+    /**
+     * Troca a senha com o token de um link de redefinição (público, limitado por endereço: nunca repetir sozinho).
+     * 200 sucesso, 400 política da senha, 410 link inválido, expirado ou já usado.
+     */
+    suspend fun consumePasswordReset(token: String, password: String) {
+        http.post {
+            url(path("/auth/password_reset"))
+            attributes.put(NoAuthRetry, Unit)
+            contentType(ContentType.Application.Json)
+            setBody(PasswordResetRequest(token, password))
+        }.requireSuccess()
+    }
 
     suspend fun logout() {
         http.post { url(path("/auth/logout")); attributes.put(NoAuthRetry, Unit) }.requireSuccess()
