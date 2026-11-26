@@ -60,6 +60,17 @@ serve). O relay segue `FAKE_VIDEO_KBPS` e `FAKE_VIDEO_401_ONCE`, que contam os p
 
     FAKE_RELAY_502=1          o relay responde 502 (falha na origem, ou as vagas globais do servidor cheias) a todo pedido
 
+Embeds, GIFs e moderação (sempre ligados): o canal `embeds` traz embeds customizados de webhook (cor, autor com ícone em
+`author_image_data`, campos `inline` e largos, rodapé, e um com links `javascript:`/`intent:`/`file:` que o app não deve abrir),
+embeds de GIF (`fetch_method: gif`, Tenor e GIPHY, com a `thumbnail` animada), imagens de embed 1200x630, 600x900 e 512x512 sem e
+com vídeo (e uma sem medidas) desenhadas com borda e cantos coloridos, para ver se algo é cortado, e anexos em cada estado de
+moderação: GIF animado, GIF `sensitive`, `pending`, `blocked` (a lista já diz) e um que a lista ainda diz `pending` mas o
+servidor bloqueou (o arquivo e a miniatura respondem 410). Os vídeos desses embeds tocam se houver `FAKE_VIDEO_DIR`.
+
+    FAKE_MODERATION=1         acrescenta a mensagem "moderação ao vivo": a imagem vira `sensitive` (evento
+                              `attachment_moderation_update`) depois de 20 s e `blocked` (410, sem evento) depois de mais 20 s.
+                              Outro número é o intervalo em segundos
+
 Renovação da sessão (sempre ligada). `POST /auth/refresh` rotaciona o token como o servidor (`RefreshConnection`): troca o
 `Auth` por outro, com outro id de conexão e o mesmo usuário, no `Set-Cookie`. O token trocado ainda vale por 60 s (a janela de
 graça do servidor); reapresentado depois disso é reuso: o servidor revoga todas as sessões do usuário e responde 401. Um
@@ -139,6 +150,101 @@ def noisy_png(r, g, b, size=96):
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
+def png_from_rows(w, h, raw):
+    """PNG RGB de 8 bits a partir das linhas já montadas (cada uma começa com o byte de filtro 0)."""
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b"")
+
+
+def frame_png(w, h, hue=(35, 120, 200)):
+    """PNG de w x h feito para denunciar corte e esticamento: borda branca, um quadrado em cada canto (vermelho e verde em
+    cima, azul e amarelo embaixo), uma cruz branca no centro e o fundo em degradê da cor `hue` para o escuro. Quem o mostra
+    cortado perde cantos; esticado, vê a cruz fora do centro ou os quadrados fora de proporção."""
+    edge, corner, white = 8, 40, (255, 255, 255)
+    corners = {"top": ((255, 0, 0), (0, 200, 0)), "bottom": ((0, 90, 255), (255, 210, 0))}
+
+    def pixel(x, kind):
+        if kind in ("edge", "center") or x < edge or x >= w - edge or abs(x - w // 2) < 2:
+            return white
+        if kind in corners:
+            left, right = corners[kind]
+            if x < corner:
+                return left
+            if x >= w - corner:
+                return right
+        shade = 1 - 0.6 * x / w
+        return tuple(int(c * shade) for c in hue)
+
+    def row_kind(y):
+        if y < edge or y >= h - edge:
+            return "edge"
+        if abs(y - h // 2) < 2:
+            return "center"
+        return "top" if y < corner else "bottom" if y >= h - corner else "middle"
+
+    rows, raw = {}, bytearray()
+    for y in range(h):
+        kind = row_kind(y)
+        if kind not in rows:   # só cinco tipos de linha: o resto se repete
+            rows[kind] = b"\x00" + b"".join(bytes(pixel(x, kind)) for x in range(w))
+        raw += rows[kind]
+    return png_from_rows(w, h, raw)
+
+
+def animated_gif(w=320, h=180, frames=4, delay_cs=25):
+    """GIF animado em laço de `frames` quadros: fundo que muda de cor e um quadrado branco que anda, com borda preta. Sem
+    compressão (um código por pixel, com CLEAR antes de a tabela crescer), então o decodificador nunca muda o tamanho do
+    código e não há o que errar na tabela; pesa uns 4,7 bits por pixel."""
+    palette = [(0, 0, 0), (255, 255, 255), (231, 76, 60), (46, 204, 113), (52, 152, 219), (241, 196, 15), (155, 89, 182), (26, 188, 156)]
+    bits = 3
+    clear, end = 1 << bits, (1 << bits) + 1
+    run = clear - 2   # códigos entre dois CLEAR sem o decodificador passar para o código maior
+
+    def lzw(pixels):
+        out, acc, used = bytearray(), 0, 0
+
+        def put(code):
+            nonlocal acc, used
+            acc |= code << used
+            used += bits + 1
+            while used >= 8:
+                out.append(acc & 0xFF)
+                acc >>= 8
+                used -= 8
+        for start in range(0, len(pixels), run):
+            put(clear)
+            for pixel in pixels[start:start + run]:
+                put(pixel)
+        put(end)
+        if used:
+            out.append(acc & 0xFF)
+        return bytes(out)
+
+    def blocks(data):
+        return b"".join(bytes([len(data[i:i + 255])]) + data[i:i + 255] for i in range(0, len(data), 255)) + b"\x00"
+
+    out = bytearray(b"GIF89a" + struct.pack("<HHBBB", w, h, 0xF0 | (bits - 1), 0, 0))
+    out += b"".join(bytes(color) for color in palette)
+    out += b"\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00"   # repetir sem fim
+    for k in range(frames):
+        background, left = 2 + k % 4, 8 + (w - 56) * k // max(1, frames - 1)
+        pixels = bytearray()
+        for y in range(h):
+            row = bytearray([background]) * w
+            if y < 4 or y >= h - 4:
+                row[:] = bytes(w)
+            else:
+                row[:4] = row[-4:] = bytes(4)
+                if h // 2 - 20 <= y < h // 2 + 20:
+                    row[left:left + 40] = b"\x01" * 40
+            pixels += row
+        out += b"\x21\xF9\x04\x00" + struct.pack("<H", delay_cs) + b"\x00\x00"
+        out += b"\x2C" + struct.pack("<HHHHB", 0, 0, w, h, 0) + bytes([bits]) + blocks(lzw(pixels))
+    return bytes(out) + b"\x3B"
+
+
 # Emojis animados do servidor falso: três quadros de 64x64 (um disco vermelho, amarelo e verde sobre fundo transparente),
 # com menos de 1 KB cada. O GIF vem do Pillow (`save_all`, `loop=0`, `disposal=2`) e o WebP do ffmpeg
 # (`-framerate 4 -i f%d.png -c:v libwebp_anim -lossless 1 -loop 0`).
@@ -180,6 +286,7 @@ EMBED_LINK = re.compile(r"https://videos\.example\.com/[^\s<>\"]*", re.IGNORECAS
 EMBED_DELAY = 1.0
 EMBEDS = {}     # embed_id -> {"view": o embed como o servidor o descreve, "channel_id", "image": bytes, "seed": vídeo semeado ou None}
 RELAY = {"fail": False}   # FAKE_RELAY_502
+GONE = set()    # anexos bloqueados pela moderação: o arquivo e a miniatura respondem 410, esteja a mensagem listando o estado ou não
 
 
 def sniffed_mime(declared, file_name):
@@ -833,7 +940,10 @@ class Handler(BaseHTTPRequestHandler):
     def attachment(self, file_id, thumbnail=False):
         """`GET /attachments/{id}` como o `http.ServeContent` do servidor: 200, 206, 416 e `Accept-Ranges`. Vídeo pode ser
         entregue devagar (FAKE_VIDEO_KBPS) e ter um 401 simulado (FAKE_VIDEO_401_ONCE). Com `thumbnail` (`/thumbnail`) serve a
-        miniatura própria do anexo, se ele tem uma; senão o próprio arquivo, como o fake sempre fez para imagens."""
+        miniatura própria do anexo, se ele tem uma; senão o próprio arquivo, como o fake sempre fez para imagens. Anexo bloqueado
+        pela moderação (em `GONE`) responde 410, arquivo ou miniatura."""
+        if file_id in GONE:
+            return self.problem(410, "Recurso indisponível", "arquivo removido pela moderação de imagens")
         mime, data = THUMBS[file_id] if thumbnail and file_id in THUMBS else FILES[file_id]
         video = mime.startswith("video/")
         if video and video_session_expires():
@@ -851,7 +961,8 @@ class Handler(BaseHTTPRequestHandler):
         if found is None or not has_channel_flag(found["channel_id"], me, "read_channel") or (relay and found["seed"] is None):
             return self.problem(404, "Recurso não encontrado", "vídeo de embed não encontrado" if relay else "embed não encontrado")
         if not relay:
-            return self.send(200, dict(found["view"], image_data=base64.b64encode(found["image"]).decode(), author_image_data=None))
+            encoded = lambda data: base64.b64encode(data).decode() if data else None
+            return self.send(200, dict(found["view"], image_data=encoded(found["image"]), author_image_data=encoded(found.get("author_image"))))
         if RELAY["fail"]:
             return self.problem(502, "Mídia indisponível", "falha ao carregar vídeo do embed")
         _, data, mime, _, _ = found["seed"]
@@ -1418,8 +1529,148 @@ def seed_track_a():
     ramos mesclarem sem conflito; o `__main__` chama as duas depois do resto das sementes."""
 
 
+def media_attachment(name, mime, data, width, height, moderation="clean"):
+    """Registra o arquivo de uma imagem e devolve o anexo como o servidor o descreve: com miniatura (o fake serve o próprio
+    arquivo como miniatura, então a de um GIF também é um GIF animado, como no servidor) e as dimensões dela."""
+    aid = str(uuid.uuid4())
+    FILES[aid] = (mime, data)
+    if moderation == "blocked":   # o servidor real responde 410 a um anexo bloqueado
+        GONE.add(aid)
+    return {"id": aid, "mime_type": mime, "original_file_name": name, "size_bytes": len(data), "width": width, "height": height,
+            "thumbnail_id": aid, "thumbnail_width": width, "thumbnail_height": height, "moderation_status": moderation}
+
+
+def seed_embed(message, image_bytes=None, author_bytes=None, seed=None, **fields):
+    """Põe um embed na mensagem, como o servidor o descreve (o que falta fica nulo, `fields` vazio). `image_bytes` e
+    `author_bytes` são o que `GET /embeds/{id}` devolve em `image_data` e `author_image_data`; `seed` é o vídeo que o relay serve."""
+    embed = {"id": str(uuid.uuid4()), "source_type": "link", "fetch_method": "opengraph", "provider": None, "site_name": None,
+             "url": None, "title": None, "description": None, "color": None, "author": None, "thumbnail": None, "image": None,
+             "video": None, "footer": None, "fields": [], "created_at": now(), "fetched_at": now(), **fields}
+    EMBEDS[embed["id"]] = {"view": embed, "channel_id": message["channel_id"], "image": image_bytes, "author_image": author_bytes, "seed": seed}
+    message["embeds"].append(embed)
+    return embed
+
+
+def moderate(message, attachment_id, status):
+    """O que a moderação faz com um anexo: grava o estado na mensagem; `sensitive` sai num `attachment_moderation_update`
+    (o servidor só avisa esse estado); `blocked` não avisa, só passa a responder 410 (o servidor real apaga a mensagem logo
+    depois, mas há uma janela entre as duas escritas, que é a que o app precisa tratar)."""
+    with LOCK:
+        for attachment in message["attachments"]:
+            if attachment["id"] == attachment_id:
+                attachment["moderation_status"] = status
+        if status == "blocked":
+            GONE.add(attachment_id)
+    if status == "sensitive":
+        emit({"type": "attachment_moderation_update", "channel_id": message["channel_id"], "message_id": message["id"],
+              "attachment_id": attachment_id, "status": status}, only=audience(message["channel_id"]))
+
+
+def moderation_delay():
+    """FAKE_MODERATION: desligado (vazio ou 0); `1` liga com 20 s; outro número liga com esse tanto de segundos."""
+    try:
+        value = float(os.environ.get("FAKE_MODERATION") or 0)
+    except ValueError as error:
+        raise SystemExit("FAKE_MODERATION: valor ilegível (%s)" % error)
+    return 20.0 if value == 1 else value
+
+
+CUSTOM_DESCRIPTION = (
+    "Resumo da execução:\n\n- **Testes**: 1.284 passaram, nenhum falhou\n- **Lint**: sem avisos\n- **Cobertura**: 91,4%\n"
+    "- **Pacote**: `papo-1.4.2.apk`\n\nTudo certo para a próxima etapa. Os detalhes estão no [log da execução]"
+    "(https://painel.example.com/build/42/log), com a lista completa dos módulos."
+)
+
+
 def seed_track_b():
-    """Sementes da trilha B do item 2 (embed completo, GIF, moderação, vídeo no cartão, YouTube, links)."""
+    """Sementes da trilha B do item 2: o canal `embeds`, com embed customizado completo (cor, autor com ícone, campos, rodapé),
+    GIFs de embed e anexados, imagens de embed de todas as proporções e anexos em cada estado de moderação.
+
+    `FAKE_MODERATION=1` (ou N, em segundos; 1 liga com 20) acrescenta uma mensagem com uma imagem que, depois de N s, vira
+    sensível (evento ao vivo) e, depois de mais N s, bloqueada (o arquivo passa a responder 410, sem evento)."""
+    channel = {"id": "c0000000-0000-4000-8000-0000000000b1", "name": "embeds", "type": "text", "position": 5,
+               "topic": "Embeds, GIFs e moderação", "parent_id": CHANNELS[0]["id"]}
+    CHANNELS.append(channel)
+    cid = channel["id"]
+    robot = {"name": "Robô de Build"}
+
+    # Embeds customizados (webhook). Os campos vêm fora de ordem, para a grade seguir `position`.
+    build = new_message(cid, None, "Build 42 concluído.", external_author=robot)
+    seed_embed(
+        build, image_bytes=frame_png(800, 450, (46, 204, 113)), author_bytes=png(231, 76, 60, 64, 64),
+        source_type="custom", fetch_method="manual", site_name="Painel da Casa", url="https://painel.example.com/build/42",
+        title="Build 42 passou", description=CUSTOM_DESCRIPTION, color="#2ECC71",
+        author={"name": "Robô de Build", "url": "https://painel.example.com/robo", "media": {"mime_type": "image/png", "width": 64, "height": 64}},
+        image={"mime_type": "image/png", "width": 800, "height": 450},
+        footer={"text": "Executado em 3 min · ramo principal"},
+        fields=[{"position": 1, "name": "Duração", "value": "3 min", "inline": True},
+                {"position": 0, "name": "Ramo", "value": "principal", "inline": True},
+                {"position": 2, "name": "Testes", "value": "1.284", "inline": True},
+                {"position": 3, "name": "Falhas", "value": "0", "inline": True},
+                {"position": 4, "name": "Notas", "value": "Sem falhas. A cobertura subiu 0,3 ponto desde a build anterior.", "inline": False},
+                {"position": 5, "name": "Quem enviou", "value": "equipe do painel", "inline": True}],
+    )
+    backup = new_message(cid, None, "Backup noturno.", external_author={"name": "Robô de Backup"})
+    seed_embed(backup, source_type="custom", fetch_method="manual", title="Backup concluído", description="Copiados 12 GB em 4 min.",
+               footer={"text": "Próximo backup às 02h"})
+    dark = new_message(cid, None, "Alerta de disco.", external_author={"name": "Robô de Alertas"})
+    seed_embed(dark, source_type="custom", fetch_method="manual", title="Disco quase cheio", description="Restam 3% no volume de dados.",
+               color="#111111", fields=[{"position": 0, "name": "Volume", "value": "/dados", "inline": False}])
+    hostile = new_message(cid, None, "Links que o app não abre (o servidor real os recusa na criação).", external_author={"name": "Robô de Teste"})
+    seed_embed(hostile, source_type="custom", fetch_method="manual", url="javascript:alert(1)", title="Título com link inválido",
+               author={"name": "Autor com link inválido", "url": "intent://exemplo.com#Intent;scheme=https;end"},
+               description="Só texto; [link de arquivo](file:///sdcard/segredo.txt) e [link bom](https://exemplo.com/ok).")
+
+    # Embeds de GIF (Tenor, GIPHY) e um GIF que chega como imagem de OpenGraph: os três animam.
+    tenor = "https://tenor.com/view/gato-dancando-1234567890"
+    gif = animated_gif()
+    seed_embed(new_message(cid, uid("caio"), tenor), image_bytes=gif, fetch_method="gif", provider="Tenor", url=tenor, title="Gato dançando",
+               thumbnail={"mime_type": "image/gif", "width": 320, "height": 180, "size_bytes": len(gif)})
+    square = animated_gif(200, 200, 3)
+    giphy = "https://giphy.com/gifs/quadrado-9876543210"
+    seed_embed(new_message(cid, uid("bia"), giphy), image_bytes=square, fetch_method="gif", provider="GIPHY", url=giphy,
+               thumbnail={"mime_type": "image/gif", "width": 200, "height": 200, "size_bytes": len(square)})
+    seed_embed(new_message(cid, uid("bia"), "Página com GIF no OpenGraph"), image_bytes=gif, site_name="exemplo.com", url="https://exemplo.com/gif",
+               title="GIF como og:image", description="Embed comum cuja imagem é um GIF animado.",
+               thumbnail={"mime_type": "image/gif", "width": 320, "height": 180, "size_bytes": len(gif)})
+
+    # Imagens de embed 1200x630, 600x900 e 512x512, sem e com vídeo (o vídeo é 16:9 e a caixa segue a imagem), e uma sem medidas.
+    hues = {(1200, 630): (35, 120, 200), (600, 900): (200, 90, 35), (512, 512): (120, 60, 180)}
+    for (width, height), hue in hues.items():
+        for with_video in (False, True):
+            link = "https://videos.example.com/%dx%d.mp4" % (width, height)
+            found, mime = embed_seed(link)
+            seed_embed(
+                new_message(cid, uid("bia"), "imagem %dx%d %s vídeo" % (width, height, "com" if with_video else "sem")),
+                image_bytes=frame_png(width, height, hue), seed=found if with_video else None, site_name="exemplo.com",
+                url="https://exemplo.com/%dx%d" % (width, height), title="Imagem %dx%d" % (width, height),
+                description="A imagem aparece inteira, sem corte nas laterais.",
+                thumbnail={"mime_type": "image/png", "width": width, "height": height},
+                video={"url": link, "mime_type": mime, "width": 1280, "height": 720} if with_video else None,
+            )
+    seed_embed(new_message(cid, uid("bia"), "imagem 1200x630 sem medidas no embed"), image_bytes=frame_png(1200, 630), site_name="exemplo.com",
+               url="https://exemplo.com/sem-medidas", title="Sem largura nem altura", thumbnail={"mime_type": "image/png"})
+
+    # Anexos: GIF animado (com selo), GIF sensível, pendente (aparece normal), bloqueado (aviso) e bloqueado no servidor antes do aviso.
+    new_message(cid, uid("caio"), "GIF anexado (anima e tem o selo GIF)", attachments=[media_attachment("danca.gif", "image/gif", gif, 320, 180)])
+    new_message(cid, uid("caio"), "GIF anexado sensível (escondido até o toque)",
+                attachments=[media_attachment("danca-sensivel.gif", "image/gif", gif, 320, 180, "sensitive")])
+    new_message(cid, uid("bia"), "imagem pendente (aparece normal: pending também é o servidor sem moderação)",
+                attachments=[media_attachment("pendente.png", "image/png", frame_png(480, 320), 480, 320, "pending")])
+    new_message(cid, uid("bia"), "imagem bloqueada (o aviso aparece e nada é pedido)",
+                attachments=[media_attachment("bloqueada.png", "image/png", frame_png(480, 320), 480, 320, "blocked")])
+    late = media_attachment("bloqueada-no-servidor.png", "image/png", frame_png(480, 320), 480, 320, "pending")
+    new_message(cid, uid("bia"), "imagem que o servidor já bloqueou, mas a lista ainda diz pending (a miniatura responde 410)", attachments=[late])
+    GONE.add(late["id"])
+
+    delay = moderation_delay()
+    if delay > 0:
+        live = media_attachment("ao-vivo.png", "image/png", frame_png(480, 320, (35, 160, 120)), 480, 320, "pending")
+        message = new_message(cid, uid("bia"), "moderação ao vivo: sensível em %g s e bloqueada em %g s" % (delay, 2 * delay), attachments=[live])
+        for after, status in ((delay, "sensitive"), (2 * delay, "blocked")):
+            timer = threading.Timer(after, moderate, (message, live["id"], status))
+            timer.daemon = True
+            timer.start()
 
 
 if __name__ == "__main__":
