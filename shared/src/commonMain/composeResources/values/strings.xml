@@ -87,8 +87,8 @@
     <string name="profile_edit_typing">Frase de digitação</string>
     <string name="profile_edit_typing_help">Aparece para os outros enquanto você digita.</string>
     <string name="profile_edit_counter">%1$d/%2$d</string>
-    <string name="profile_edit_avatar_help">Recortado no centro, em quadrado, e reduzido para 512 px antes de enviar.</string>
-    <string name="profile_edit_banner_help">Recortado no centro, na proporção 3:1, e reduzido para 1536 × 512 px antes de enviar.</string>
+    <string name="profile_edit_avatar_help">Você escolhe o recorte, em quadrado; a imagem é reduzida para até 512 px antes de enviar.</string>
+    <string name="profile_edit_banner_help">Você escolhe o recorte, na proporção 3:1; a imagem é reduzida para até 1536 × 512 px antes de enviar.</string>
     <string name="profile_edit_pick_avatar">Escolher avatar</string>
     <string name="profile_edit_pick_banner">Escolher banner</string>
     <string name="profile_edit_remove_banner">Remover banner</string>
@@ -533,4 +533,13 @@
     <string name="msg_link_open">Abrir link</string>
     <!-- Painel da conversa sobre a lista de canais (0.6.1): a faixa da conversa estacionada -->
     <string name="conversation_panel_resume">Voltar à conversa</string>
+    <!-- Recorte da imagem -->
+    <string name="crop_title">Editar imagem</string>
+    <string name="crop_cancel">Cancelar</string>
+    <string name="crop_confirm">Confirmar</string>
+    <string name="crop_rotate">Girar</string>
+    <string name="crop_reset">Tamanho</string>
+    <string name="crop_zoom">Zoom</string>
+    <string name="crop_zoom_percent">%1$d%</string>
+    <string name="crop_area">Área de recorte. Arraste para mover a imagem e use dois dedos para ampliar.</string>
 </resources>

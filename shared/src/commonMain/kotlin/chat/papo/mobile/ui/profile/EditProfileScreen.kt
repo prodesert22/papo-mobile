@@ -113,7 +113,7 @@ private val PencilSize = 36.dp
 
 /**
  * Edita o próprio perfil: apelido, frase de status, descrição, frase de digitação, avatar e banner. A imagem escolhida é
- * recortada e reduzida aqui, antes de qualquer envio; "Salvar" manda só o que mudou e mostra o resultado de cada pedido.
+ * recortada pelo usuário ([ImageCropper]) e reduzida aqui, antes de qualquer envio; "Salvar" manda só o que mudou e mostra o resultado de cada pedido.
  * Enquanto salva, nada muda e o voltar espera. Tudo o que o servidor devolve é texto simples.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -181,6 +181,9 @@ fun EditProfileScreen(session: AccountSession, viewModel: EditProfileViewModel, 
             }
             // Espaço para a barra flutuante não cobrir o último campo.
             Spacer(Modifier.height(96.dp))
+        }
+        state.cropping?.let { pending ->
+            ImageCropper(pending, onConfirm = viewModel::confirmCrop, onCancel = viewModel::cancelCrop)
         }
         UnsavedBar(
             visible = state.hasUnsavedChanges && !state.saving,
