@@ -107,6 +107,16 @@ têm recado e descrição; o banner vem de `GET /media/{sha}` (com sessão) e o 
 As mensagens de webhook trazem sempre o mesmo `webhook_id` para o mesmo webhook (derivado do nome). No `papo`: "Robô de Deploy"
 (sem avatar), "Monitor de Status" (duas mensagens seguidas, com avatar persistente em `/webhooks/{id}/avatar`, rota pública) e
 "Maria da Ponte", com um autor temporário cujo `avatar_url` é uma URL externa que o app nunca deve pedir.
+
+Bloqueios, senha e servidor (sempre ligados; regras lidas no código do servidor real, não observadas em execução).
+`GET /users/blocks`, `POST`/`DELETE /users/{id}/block` (204, idempotentes; 400 em si mesmo, 404 sem usuário): com bloqueio em qualquer
+sentido, `POST /dms` e `POST /messages` numa DM dão 403 com `type` terminando em `/dm-blocked`, e a DM some de `GET /dms` (desbloquear
+a traz de volta no fake; no servidor real ela só reaparece se alguém a abrir). `POST /users/{eu}/reset` marca a troca; sem a marca,
+`PUT /users/{eu}/password` dá 409 `no-reset-password` (fora da OpenAPI); com ela confere a política (400), troca a senha, revoga todas
+as sessões do usuário, a atual inclusive, e fecha os WebSockets dele. `POST /users/{outro}/reset` só o dono (`FAKE_PERMISSIONS`)
+gera um link de 24 h, e o novo invalida os anteriores. `POST /auth/password_reset` (público) consome um token: 200, 400 (política; o
+token segue valendo) ou 410 (desconhecido, expirado ou usado). Tokens prontos: `seed-valido-ana` (200 uma vez), `seed-usado` e
+`seed-expirado` (410). `GET /server` traz `role_count` e `created_at`.
 """
 import base64
 import hashlib
@@ -114,6 +124,7 @@ import json
 import os
 import random
 import re
+import socket
 import struct
 import subprocess
 import sys
@@ -1222,11 +1233,16 @@ class Handler(BaseHTTPRequestHandler):
         if embed and s is None:
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
             return True
+        if s is None and path == "/users/blocks":
+            self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+            return True
         if s is None:
             return False
         me = uid(s["user"])
         if embed:
             self.embed(embed.group(1), bool(embed.group(2)), me)
+            return True
+        if serve_blocks_and_password(self, "GET", path, me, {}):
             return True
         if path == "/channels":
             out = []
@@ -1242,7 +1258,8 @@ class Handler(BaseHTTPRequestHandler):
                 out.append(item)
             self.send(200, {"channels": out})
         elif path == "/dms":
-            self.send(200, {"dms": [dm_view(d, me) for d, pair in DMS.items() if me in pair]})
+            # Uma DM com bloqueio, em qualquer sentido, não sai da lista (o servidor a esconde; desbloquear não a reabre).
+            self.send(200, {"dms": [dm_view(d, me) for d, pair in DMS.items() if me in pair and not blocked_between(*pair)]})
         elif path == "/users":
             self.send(200, {"users": [summary(n) for n in USERS], "has_more": False})
         elif path == "/roles" and ACCESS["on"]:
@@ -1335,6 +1352,8 @@ class Handler(BaseHTTPRequestHandler):
                 fields, files = parse_upload(ctype, body)
                 check_upload_form(files)
                 cid = fields["channel_id"]
+                if cid in DMS and blocked_between(*DMS[cid]):
+                    return dm_blocked(self)
                 # Em DM o anexo não pede `send_attachment`; em canal, sim (e o envio pede `send_messages`).
                 if not has_channel_flag(cid, me, "send_messages") or (files and cid not in DMS and not has_role_flag(me, "send_attachment")):
                     return self.forbidden("usuário não tem permissão para enviar esta mensagem")
@@ -1371,6 +1390,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, found)
         if method == "POST" and path == "/dms":
             other = data["user_id"]
+            if blocked_between(me, other):
+                return dm_blocked(self)
             dm_id = next((d for d, pair in DMS.items() if set(pair) == {me, other}), None)
             if dm_id is None:
                 dm_id = str(uuid.uuid4())
@@ -1423,6 +1444,8 @@ class Handler(BaseHTTPRequestHandler):
                 users.pop(me, None)
             emit({"type": "react_update", "message_id": msg["id"], "emoji_id": key[0], "unicode": key[1], "count": len(users)}, only=audience(msg["channel_id"]))
             return self.send(201 if method == "POST" else 204, {"message_id": msg["id"]} if method == "POST" else None)
+        if serve_blocks_and_password(self, method, path, me, data):
+            return
         if ACCESS["on"] and self.access_write(method, path, data, me):
             return
         self.problem(404, "Não encontrado", "Rota inexistente")
@@ -1580,7 +1603,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"OK")
         elif self.path == "/server":
             server = {"id": str(uuid.uuid4()), "name": NAME, "public": SERVER_PASSWORD is None,
-                      "owner_username": "dono", "member_count": len(USERS), "channel_count": 3}
+                      "owner_username": "dono", "member_count": len(USERS), "channel_count": 3,
+                      "role_count": role_count(), "created_at": SERVER_CREATED_AT}
             if ACCESS["on"]:
                 server.update(owner_id=ACCESS["owner"], owner_username=name_of(ACCESS["owner"]), role_count=len(ROLES))
             self.send(200, server)
@@ -1625,6 +1649,8 @@ class Handler(BaseHTTPRequestHandler):
             token = open_session(username)
             self.send(200, {"user": {"id": user["id"], "username": username}, "connection_violation": False},
                       cookie=SESSION_COOKIE % token)
+        elif self.path == "/auth/password_reset":
+            consume_reset(self, data)
         elif self.path == "/auth/logout":
             SESSIONS.pop(self.cookie(), None)
             self.send(204, cookie="Auth=; Path=/; Max-Age=0")
@@ -1644,6 +1670,155 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(200, {"dropped": len(doomed)})
         else:
             self.problem(404, "Não encontrado", "Rota inexistente")
+
+
+# ── Bloqueios, senha e informações do servidor ───────────────────────────────────────────────────
+# Ligados sempre. Regras lidas no código do servidor real (`handlers/users.go`, `handlers/direct_messages.go`,
+# `handlers/messages.go`, `services/users.go`, `utils/password.go`), não observadas em execução.
+BLOCKS = {}          # id de quem bloqueou -> {id do bloqueado: None}, na ordem em que bloqueou
+RESET_FLAG = set()   # ids com `POST /users/{eu}/reset` feito: só eles passam em `PUT /users/{eu}/password`
+RESET_LINK_BASE = "https://papo.cyberasilo.online/passwordchange/"   # o host do site, fixo no código do servidor
+SERVER_CREATED_AT = "2026-01-01T08:00:00Z"
+# token -> {user (nome), expires (datetime), used}. Os três primeiros servem para provar o app à mão: o primeiro redefine a
+# senha de `ana` (200); o segundo e o terceiro dão 410. `POST /users/{outro}/reset` do dono gera um novo, de 24 h.
+RESET_TOKENS = {
+    "seed-valido-ana": {"user": "ana", "expires": datetime(2099, 1, 1, tzinfo=timezone.utc), "used": False},
+    "seed-usado": {"user": "ana", "expires": datetime(2099, 1, 1, tzinfo=timezone.utc), "used": True},
+    "seed-expirado": {"user": "ana", "expires": datetime(2020, 1, 1, tzinfo=timezone.utc), "used": False},
+}
+
+
+def blocked_between(a, b):
+    """Há bloqueio entre os dois usuários, em qualquer sentido (vale para DM; canais não mudam)."""
+    return b in BLOCKS.get(a, {}) or a in BLOCKS.get(b, {})
+
+
+def role_count():
+    """Cargos do servidor: os do `FAKE_PERMISSIONS`, ou os distintos que os usuários semeados têm."""
+    if ACCESS["on"]:
+        return len(ROLES)
+    return len({r["id"] for u in USERS.values() for r in u.get("roles", [])})
+
+
+def typed_problem(handler, status, title, detail, kind):
+    """Um problem+json com `type` próprio: o app reconhece `dm-blocked` e `no-reset-password` pelo fim dele."""
+    handler.send(status, {"type": "https://papo.com/errors/" + kind, "title": title, "status": status, "detail": detail,
+                          "instance": handler.path})
+
+
+def dm_blocked(handler):
+    typed_problem(handler, 403, "Acesso negado", "existe um bloqueio entre os usuários", "dm-blocked")
+
+
+def password_problem(password):
+    """A política do servidor (`utils.ValidatePassword`): 8 caracteres, uma maiúscula e um que não seja letra nem número."""
+    if len(password) < 8 or not any(c.isupper() for c in password) or all(c.isalnum() for c in password):
+        return "senha fora da política: no mínimo 8 caracteres, 1 letra maiúscula e 1 caractere especial"
+    return None
+
+
+def revoke_connections(user_id):
+    """Revoga todas as sessões do usuário (a atual também, sem marcar violação) e fecha os WebSockets dele."""
+    with LOCK:
+        for token in [t for t, v in SESSIONS.items() if uid(v["user"]) == user_id]:
+            del SESSIONS[token]
+        for token in [t for t, v in REPLACED.items() if uid(v["session"]["user"]) == user_id]:
+            del REPLACED[token]
+        sockets = [entry for entry in SOCKETS if entry[0] == user_id]
+    for _, wfile, lock in sockets:
+        try:
+            with lock:
+                wfile.write(b"\x88\x00")   # quadro de fechamento
+                wfile.flush()
+            # O servidor de verdade fecha a conexão; sem isto a linha do handler ficaria esperando o cliente.
+            getattr(wfile, "_sock", None) and wfile._sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
+def serve_blocks_and_password(handler, method, path, me, data):
+    """`GET /users/blocks`, `POST`/`DELETE /users/{id}/block`, `POST /users/{id}/reset` e `PUT /users/{id}/password`.
+    Devolve False se `path` não é uma destas rotas."""
+    if path == "/users/blocks" and method == "GET":
+        handler.send(200, {"users": [summary(name_of(i)) for i in BLOCKS.get(me, {}) if name_of(i)]})
+        return True
+    found = re.fullmatch(r"/users/([^/]+)/(block|reset|password)", path)
+    if not found:
+        return False
+    target, action = found.group(1), found.group(2)
+    if (action, method) not in (("block", "POST"), ("block", "DELETE"), ("reset", "POST"), ("password", "PUT")):
+        return False
+    if name_of(target) is None:
+        handler.problem(404, "Recurso não encontrado", "usuário não encontrado")
+    elif action == "block":
+        if target == me:
+            handler.problem(400, "Parâmetro inválido", "não é permitido bloquear a si mesmo")
+        else:
+            if method == "POST":
+                BLOCKS.setdefault(me, {})[target] = None
+            else:
+                BLOCKS.get(me, {}).pop(target, None)
+            handler.send(204)
+    elif action == "reset":
+        reset_prepare(handler, target, me)
+    else:
+        password_change(handler, target, me, data)
+    return True
+
+
+def reset_prepare(handler, target, me):
+    """`POST /users/{id}/reset`: no próprio usuário marca a troca autenticada; em outro, só o dono gera o link (24 h) e o novo
+    invalida os anteriores dele."""
+    if target == me:
+        RESET_FLAG.add(me)
+        return handler.send(200, {"response": "Password reset prepared"})
+    if not ACCESS["on"] or ACCESS["owner"] != me:
+        return handler.forbidden("apenas o dono do servidor pode gerar o link de redefinição")
+    for info in RESET_TOKENS.values():
+        if info["user"] == name_of(target):
+            info["used"] = True
+    token = uuid.uuid4().hex + uuid.uuid4().hex
+    expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    RESET_TOKENS[token] = {"user": name_of(target), "expires": expires, "used": False}
+    handler.send(200, {"reset_url": RESET_LINK_BASE + token, "expires_at": expires.isoformat().replace("+00:00", "Z")})
+
+
+def password_change(handler, target, me, data):
+    """`PUT /users/{id}/password`: só a própria conta, só depois do `reset` (senão 409 `no-reset-password`, que a OpenAPI não
+    lista). Não confere a senha atual. Com 200 revoga todas as conexões do usuário, a atual inclusive."""
+    if target != me:
+        return handler.forbidden("só é possível trocar a própria senha")
+    password = data.get("password")
+    if not isinstance(password, str) or not password:
+        return handler.problem(400, "Parâmetro inválido", "password é obrigatório")
+    if me not in RESET_FLAG:
+        return typed_problem(handler, 409, "Conflito", "a troca de senha não foi preparada", "no-reset-password")
+    problem = password_problem(password)
+    if problem:
+        return handler.problem(400, "Parâmetro inválido", problem)
+    USERS[name_of(me)]["password"] = password
+    RESET_FLAG.discard(me)
+    revoke_connections(me)
+    handler.send(200, {"response": "Password updated successfully"})
+
+
+def consume_reset(handler, data):
+    """`POST /auth/password_reset` (público): 200 troca a senha, gasta o token e revoga as sessões; 400 sem token ou senha, ou
+    com senha fora da política (o token continua valendo); 410 para token desconhecido, expirado ou já usado."""
+    token, password = data.get("token"), data.get("password")
+    if not isinstance(token, str) or not token or not isinstance(password, str) or not password:
+        return handler.problem(400, "Parâmetro inválido", "token e password são obrigatórios")
+    info = RESET_TOKENS.get(token)
+    if info is None or info["used"] or info["expires"] < datetime.now(timezone.utc):
+        return handler.problem(410, "Recurso removido", "link inválido, expirado ou já utilizado")
+    problem = password_problem(password)
+    if problem:
+        return handler.problem(400, "Parâmetro inválido", problem)
+    info["used"] = True
+    USERS[info["user"]]["password"] = password
+    RESET_FLAG.discard(uid(info["user"]))
+    revoke_connections(uid(info["user"]))
+    handler.send(200, {"response": "Password updated successfully"})
 
 
 # Limites do `POST /messages` no servidor de verdade (`handlers/messages.go`, `services/attachments.go`, `middleware/bodylimit.go`);
