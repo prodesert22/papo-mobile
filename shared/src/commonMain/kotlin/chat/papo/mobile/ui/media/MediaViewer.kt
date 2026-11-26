@@ -99,6 +99,7 @@ import chat.papo.mobile.resources.viewer_share
 import chat.papo.mobile.resources.viewer_share_failed
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.PlatformImage
+import chat.papo.mobile.ui.components.VideoPlayerState
 import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.components.rememberedPainter
 import kotlinx.coroutines.CancellationException
@@ -247,8 +248,8 @@ internal fun MediaViewer(session: AccountSession, message: Message, viewing: Vie
                     item = item,
                     onScreen = index == pager.currentPage,
                     viewing = viewing,
-                    // Só a página atual manda na barra: o player da página que saiu ainda avisa que os controles sumiram
-                    // (ao ser solto) depois da troca, e esconderia a barra de uma imagem, que não tem como trazê-la de volta.
+                    // Só a página atual manda na barra: o aviso de uma página que já saiu (um "sumiram" que estava a caminho)
+                    // chegaria depois da troca e esconderia a barra de uma imagem, que não tem como trazê-la de volta.
                     onControlsVisible = { visible -> if (index == pager.currentPage) controlsVisible = visible },
                     onDismiss = onDismiss,
                 )
@@ -300,8 +301,9 @@ private fun ViewerWindow(onDismiss: () -> Unit, content: @Composable BoxScope.()
     }
 }
 
+/** A barra de cima dos visualizadores: fechar, o título e, se houver, o contador e as ações, sobre um degradê escuro que lê sobre qualquer mídia. */
 @Composable
-private fun ViewerTopBar(
+internal fun ViewerTopBar(
     title: String,
     counter: String?,
     onDismiss: () -> Unit,
@@ -311,9 +313,9 @@ private fun ViewerTopBar(
     Row(
         modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.45f))
+            .background(edgeScrim(fromTop = true))
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-            .padding(4.dp),
+            .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onDismiss) {
@@ -535,12 +537,20 @@ private fun VideoPlayback(
     val download = rememberAttachmentDownload(session, attachment)
     var attempt by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<PlaybackFailure?>(null) }
+    val playerState = remember { VideoPlayerState() }
+    val controls = rememberVideoControlsVisibility(playerState)
     LaunchedEffect(failure) {
         if (failure == PlaybackFailure.Gone) {
             session.chat.markBlocked(messageId, attachment.id)
             onDismiss()
         }
     }
+    // A barra de cima do visualizador acompanha os controles do vídeo. Com a falha não há controles e ela fica à vista; quando
+    // o player sai (a página virou, ou o vídeo fechou) ela volta. Quem recebe o aviso decide se esta página ainda manda nela.
+    val barVisible = failure != null || controls.visible
+    val currentOnControlsVisible by rememberUpdatedState(onControlsVisible)
+    LaunchedEffect(barVisible) { currentOnControlsVisible(barVisible) }
+    DisposableEffect(Unit) { onDispose { currentOnControlsVisible(true) } }
     // Enquanto o vídeo está aberto as capas dos cartões esperam: o player e elas disputariam o limite de pedidos.
     DisposableEffect(session) {
         session.videoPosters.playerOpened()
@@ -550,19 +560,20 @@ private fun VideoPlayback(
     if (failed == null) {
         // O ponto de partida é fixado por tentativa: mudá-lo durante a reprodução não pode reiniciar o player.
         val startAt = remember(attempt) { viewing.positionMs }
-        key(attempt) {
-            platform.VideoPlayer(
-                client = session.client,
-                media = item.media,
-                startAtMs = startAt,
-                modifier = Modifier.fillMaxSize(),
-                onPosition = { viewing.positionMs = it },
-                onFailure = {
-                    failure = it
-                    onControlsVisible(true)
-                },
-                onControlsVisible = onControlsVisible,
-            )
+        // Uma caixa só, para os controles ficarem por cima do player: a página de um `Pager` não empilha os filhos sozinha.
+        Box(Modifier.fillMaxSize()) {
+            key(attempt) {
+                platform.VideoPlayer(
+                    client = session.client,
+                    media = item.media,
+                    startAtMs = startAt,
+                    modifier = Modifier.fillMaxSize(),
+                    state = playerState,
+                    onPosition = { viewing.positionMs = it },
+                    onFailure = { failure = it },
+                )
+            }
+            VideoControls(playerState, controls, Modifier.fillMaxSize())
         }
     } else {
         FailurePage(

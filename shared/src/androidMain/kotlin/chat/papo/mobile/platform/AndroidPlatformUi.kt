@@ -41,6 +41,7 @@ import org.webrtc.VideoTrack
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.ui.components.PlatformImage
 import chat.papo.mobile.ui.components.PlatformUi
+import chat.papo.mobile.ui.components.VideoPlayerState
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.jvm.javaio.toByteReadChannel
 import kotlinx.coroutines.CancellationException
@@ -126,11 +127,10 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
         media: PlayableMedia,
         startAtMs: Long,
         modifier: Modifier,
+        state: VideoPlayerState,
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
-        onControlsVisible: (Boolean) -> Unit,
-        onFullscreen: (() -> Unit)?,
-    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure, onControlsVisible, onFullscreen)
+    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, state, onPosition, onFailure)
 
     @Composable
     override fun HideSystemBars() = HideSystemBarsInDialog()
