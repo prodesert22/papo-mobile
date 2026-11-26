@@ -419,4 +419,6 @@
     <string name="msg_links">Links</string>
     <string name="msg_link_copy">Copiar link</string>
     <string name="msg_link_open">Abrir link</string>
+    <!-- Painel da conversa sobre a lista de canais (0.6.1): a faixa da conversa estacionada -->
+    <string name="conversation_panel_resume">Voltar à conversa</string>
 </resources>

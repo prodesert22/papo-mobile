@@ -128,6 +128,14 @@ fun groupChannels(channels: List<Channel>): List<ChannelGroup> {
     return groups
 }
 
+/**
+ * O canal de texto mais ao topo da lista de canais: o primeiro que [groupChannels] mostra, com os canais soltos antes
+ * das categorias. Quem chama passa os canais que a lista mostra ([visibleChannels]), então o que a conta não pode ler
+ * não conta; canal de voz, categoria e conversa direta também não.
+ */
+fun topTextChannel(channels: List<Channel>): Channel? =
+    groupChannels(channels).firstNotNullOfOrNull { group -> group.channels.firstOrNull { it.type == ChannelType.Text } }
+
 private val mentionPattern = Regex("""@mention\(<@([0-9a-fA-F-]{36})>\)""")
 
 /** Troca `@mention(<@id>)` pelo nome de exibição. */

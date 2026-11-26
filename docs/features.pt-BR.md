@@ -48,6 +48,20 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Toque numa resposta para ir à mensagem original, deslize uma mensagem para
   respondê-la e toque duas vezes para reagir com 👍. Copie uma mensagem ou
   selecione parte do texto.
+- A conversa é um painel por cima da lista de canais, como no Discord. Deslize-a
+  para a direita para ver os canais, e a conversa se esconde por completo;
+  deslize a lista de canais para a esquerda para voltar a ela. O painel
+  acompanha o dedo e, ao soltar, assenta aberto ou fechado; o botão e o gesto de
+  voltar também o fecham. Cada conta guarda a sua última conversa, e depois que o
+  app trava nenhuma conversa fica esperando fora da tela. Ao abrir o app,
+  destravá-lo ou voltar a ele com a lista de canais à vista, uma conversa da
+  conta selecionada aparece no painel: a que estava aberta nela, ou então o
+  primeiro canal de texto da lista, assim que os canais chegam do servidor.
+  Quem volta numa conversa ou noutra tela fica nela; sem canal de texto que você
+  possa ler, sem conexão ou com a sessão encerrada, a lista de canais fica. As mensagens que chegam numa
+  conversa esperando fora da tela continuam não lidas.
+  Deslizar uma mensagem para a esquerda continua respondendo, e as áreas que
+  rolam para o lado, como as prévias de anexos, ficam com o deslize primeiro.
 - Segure uma reação, ou escolha "Ver reações" nas ações de uma mensagem, para ver
   quem reagiu, com uma lista para cada emoji. A lista é lida quando abre; abra de
   novo para atualizá-la. Para vê-la basta poder ler o canal.

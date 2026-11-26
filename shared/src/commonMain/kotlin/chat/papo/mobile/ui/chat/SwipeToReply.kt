@@ -31,14 +31,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollDispatcher
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
@@ -61,6 +67,10 @@ private val IconGap = 16.dp
  * Quem começa perto da borda da tela não responde: ali o sistema usa o deslize para voltar
  * (a área vem de [WindowInsets.Companion.systemGestures], e é vazia com a navegação por botões).
  *
+ * Um arraste que começa no sentido contrário ao de responder não é da linha: o movimento e a soltura sobem, como
+ * numa rolagem que já chegou ao fim, para quem está acima (o painel da conversa, que o leva para a lista de canais).
+ * O sentido se decide no primeiro movimento e vale até soltar.
+ *
  * Com [enabled] falso (sem permissão para enviar) o conteúdo não se mexe: a estrutura é a mesma e só o gesto
  * desliga, para o estado de dentro de [content] (um anexo sensível já revelado, por exemplo) não se perder.
  */
@@ -78,12 +88,26 @@ fun SwipeToReply(onReply: () -> Unit, modifier: Modifier = Modifier, enabled: Bo
     // O arrasto começou fora das bordas do sistema? Senão ele é ignorado, e quem o usa é o gesto de voltar.
     var tracking by remember { mutableStateOf(false) }
     var widthPx by remember { mutableIntStateOf(0) }
+    // O sentido do arraste ainda não se decidiu (`undecided`), ou ele não é de responder e sobe para quem está acima (`passing`).
+    var undecided by remember { mutableStateOf(true) }
+    var passing by remember { mutableStateOf(false) }
+    val scrollDispatcher = remember { NestedScrollDispatcher() }
+    val noConnection = remember { object : NestedScrollConnection {} }
     val reply by rememberUpdatedState(onReply)
     // +1 anda para a direita (idiomas da direita para a esquerda), -1 para a esquerda.
     val toward = if (direction == LayoutDirection.Rtl) 1f else -1f
 
     val dragState = rememberDraggableState { delta ->
         if (!tracking) return@rememberDraggableState
+        // Um movimento nulo (a folga de toque gasta por inteiro) ainda não diz para onde o dedo vai.
+        if (undecided && delta != 0f) {
+            undecided = false
+            passing = delta * toward < 0f
+        }
+        if (passing) {
+            scrollDispatcher.dispatchPostScroll(Offset.Zero, Offset(delta, 0f), NestedScrollSource.UserInput)
+            return@rememberDraggableState
+        }
         pull = (pull + delta * toward).coerceIn(0f, maxPx)
         val reached = pull >= thresholdPx
         if (reached && !armed) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -101,19 +125,26 @@ fun SwipeToReply(onReply: () -> Unit, modifier: Modifier = Modifier, enabled: Bo
     Box(
         modifier
             .onSizeChanged { widthPx = it.width }
+            .nestedScroll(noConnection, scrollDispatcher)
             .draggable(
                 state = dragState,
                 orientation = Orientation.Horizontal,
                 enabled = enabled,
                 onDragStarted = { start ->
+                    undecided = true
+                    passing = false
                     val left = gestureInsets.getLeft(density, direction)
                     val right = gestureInsets.getRight(density, direction)
                     tracking = start.x >= left && start.x <= widthPx - right
                 },
-                onDragStopped = {
+                onDragStopped = { velocity ->
+                    val passed = tracking && passing
                     val replied = tracking && armed
                     tracking = false
                     armed = false
+                    undecided = true
+                    passing = false
+                    if (passed) scrollDispatcher.dispatchPostFling(Velocity.Zero, Velocity(velocity, 0f))
                     if (replied) reply()
                     animate(pull, 0f, animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMedium)) { value, _ -> pull = value }
                 },

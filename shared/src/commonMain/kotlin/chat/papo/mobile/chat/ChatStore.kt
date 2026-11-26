@@ -127,6 +127,24 @@ class ChatStore(
     private val _syncError = MutableStateFlow<Throwable?>(null)
     val syncError: StateFlow<Throwable?> = _syncError.asStateFlow()
 
+    private val _synced = MutableStateFlow(false)
+
+    /**
+     * Os canais, as permissões e os usuários já chegaram do servidor ao menos uma vez desde que a sessão abriu. Antes
+     * disso a lista é a do banco, de uma sessão anterior, e o que a conta pode ler ainda é desconhecido.
+     */
+    val synced: StateFlow<Boolean> = _synced.asStateFlow()
+
+    private val _channelsSynced = MutableStateFlow(false)
+
+    /**
+     * Os canais (e as conversas diretas) já chegaram do servidor e foram gravados ao menos uma vez desde que a sessão abriu.
+     * Vale antes de [synced]: não espera a leitura de todos os usuários, que num servidor grande leva várias páginas e pode
+     * falhar (um 429) sem desfazer isto. A lista de canais tem o que o servidor mandou; os cargos da própria conta podem
+     * ainda faltar, e um canal sem leitura então mostra o aviso de acesso negado ao abrir.
+     */
+    val channelsSynced: StateFlow<Boolean> = _channelsSynced.asStateFlow()
+
     val connection: StateFlow<WsState> get() = ws.state
 
     private val hasOlder = HashMap<String, Boolean>()
@@ -163,6 +181,11 @@ class ChatStore(
         viewing = channelId
     }
 
+    /** [channelId] deixou de estar na tela. Só vale se ele ainda é o que está: outro, já marcado depois, fica. */
+    fun clearViewing(channelId: String) {
+        if (viewing == channelId) viewing = null
+    }
+
     suspend fun runSync() {
         try {
             sync()
@@ -190,7 +213,9 @@ class ChatStore(
                     if (dmList.isEmpty()) q.deleteAllDms() else q.deleteDmsNotIn(dmList.map { it.id })
                 }
             }
+            _channelsSynced.value = true
             syncUsers()
+            _synced.value = true
         } finally {
             _syncing.value = false
         }

@@ -175,6 +175,66 @@ class ChatStorePermissionsTest {
     }
 
     @Test
+    fun sincronizadaSoDepoisDeUmaSincronizacaoInteira() = runTest {
+        val account = account(engine)
+        assertFalse(account.chat.synced.value)
+
+        account.chat.sync()
+
+        assertTrue(account.chat.synced.value)
+    }
+
+    @Test
+    fun sincronizacaoQueFalhaNaLeituraDosUsuariosNaoMarcaComoSincronizada() = runTest {
+        usersHandler = { problem(HttpStatusCode.InternalServerError) }
+        val account = account(engine)
+
+        account.chat.runSync()
+
+        assertNotNull(account.chat.syncError.value)
+        assertFalse(account.chat.synced.value)
+    }
+
+    @Test
+    fun canaisGravadosValemMesmoQuandoALeituraDosUsuariosFalha() = runTest {
+        // A abertura no canal do topo espera só os canais: um 429 ou 500 nas páginas de usuários não pode impedi-la.
+        usersHandler = { problem(HttpStatusCode.TooManyRequests) }
+        val account = account(engine)
+        assertFalse(account.chat.channelsSynced.value)
+
+        account.chat.runSync()
+
+        assertTrue(account.chat.channelsSynced.value)
+        assertFalse(account.chat.synced.value)
+    }
+
+    @Test
+    fun sincronizacaoCanceladaNoMeioNaoMarcaComoSincronizada() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        serverGate = gate
+        val account = account(engine)
+        val job = launch { account.chat.runSync() }
+
+        serverStarted.await()
+        job.cancel()
+        job.join()
+
+        assertFalse(account.chat.synced.value)
+    }
+
+    @Test
+    fun umaFalhaDepoisDeSincronizarNaoDesfazOSincronizada() = runTest {
+        val account = account(engine)
+        account.chat.runSync()
+
+        usersHandler = { problem(HttpStatusCode.InternalServerError) }
+        account.chat.runSync()
+
+        assertNotNull(account.chat.syncError.value)
+        assertTrue(account.chat.synced.value)
+    }
+
+    @Test
     fun roleAddMeuDecideAntesDeLerOsUsuarios() = runTest {
         val account = account(engine)
         account.chat.sync()
