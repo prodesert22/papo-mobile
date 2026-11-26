@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -108,7 +109,13 @@ internal class PlayingVideo(val key: String, var positionMs: Long = 0L) {
  * (o relay do servidor), [attachment] é null e [pageUrl] é a página do embed, que o **Abrir no navegador** abre
  * (null se o embed não tem uma URL `http` ou `https`).
  */
-internal data class OpenVideo(val media: PlayableMedia, val attachment: AttachmentDto?, val pageUrl: String? = null) {
+internal data class OpenVideo(
+    val media: PlayableMedia,
+    val attachment: AttachmentDto?,
+    val pageUrl: String? = null,
+    /** A mensagem do [attachment], para gravá-lo como bloqueado se o servidor responder 410; null de um embed. */
+    val messageId: String? = null,
+) {
     /** Só há dois jeitos de chegar aqui: anexo (tem arquivo para baixar) ou embed (só o relay, sem arquivo). */
     val isEmbed: Boolean get() = attachment == null
 }
@@ -122,7 +129,7 @@ internal fun findOpenVideo(server: ServerUrl, messages: List<Message>, key: Stri
     for (message in messages) {
         for (attachment in message.attachments) {
             val media = playableAttachment(server, attachment) ?: continue
-            if (media.key == key) return OpenVideo(media, attachment)
+            if (media.key == key) return OpenVideo(media, attachment, messageId = message.id)
         }
         for (embed in message.embeds) {
             val media = relayVideo(server, embed) ?: continue
@@ -196,6 +203,14 @@ internal fun VideoViewer(
     // A barra de título acompanha os controles do player: some com eles e deixa o vídeo limpo.
     var controlsVisible by remember { mutableStateOf(true) }
     val resume = remember { Resume(startAtMs) }
+    // 410: o anexo foi bloqueado pela moderação. Gravá-lo troca o cartão pelo aviso e, sem o vídeo tocável, a tela se fecha.
+    LaunchedEffect(failure) {
+        val messageId = video.messageId
+        val attachment = video.attachment
+        if (failure == PlaybackFailure.Gone && messageId != null && attachment != null) {
+            session.chat.markBlocked(messageId, attachment.id)
+        }
+    }
     // Enquanto o vídeo está aberto as capas dos cartões esperam: o player e elas disputariam o limite de pedidos.
     DisposableEffect(session) {
         session.videoPosters.playerOpened()

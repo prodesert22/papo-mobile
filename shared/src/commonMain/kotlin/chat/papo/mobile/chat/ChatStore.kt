@@ -636,6 +636,23 @@ class ChatStore(
         _typing.value = typingMarks.keys.groupBy({ it.first }, { it.second }).mapValues { it.value.toSet() }
     }
 
+    /**
+     * O servidor respondeu 410 a um pedido do anexo: a moderação o bloqueou (o `message_delete` costuma vir junto, mas
+     * não há ordem entre os dois). Grava `blocked` no anexo guardado, sem pedir nada ao servidor, para a tela trocá-lo
+     * pelo aviso. Mensagem ou anexo desconhecido, ou já bloqueado, não muda nada.
+     */
+    suspend fun markBlocked(messageId: String, attachmentId: String) =
+        withContext(io) { setAttachmentStatus(messageId, attachmentId, BLOCKED) }
+
+    /** Troca o `moderation_status` do anexo da mensagem guardada; só grava se algo mudou. */
+    private fun setAttachmentStatus(messageId: String, attachmentId: String, status: String) = q.transaction {
+        val row = q.selectMessage(messageId).executeAsOneOrNull() ?: return@transaction
+        val attachments = decodeList(AttachmentDto.serializer(), row.attachments)
+        if (attachments.none { it.id == attachmentId && it.moderationStatus != status }) return@transaction
+        val updated = attachments.map { if (it.id == attachmentId) it.copy(moderationStatus = status) else it }
+        q.setMessageAttachments(encodeList(AttachmentDto.serializer(), updated), messageId)
+    }
+
     // Eventos do WebSocket
 
     internal suspend fun handle(event: WsEvent) {
@@ -693,12 +710,7 @@ class ChatStore(
             is WsEvent.EmbedsUpdated -> withContext(io) {
                 q.setMessageEmbeds(encodeList(EmbedDto.serializer(), event.embeds), event.messageId)
             }
-            is WsEvent.AttachmentModeration -> withContext(io) {
-                val row = q.selectMessage(event.messageId).executeAsOneOrNull() ?: return@withContext
-                val updated = decodeList(AttachmentDto.serializer(), row.attachments)
-                    .map { if (it.id == event.attachmentId) it.copy(moderationStatus = event.status) else it }
-                q.setMessageAttachments(encodeList(AttachmentDto.serializer(), updated), event.messageId)
-            }
+            is WsEvent.AttachmentModeration -> withContext(io) { setAttachmentStatus(event.messageId, event.attachmentId, event.status) }
             is WsEvent.MessagePinned -> {
                 val channelId = withContext(io) { q.selectMessage(event.messageId).executeAsOneOrNull()?.channel_id }
                 if (channelId != null) {
@@ -925,6 +937,7 @@ class ChatStore(
         const val ORIGINAL_PAGE_SIZE = 100
         const val ORIGINAL_MAX_PAGES = 5
         const val DETACHED = "detached:"
+        const val BLOCKED = "blocked"
         const val MAX_USER_PAGES = 50
         // Mudar permissões de canal manda um channel_update por cargo; uma releitura basta para a rajada.
         val CHANNELS_REFRESH_DEBOUNCE = 1.seconds

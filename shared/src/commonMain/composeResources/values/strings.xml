@@ -325,6 +325,8 @@
     <string name="embed_show_more">Mostrar mais</string>
     <string name="embed_show_less">Mostrar menos</string>
     <string name="embed_open_link">Abrir o link</string>
+    <string name="attachment_gif_badge">GIF</string>
+    <string name="attachment_blocked">Removido pela moderação</string>
     <!-- 02 · trilha A · onda 2 (visualizador) -->
     <!-- 02 · trilha B · onda 2 (vídeo no cartão, YouTube) -->
     <!-- 02 · trilha A · onda 3 (áudio) -->

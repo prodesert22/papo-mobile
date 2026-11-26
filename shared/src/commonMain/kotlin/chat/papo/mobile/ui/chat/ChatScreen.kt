@@ -149,6 +149,7 @@ import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.ReactionSummaryDto
+import chat.papo.mobile.media.guardGone
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
@@ -205,7 +206,8 @@ import chat.papo.mobile.resources.switcher_title
 import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.formatBytes
-import chat.papo.mobile.ui.components.rememberMediaImage
+import chat.papo.mobile.ui.components.rememberMediaPainter
+import chat.papo.mobile.ui.components.rememberedPainter
 import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.media.PlayingVideo
 import chat.papo.mobile.ui.media.VideoViewer
@@ -281,7 +283,7 @@ fun ChatScreen(
     var selecting by remember { mutableStateOf<Message?>(null) }
     var columnPx by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
-    var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
+    var viewing by remember { mutableStateOf<ViewingImage?>(null) }
     var reactorsOf by remember { mutableStateOf<ReactorsRequest?>(null) }
     // Um vídeo por vez. Gira o aparelho e a atividade se recria: a chave e o ponto sobrevivem, e a mídia sai das mensagens de novo.
     var playing by rememberSaveable(stateSaver = PlayingVideo.Saver) { mutableStateOf<PlayingVideo?>(null) }
@@ -514,7 +516,7 @@ fun ChatScreen(
                                 // A folha só abre se tiver o que oferecer (copiar não existe numa mensagem só de anexo).
                                 onLongPress = { if (messageActionOffer(access, message, session.userId).any) actionsFor = message },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
-                                onOpenImage = { viewing = it },
+                                onOpenImage = { viewing = ViewingImage(message.id, it) },
                                 onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
                                 onPlay = { playing = PlayingVideo(it.key) },
                             )
@@ -682,7 +684,7 @@ fun ChatScreen(
             ReactorsSheet(session, message, users, request.first) { reactorsOf = null }
         }
     }
-    viewing?.let { ImageViewer(session, it) { viewing = null } }
+    viewing?.let { ImageViewer(session, it.messageId, it.attachment) { viewing = null } }
     playing?.let { current ->
         val video = remember(current, messages) { findOpenVideo(session.client.server, messages, current.key) }
         // Sem o vídeo nas mensagens (apagado, ou ainda carregando depois de girar) o visualizador não aparece.
@@ -1492,20 +1494,31 @@ private fun PinnedSheet(session: AccountSession, pinned: List<Message>, users: M
     }
 }
 
-/** Imagem original em tela cheia, com zoom por pinça. */
+/** A imagem aberta em tela cheia e a mensagem dela, para gravar o bloqueio se o servidor responder 410. */
+private data class ViewingImage(val messageId: String, val attachment: AttachmentDto)
+
+/** Lado maior da imagem original decodificada: cobre o zoom de 5x de uma tela cheia sem estourar a memória com uma foto enorme. */
+private const val VIEWER_IMAGE_PX = 4096
+
+/**
+ * Imagem original em tela cheia, com zoom por pinça. Um GIF anima em laço. Se o servidor responde 410 ao original, o anexo
+ * foi bloqueado pela moderação: ele é gravado como tal ([guardGone]) e a tela se fecha.
+ */
 @Composable
-private fun ImageViewer(session: AccountSession, attachment: AttachmentDto, onDismiss: () -> Unit) {
-    val image by rememberMediaImage(session, "att/${attachment.id}") { session.api.attachment(attachment.id) }
+private fun ImageViewer(session: AccountSession, messageId: String, attachment: AttachmentDto, onDismiss: () -> Unit) {
+    val image by rememberMediaPainter(session, "att/${attachment.id}", VIEWER_IMAGE_PX, animate = true) {
+        session.guardGone(messageId, attachment.id, onGone = onDismiss) { session.api.attachment(attachment.id) }
+    }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            val bitmap = image
-            if (bitmap == null) {
+            val loaded = image
+            if (loaded == null) {
                 CircularProgressIndicator(color = Color.White)
             } else {
                 Image(
-                    bitmap,
+                    loaded.rememberedPainter(),
                     contentDescription = attachment.fileName,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier

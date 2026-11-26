@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,55 +28,107 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.data.api.AttachmentDto
+import chat.papo.mobile.media.ModerationView
 import chat.papo.mobile.media.PlayableMedia
+import chat.papo.mobile.media.aspectOrNull
+import chat.papo.mobile.media.guardGone
+import chat.papo.mobile.media.moderationView
 import chat.papo.mobile.media.playableAttachment
+import chat.papo.mobile.media.sniffImage
 import chat.papo.mobile.resources.Res
+import chat.papo.mobile.resources.attachment_blocked
+import chat.papo.mobile.resources.attachment_gif_badge
 import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.ui.components.formatBytes
-import chat.papo.mobile.ui.components.rememberMediaImage
+import chat.papo.mobile.ui.components.rememberMediaPainter
+import chat.papo.mobile.ui.components.rememberedPainter
 import chat.papo.mobile.ui.media.rememberAttachmentDownload
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * Um anexo da mensagem: imagem com miniatura, vídeo que o player abre (cartão com ▶) ou, para o resto, o cartão de
- * arquivo com **Baixar**. Os que o player recusa (bloqueado) ficam no cartão de arquivo.
+ * Um anexo da mensagem [messageId]: imagem com miniatura (um GIF anima), vídeo que o player abre (cartão com ▶) ou, para
+ * o resto, o cartão de arquivo com **Baixar**. Um anexo que a moderação bloqueou ([ModerationView.Blocked]) vira o aviso e
+ * nada é pedido ao servidor.
  */
 @Composable
 internal fun MessageAttachment(
     session: AccountSession,
+    messageId: String,
     attachment: AttachmentDto,
     onOpenImage: (AttachmentDto) -> Unit,
     onPlay: (PlayableMedia) -> Unit,
 ) {
+    if (moderationView(attachment.moderationStatus) == ModerationView.Blocked) {
+        BlockedAttachment()
+        return
+    }
     val video = playableAttachment(session.client.server, attachment)
     when {
-        attachment.isImage && attachment.thumbnailId != null -> ImageAttachment(session, attachment, onOpen = { onOpenImage(attachment) })
-        video != null -> VideoAttachment(session, attachment, video, onPlay)
+        attachment.isImage && attachment.thumbnailId != null -> ImageAttachment(session, messageId, attachment, onOpen = { onOpenImage(attachment) })
+        video != null -> VideoAttachment(session, messageId, attachment, video, onPlay)
         else -> FileAttachment(session, attachment)
     }
 }
 
+/** O aviso no lugar de um anexo que a moderação removeu. */
 @Composable
-internal fun ImageAttachment(session: AccountSession, attachment: AttachmentDto, onOpen: () -> Unit) {
-    var revealed by remember(attachment.id) { mutableStateOf(!attachment.isSensitive) }
-    val ratio = run {
-        val w = attachment.thumbnailWidth ?: 0
-        val h = attachment.thumbnailHeight ?: 0
-        if (w > 0 && h > 0) (w.toFloat() / h).coerceIn(0.5f, 2.5f) else 4f / 3f
+internal fun BlockedAttachment() {
+    Row(
+        Modifier
+            .widthIn(max = 320.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Block, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            stringResource(Res.string.attachment_blocked),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
-    val image by rememberMediaImage(session, if (revealed) "att-thumb/${attachment.id}" else null) {
-        session.api.attachmentThumbnail(attachment.id)
+}
+
+/** Lado maior da miniatura decodificada: a caixa da lista tem até 280 dp, e a miniatura do servidor, até 640 px. */
+private const val THUMBNAIL_PX = 640
+
+/**
+ * A miniatura de uma imagem anexada. Um GIF anima em laço (a miniatura que o servidor gera de um GIF também é um GIF) e
+ * leva o selo **GIF**, mesmo com as animações do sistema removidas, quando ele fica no primeiro quadro. Anexo sensível
+ * fica escondido, sem pedir nada, até o toque; virar sensível depois de aberto esconde de novo. Se o servidor responde 410
+ * à miniatura, o anexo foi bloqueado ([guardGone]) e o aviso o substitui.
+ */
+@Composable
+internal fun ImageAttachment(session: AccountSession, messageId: String, attachment: AttachmentDto, onOpen: () -> Unit) {
+    val sensitive = moderationView(attachment.moderationStatus) == ModerationView.Sensitive
+    var revealed by remember(attachment.id, sensitive) { mutableStateOf(!sensitive) }
+    val ratio = aspectOrNull(attachment.thumbnailWidth, attachment.thumbnailHeight) ?: (4f / 3f)
+    val name = "att-thumb/${attachment.id}"
+    val image = if (revealed) {
+        rememberMediaPainter(session, name, THUMBNAIL_PX, animate = true) {
+            session.guardGone(messageId, attachment.id) { session.api.attachmentThumbnail(attachment.id) }
+        }.value
+    } else {
+        null
+    }
+    // O formato vem dos bytes (não do MIME do servidor) e só se lê depois que a imagem chegou, já no cache.
+    val isGif by produceState(false, image) {
+        value = image != null && session.media.peek(name)?.let { sniffImage(it).mayAnimate } == true
     }
     // A proporção vem dos metadados: a caixa já nasce do tamanho certo e a lista não pula ao carregar.
     Box(
@@ -88,7 +141,6 @@ internal fun ImageAttachment(session: AccountSession, attachment: AttachmentDto,
             .clickable { if (revealed) onOpen() else revealed = true },
         contentAlignment = Alignment.Center,
     ) {
-        val bitmap = image
         when {
             !revealed -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {
                 Icon(Icons.Filled.VisibilityOff, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -99,9 +151,21 @@ internal fun ImageAttachment(session: AccountSession, attachment: AttachmentDto,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            bitmap != null -> Image(bitmap, attachment.fileName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            image != null -> Image(image.rememberedPainter(), attachment.fileName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
+        if (isGif) GifBadge(Modifier.align(Alignment.BottomStart).padding(6.dp))
     }
+}
+
+/** O selo **GIF** no canto da miniatura: um disco escuro com texto branco, legível sobre qualquer imagem nos dois temas. */
+@Composable
+private fun GifBadge(modifier: Modifier = Modifier) {
+    Text(
+        stringResource(Res.string.attachment_gif_badge),
+        style = MaterialTheme.typography.labelSmall,
+        color = Color.White,
+        modifier = modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 @Composable

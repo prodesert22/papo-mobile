@@ -399,7 +399,7 @@ fun MessageItem(
                 }
                 message.attachments.forEach { attachment ->
                     Spacer(Modifier.height(6.dp))
-                    MessageAttachment(session, attachment, onOpenImage, onPlay)
+                    MessageAttachment(session, message.id, attachment, onOpenImage, onPlay)
                 }
                 message.embeds.forEach { embed ->
                     Spacer(Modifier.height(6.dp))

@@ -28,7 +28,7 @@ data class PlayableMedia(
  */
 fun playableAttachment(server: ServerUrl, attachment: AttachmentDto): PlayableMedia? {
     if (!attachment.isVideo) return null
-    if (attachment.moderationStatus == MODERATION_BLOCKED) return null
+    if (moderationView(attachment.moderationStatus) == ModerationView.Blocked) return null
     if (!PATH_TOKEN.matches(attachment.id)) return null
     return PlayableMedia(
         key = "attachment:${attachment.id}",
@@ -168,8 +168,6 @@ private fun failureForStatus(status: Int): PlaybackFailure? = STATUS_FAILURES[st
 
 private val RETRYABLE = setOf(PlaybackFailure.Network, PlaybackFailure.Unavailable)
 private val RETRY_DELAYS_MS = listOf(1_000L, 3_000L)
-
-private const val MODERATION_BLOCKED = "blocked"
 
 /** O servidor só serve estes tipos pelo relay; outro vira 404. */
 private val RELAY_MIME_TYPES = setOf("video/mp4", "video/webm", "video/ogg")

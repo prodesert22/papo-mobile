@@ -47,8 +47,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.data.api.AttachmentDto
+import chat.papo.mobile.media.ModerationView
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PosterSource
+import chat.papo.mobile.media.guardGone
+import chat.papo.mobile.media.moderationView
 import chat.papo.mobile.media.posterKey
 import chat.papo.mobile.media.posterSource
 import chat.papo.mobile.media.videoCardAspect
@@ -79,8 +82,16 @@ private val MaxHeight = 320.dp
  * até o primeiro toque (o segundo toca), como a imagem.
  */
 @Composable
-internal fun VideoAttachment(session: AccountSession, attachment: AttachmentDto, media: PlayableMedia, onPlay: (PlayableMedia) -> Unit) {
-    var revealed by remember(attachment.id) { mutableStateOf(!attachment.isSensitive) }
+internal fun VideoAttachment(
+    session: AccountSession,
+    messageId: String,
+    attachment: AttachmentDto,
+    media: PlayableMedia,
+    onPlay: (PlayableMedia) -> Unit,
+) {
+    // A chave inclui o estado: virar sensível depois de aberto esconde de novo.
+    val sensitive = moderationView(attachment.moderationStatus) == ModerationView.Sensitive
+    var revealed by remember(attachment.id, sensitive) { mutableStateOf(!sensitive) }
     val download = rememberAttachmentDownload(session, attachment)
     val aspect = videoCardAspect(media.width, media.height, attachment.thumbnailWidth, attachment.thumbnailHeight)
     val source = posterSource(attachment, revealed)
@@ -94,7 +105,7 @@ internal fun VideoAttachment(session: AccountSession, attachment: AttachmentDto,
         },
     ) {
         when (source) {
-            PosterSource.Server -> session.api.attachmentThumbnail(attachment.id)
+            PosterSource.Server -> session.guardGone(messageId, attachment.id) { session.api.attachmentThumbnail(attachment.id) }
             PosterSource.Extract -> session.videoPosters.poster(attachment.id, media.url, attachment.sizeBytes)
             PosterSource.None -> null
         }
