@@ -20,17 +20,19 @@ interface PlatformUi {
     fun VideoView(track: VideoTrackHandle, modifier: Modifier, fill: Boolean)
 
     /**
-     * Toca [media] com os controles do sistema, a partir de [startAtMs]. Os pedidos saem pelo
-     * `http` de [client], que deve ser o da conta dona da mensagem: dele vêm o cookie `Auth` e a
-     * renovação única da sessão. Nada vai para o disco. O player nasce com esta composição e é
-     * liberado quando ela sai (travar o app também a tira). Fora da tela ele pausa e não retoma
-     * sozinho.
+     * Toca [media] a partir de [startAtMs] e desenha só a superfície do vídeo, inteiro dentro de [modifier] e sobre preto: os
+     * controles são da tela comum, que lê e comanda o player pelo [state]. Os pedidos saem pelo `http` de [client], que deve
+     * ser o da conta dona da mensagem: dele vêm o cookie `Auth` e a renovação única da sessão. Nada vai para o disco. O player
+     * nasce com esta composição e é liberado quando ela sai (travar o app também a tira). Fora da tela ele pausa e não
+     * retoma sozinho.
      *
-     * [onPosition] recebe a posição atual em milissegundos, para a tela guardá-la e voltar ao
-     * mesmo ponto depois de girar o aparelho. [onFailure] recebe o motivo uma vez, depois de a
-     * política de repetição (`retryDelay`) se esgotar; o texto e as ações do erro são da tela comum.
-     * [onControlsVisible] diz quando os controles do player aparecem e somem, para a tela esconder
-     * junto o que ela desenha por cima do vídeo.
+     * Enquanto o player está na composição, [state] diz se ele toca, carrega ou terminou, o ponto, a duração e o trecho já
+     * baixado, e executa tocar, pausar e buscar; ao sair, o [state] volta ao de um player novo. Um [state] acompanha um player
+     * por vez. O player não toca no vídeo: o toque é de quem está por cima dele.
+     *
+     * [onPosition] recebe a posição atual em milissegundos, para a tela guardá-la e voltar ao mesmo ponto depois de girar o
+     * aparelho. [onFailure] recebe o motivo uma vez, depois de a política de repetição (`retryDelay`) se esgotar; o texto e as
+     * ações do erro são da tela comum. [startAtMs] só vale quando o player nasce.
      */
     @Composable
     fun VideoPlayer(
@@ -38,9 +40,9 @@ interface PlatformUi {
         media: PlayableMedia,
         startAtMs: Long,
         modifier: Modifier,
+        state: VideoPlayerState,
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
-        onControlsVisible: (Boolean) -> Unit = {},
     )
 
     /**
@@ -68,6 +70,54 @@ interface PlatformUi {
      * não altera [bytes] (o `ByteArray` do cache é compartilhado) e não deixa nada aberto se for cancelada.
      */
     suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage?
+
+    /**
+     * Devolve a ação que abre o seletor de fotos e vídeos do sistema, que dispensa a permissão de armazenamento.
+     * O seletor deixa escolher até [maxItems] itens, mas a tela confere o que volta: um sistema sem o seletor de
+     * fotos usa o de documentos, que ignora o limite, e o seletor pede ao menos dois itens mesmo com uma vaga só.
+     * Cada item escolhido chega descrito como um [OutgoingFile], com o nome, o tipo e o tamanho que o provedor
+     * informa e sem nada copiado; um item que o provedor já recusou chega com [OutgoingFile.unavailable].
+     */
+    @Composable
+    fun rememberMediaPicker(maxItems: Int, onPicked: (List<OutgoingFile>) -> Unit): () -> Unit
+
+    /**
+     * O player do YouTube embutido, que toca o vídeo [videoId] (um id já validado por `isYouTubeId`) assim que entra na
+     * composição. Só entra depois do toque do usuário no ▶, que é o consentimento: antes disso nada é pedido ao YouTube.
+     * Preenche [modifier] e mostra os controles do próprio YouTube; o dono é a composição, que o fecha (e apaga o que ele
+     * guardou) quando sai dela, e o app o fecha também ao travar.
+     *
+     * Com [fullscreenButton] o botão de tela cheia do YouTube leva o mesmo player para a tela cheia, sem recarregar (é o do
+     * cartão da mensagem); sem ele (a tela cheia do app) o botão não existe. Qualquer navegação que o player tente fora da
+     * página do vídeo não acontece nele: chama [onOpenExternally], que abre o vídeo no YouTube fora do app.
+     */
+    @Composable
+    fun YouTubePlayer(videoId: String, modifier: Modifier, fullscreenButton: Boolean, onOpenExternally: () -> Unit)
+
+    // 02 · trilha A · onda 2 (visualizador)
+
+    /**
+     * Abre a folha de compartilhamento do sistema com [bytes] como um arquivo chamado [name], do tipo [mimeType]. O
+     * conteúdo vai da memória para o aplicativo escolhido, sem arquivo em disco, e só para quem o sistema autorizar
+     * naquele compartilhamento: cada aplicativo lê uma vez, e o que não foi lido some em poucos minutos ou quando o app
+     * trava. Devolve false se não foi possível abrir a folha (nenhum aplicativo atende). Não altera [bytes], que pode ser
+     * o array do cache de mídia.
+     */
+    fun shareMedia(name: String, mimeType: String, bytes: ByteArray): Boolean
+
+    // 02 · trilha B · onda 3 (teclado)
+
+    /**
+     * O modificador que faz um campo de texto de `TextFieldState` receber, pelo teclado (GIF, figurinha, imagem) e ao colar,
+     * imagens e vídeos como anexos: cada um chega descrito como um [OutgoingFile], com o conteúdo já lido (até
+     * [RECEIVED_MEDIA_MAX_BYTES] cada), porque o acesso que o teclado dá ao conteúdo é temporário. Passa para [onMedia] só o
+     * que é imagem ou vídeo; o resto (texto colado) fica para o campo. Um item que não pôde ser lido, ou que passa do limite,
+     * chega com [OutgoingFile.unavailable]. Roda na thread principal, dentro da entrega do conteúdo.
+     */
+    fun receiveMedia(onMedia: (List<OutgoingFile>) -> Unit): Modifier
 }
+
+/** Tamanho máximo de cada imagem ou vídeo recebido pelo teclado ou colado: ele fica na memória até ser enviado ou tirado. */
+const val RECEIVED_MEDIA_MAX_BYTES = 20 * 1024 * 1024
 
 val LocalPlatformUi = staticCompositionLocalOf<PlatformUi> { error("PlatformUi não fornecido") }

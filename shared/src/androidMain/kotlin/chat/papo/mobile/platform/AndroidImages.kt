@@ -61,7 +61,7 @@ internal class AndroidImages(context: Context) {
     }
 }
 
-private class StillImage(bitmap: Bitmap) : PlatformImage {
+internal class StillImage(bitmap: Bitmap) : PlatformImage {
     override val painter: Painter = BitmapPainter(bitmap.asImageBitmap())
     override val width: Int = bitmap.width
     override val height: Int = bitmap.height

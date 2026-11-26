@@ -86,4 +86,27 @@ class EmojiCompletionTest {
         assertNull(EmojiCompletion.closeShortcode(":joy:", ":joy", 4, catalog, emptySet()))
         assertNull(EmojiCompletion.closeShortcode("", ":joy:", 5, catalog, emptySet())) // colou um atalho inteiro
     }
+
+    private fun typedColon(composing: Boolean = false, start: Int = 5, end: Int = 5, catalog: UnicodeEmojiCatalog? = this.catalog) =
+        EmojiCompletion.closeTypedShortcode(":joy", ":joy:", start, end, composing, catalog, emptySet())
+
+    @Test
+    fun teclaDigitadaComOCursorParadoSemComposicaoFechaOAtalho() {
+        assertEquals(EmojiEdit("😂", 2), typedColon())
+    }
+
+    @Test
+    fun noMeioDeUmaComposicaoDoTecladoNaoFechaOAtalho() {
+        assertNull(typedColon(composing = true))
+    }
+
+    @Test
+    fun comUmaSelecaoNaoFechaOAtalho() {
+        assertNull(typedColon(start = 4, end = 5))
+    }
+
+    @Test
+    fun semOCatalogoAindaNaoFechaOAtalho() {
+        assertNull(typedColon(catalog = null))
+    }
 }

@@ -30,14 +30,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.decodeToImageBitmap
 
-/** Imagem vinda do cache cifrado da conta; null enquanto carrega ou se não existir. */
+/**
+ * Imagem vinda do cache cifrado da conta; null enquanto carrega ou se não existir. Com [holdFailures] uma
+ * busca que falhou não é repetida por um tempo ([chat.papo.mobile.media.MediaCache.get]).
+ */
 @Composable
-fun rememberMediaImage(session: AccountSession, name: String?, fetch: suspend () -> ByteArray?): State<ImageBitmap?> =
+fun rememberMediaImage(
+    session: AccountSession,
+    name: String?,
+    holdFailures: Boolean = false,
+    fetch: suspend () -> ByteArray?,
+): State<ImageBitmap?> =
     produceState<ImageBitmap?>(null, session.accountId, name) {
         value = null
         if (name == null) return@produceState
         value = try {
-            val bytes = session.media.get(name, fetch)
+            val bytes = session.media.get(name, holdFailures, fetch)
             bytes?.let { withContext(Dispatchers.Default) { it.decodeToImageBitmap() } }
         } catch (e: CancellationException) {
             throw e
@@ -64,7 +72,7 @@ fun rememberMediaPainter(
     val image = produceState<PlatformImage?>(null, session.accountId, name, maxPx, animate) {
         value = null
         value = try {
-            session.media.get(name, fetch)?.let { platform.decodeImage(it, maxPx, animate) }
+            session.media.get(name, fetch = fetch)?.let { platform.decodeImage(it, maxPx, animate) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -82,7 +90,8 @@ fun rememberMediaPainter(
 
 @Composable
 fun UserAvatar(session: AccountSession, user: User?, modifier: Modifier = Modifier, size: Dp = 40.dp, fallbackName: String = "?") {
-    val image = rememberMediaImage(session, user?.let { "avatar/${it.id}/${it.avatarVersion}" }) {
+    // Avatares aparecem às dezenas (conversa, lista de membros): a falha de um não é repetida a cada exibição.
+    val image = rememberMediaImage(session, user?.let { "avatar/${it.id}/${it.avatarVersion}" }, holdFailures = true) {
         user?.let { session.api.avatar(it.id) }
     }
     val color = colorFor(user?.id ?: fallbackName)

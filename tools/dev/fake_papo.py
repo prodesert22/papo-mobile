@@ -60,12 +60,53 @@ serve). O relay segue `FAKE_VIDEO_KBPS` e `FAKE_VIDEO_401_ONCE`, que contam os p
 
     FAKE_RELAY_502=1          o relay responde 502 (falha na origem, ou as vagas globais do servidor cheias) a todo pedido
 
+Embeds, GIFs e moderação (sempre ligados): o canal `embeds` traz embeds customizados de webhook (cor, autor com ícone em
+`author_image_data`, campos `inline` e largos, rodapé, e um com links `javascript:`/`intent:`/`file:` que o app não deve abrir),
+embeds de GIF (`fetch_method: gif`, Tenor e GIPHY, com a `thumbnail` animada), imagens de embed 1200x630, 600x900 e 512x512 sem e
+com vídeo (e uma sem medidas) desenhadas com borda e cantos coloridos, para ver se algo é cortado, e anexos em cada estado de
+moderação: GIF animado, GIF `sensitive`, `pending`, `blocked` (a lista já diz) e um que a lista ainda diz `pending` mas o
+servidor bloqueou (o arquivo e a miniatura respondem 410). Os vídeos desses embeds tocam se houver `FAKE_VIDEO_DIR`.
+
+YouTube (sempre ligado, no canal `embeds`): um embed `oembed` cujo player é `video.url` = `https://www.youtube.com/embed/<id>`, sem
+`mime_type`, como o servidor o entrega, com a miniatura em `GET /embeds/{id}`; e um cujo endereço de player é quase o certo
+(`youtube.com.evil.example.com`), que o app não pode tocar. O id é inventado, então o player real responde "vídeo indisponível"
+(basta para ver o fluxo do app); `FAKE_YOUTUBE_ID=<11 caracteres>` põe um id de verdade, para ver um vídeo tocar. O relay
+(`GET /embeds/{id}/video`) responde 404 a eles, como o servidor.
+
+    FAKE_YOUTUBE_ID=<id>      o id do vídeo do YouTube semeado (11 caracteres de A-Z, a-z, 0-9, _ e -)
+
+    FAKE_MODERATION=1         acrescenta a mensagem "moderação ao vivo": a imagem vira `sensitive` (evento
+                              `attachment_moderation_update`) depois de 20 s e `blocked` (410, sem evento) depois de mais 20 s.
+                              Outro número é o intervalo em segundos
+
+Visualizador de mídia (sempre ligado): o canal `galeria` traz uma mensagem com quatro mídias (imagem larga, alta, quadrada e um
+GIF), uma com uma imagem só, uma de 4800x3200 (para o zoom), uma com dois anexos sensíveis entre normais, uma com um anexo
+bloqueado entre normais e, com `FAKE_VIDEO_DIR`, uma com imagem, vídeo, GIF e imagem juntos.
+
+Áudios anexados (trilha A, onda 3). O canal `audio` traz sempre um áudio que o aparelho não decodifica (`audio/ogg` com bytes que
+não são Ogg: o player diz "formato não suportado") e um que a lista diz limpo mas o servidor já bloqueou (o arquivo responde 410: o
+cartão vira o aviso da moderação). `GET /attachments/{id}` atende `Range` para áudio como para vídeo, e o log da linha de comando
+mostra o `Range` e o status de cada pedido, para conferir que buscar no áudio pede só o trecho novo.
+
+    FAKE_AUDIO_DIR=<pasta>    semeia no `audio` uma mensagem de `bia` para cada .ogg, .opus, .mp3, .m4a, .wav e .webm da pasta, com
+                              30 mensagens curtas depois da primeira (o cartão dela sai da tela e a barra de áudio aparece), e mais:
+                              uma gravação de voz do web (`audio_gravado.<ext>` com o tipo `video/webm`, como o servidor a fareja), um
+                              envio antigo (`antigo.<ext>` com o tipo genérico), um áudio sensível, dois áudios numa mensagem só
+                              (para ver que só um toca por vez)
+
 Renovação da sessão (sempre ligada). `POST /auth/refresh` rotaciona o token como o servidor (`RefreshConnection`): troca o
 `Auth` por outro, com outro id de conexão e o mesmo usuário, no `Set-Cookie`. O token trocado ainda vale por 60 s (a janela de
 graça do servidor); reapresentado depois disso é reuso: o servidor revoga todas as sessões do usuário e responde 401. Um
 `refresh` com o token trocado devolve o token ativo da cadeia, sem rotacionar de novo.
 
     FAKE_REFRESH_GRACE=0      janela de graça em segundos (60 por padrão); 0 faz o token trocado ser reuso de imediato
+
+Perfis e webhooks (sempre ligados). `GET /users/{id}/profile` (com sessão; 404 para um usuário que não existe) devolve o
+perfil como a OpenAPI o descreve: `ana` ("Ana Lima", ocupada, cargo Design), `bia` (cargo Admin, avatar e banner) e `caio` (ausente)
+têm recado e descrição; o banner vem de `GET /media/{sha}` (com sessão) e o avatar de `bia` também de `GET /users/{id}/avatar`.
+As mensagens de webhook trazem sempre o mesmo `webhook_id` para o mesmo webhook (derivado do nome). No `papo`: "Robô de Deploy"
+(sem avatar), "Monitor de Status" (duas mensagens seguidas, com avatar persistente em `/webhooks/{id}/avatar`, rota pública) e
+"Maria da Ponte", com um autor temporário cujo `avatar_url` é uma URL externa que o app nunca deve pedir.
 """
 import base64
 import hashlib
@@ -139,6 +180,101 @@ def noisy_png(r, g, b, size=96):
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
+def png_from_rows(w, h, raw):
+    """PNG RGB de 8 bits a partir das linhas já montadas (cada uma começa com o byte de filtro 0)."""
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b"")
+
+
+def frame_png(w, h, hue=(35, 120, 200)):
+    """PNG de w x h feito para denunciar corte e esticamento: borda branca, um quadrado em cada canto (vermelho e verde em
+    cima, azul e amarelo embaixo), uma cruz branca no centro e o fundo em degradê da cor `hue` para o escuro. Quem o mostra
+    cortado perde cantos; esticado, vê a cruz fora do centro ou os quadrados fora de proporção."""
+    edge, corner, white = 8, 40, (255, 255, 255)
+    corners = {"top": ((255, 0, 0), (0, 200, 0)), "bottom": ((0, 90, 255), (255, 210, 0))}
+
+    def pixel(x, kind):
+        if kind in ("edge", "center") or x < edge or x >= w - edge or abs(x - w // 2) < 2:
+            return white
+        if kind in corners:
+            left, right = corners[kind]
+            if x < corner:
+                return left
+            if x >= w - corner:
+                return right
+        shade = 1 - 0.6 * x / w
+        return tuple(int(c * shade) for c in hue)
+
+    def row_kind(y):
+        if y < edge or y >= h - edge:
+            return "edge"
+        if abs(y - h // 2) < 2:
+            return "center"
+        return "top" if y < corner else "bottom" if y >= h - corner else "middle"
+
+    rows, raw = {}, bytearray()
+    for y in range(h):
+        kind = row_kind(y)
+        if kind not in rows:   # só cinco tipos de linha: o resto se repete
+            rows[kind] = b"\x00" + b"".join(bytes(pixel(x, kind)) for x in range(w))
+        raw += rows[kind]
+    return png_from_rows(w, h, raw)
+
+
+def animated_gif(w=320, h=180, frames=4, delay_cs=25):
+    """GIF animado em laço de `frames` quadros: fundo que muda de cor e um quadrado branco que anda, com borda preta. Sem
+    compressão (um código por pixel, com CLEAR antes de a tabela crescer), então o decodificador nunca muda o tamanho do
+    código e não há o que errar na tabela; pesa uns 4,7 bits por pixel."""
+    palette = [(0, 0, 0), (255, 255, 255), (231, 76, 60), (46, 204, 113), (52, 152, 219), (241, 196, 15), (155, 89, 182), (26, 188, 156)]
+    bits = 3
+    clear, end = 1 << bits, (1 << bits) + 1
+    run = clear - 2   # códigos entre dois CLEAR sem o decodificador passar para o código maior
+
+    def lzw(pixels):
+        out, acc, used = bytearray(), 0, 0
+
+        def put(code):
+            nonlocal acc, used
+            acc |= code << used
+            used += bits + 1
+            while used >= 8:
+                out.append(acc & 0xFF)
+                acc >>= 8
+                used -= 8
+        for start in range(0, len(pixels), run):
+            put(clear)
+            for pixel in pixels[start:start + run]:
+                put(pixel)
+        put(end)
+        if used:
+            out.append(acc & 0xFF)
+        return bytes(out)
+
+    def blocks(data):
+        return b"".join(bytes([len(data[i:i + 255])]) + data[i:i + 255] for i in range(0, len(data), 255)) + b"\x00"
+
+    out = bytearray(b"GIF89a" + struct.pack("<HHBBB", w, h, 0xF0 | (bits - 1), 0, 0))
+    out += b"".join(bytes(color) for color in palette)
+    out += b"\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00"   # repetir sem fim
+    for k in range(frames):
+        background, left = 2 + k % 4, 8 + (w - 56) * k // max(1, frames - 1)
+        pixels = bytearray()
+        for y in range(h):
+            row = bytearray([background]) * w
+            if y < 4 or y >= h - 4:
+                row[:] = bytes(w)
+            else:
+                row[:4] = row[-4:] = bytes(4)
+                if h // 2 - 20 <= y < h // 2 + 20:
+                    row[left:left + 40] = b"\x01" * 40
+            pixels += row
+        out += b"\x21\xF9\x04\x00" + struct.pack("<H", delay_cs) + b"\x00\x00"
+        out += b"\x2C" + struct.pack("<HHHHB", 0, 0, w, h, 0) + bytes([bits]) + blocks(lzw(pixels))
+    return bytes(out) + b"\x3B"
+
+
 # Emojis animados do servidor falso: três quadros de 64x64 (um disco vermelho, amarelo e verde sobre fundo transparente),
 # com menos de 1 KB cada. O GIF vem do Pillow (`save_all`, `loop=0`, `disposal=2`) e o WebP do ffmpeg
 # (`-framerate 4 -i f%d.png -c:v libwebp_anim -lossless 1 -loop 0`).
@@ -171,6 +307,9 @@ ANIMATED_EMOJIS = {
 # Tipos de vídeo que o servidor aceita como arquivo; o MIME do anexo é farejado no upload, aqui pela extensão.
 VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".ogv": "video/ogg"}
 GENERIC_TYPES = {"", "application/octet-stream"}
+# Áudios que FAKE_AUDIO_DIR semeia: o MIME de cada extensão, como o servidor o fareja.
+AUDIO_TYPES = {".ogg": "audio/ogg", ".opus": "audio/ogg", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav",
+               ".webm": "audio/webm"}
 VIDEO = {"kbps": 0.0, "expire_at": 0, "requests": 0}   # FAKE_VIDEO_KBPS, FAKE_VIDEO_401_ONCE e os pedidos de vídeo vistos
 CHUNK = 16384
 SEEDED = []     # vídeos semeados por FAKE_VIDEO_DIR: (nome, bytes, mime, largura, altura)
@@ -180,6 +319,7 @@ EMBED_LINK = re.compile(r"https://videos\.example\.com/[^\s<>\"]*", re.IGNORECAS
 EMBED_DELAY = 1.0
 EMBEDS = {}     # embed_id -> {"view": o embed como o servidor o descreve, "channel_id", "image": bytes, "seed": vídeo semeado ou None}
 RELAY = {"fail": False}   # FAKE_RELAY_502
+GONE = set()    # anexos bloqueados pela moderação: o arquivo e a miniatura respondem 410, esteja a mensagem listando o estado ou não
 
 
 def sniffed_mime(declared, file_name):
@@ -395,10 +535,11 @@ def name_of(user_id):
     return next((n for n, u in USERS.items() if u["id"] == user_id), None)
 
 
-def new_message(channel_id, author_id, content, reply_to=None, attachments=None, created_at=None, external_author=None):
+def new_message(channel_id, author_id, content, reply_to=None, attachments=None, created_at=None, external_author=None, webhook_id=None):
     m = {"id": str(uuid.uuid4()), "channel_id": channel_id, "author_id": author_id, "content": content,
          "created_at": created_at or stamp(), "edited_at": None, "reply_to": reply_to,
-         "webhook_id": str(uuid.uuid4()) if external_author else None, "external_author": external_author,
+         "webhook_id": (webhook_id or webhook_id_for(external_author["name"])) if external_author else None,
+         "external_author": external_author,
          "attachments": attachments or [], "embeds": [], "reactions": {}, }
     MESSAGES.setdefault(channel_id, []).append(m)
     return m
@@ -781,6 +922,102 @@ def send_control():
             "rate": float(pick("rate", "FAKE_SEND_RATE")), "create": bool(int(pick("create", "FAKE_SEND_CREATE")))}
 
 
+# ── Perfis, mídia e webhooks ─────────────────────────────────────────────────────────────────────
+# `GET /users/{id}/profile`, `GET /media/{sha}` (o banner), `GET /users/{id}/avatar` (de quem tem avatar) e
+# `GET /webhooks/{id}/avatar`. Tudo o que está aqui sobre eles fica junto; o resto do fake só chama `serve_profiles`.
+
+PROFILES = {}    # nome do usuário -> {description, status, status_message, banner (sha), avatar (bytes)}
+MEDIA = {}       # sha256 em hexadecimal -> (mime, bytes): a mídia content-addressable, onde moram os banners
+WEBHOOKS = {}    # webhook_id -> {name, avatar (bytes ou None)}: o avatar persistente do webhook, se tem
+
+
+def webhook_id_for(name):
+    """O id do webhook de um autor externo: derivado do nome, o mesmo em toda mensagem dele e em toda partida."""
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, "papo-fake-webhook-" + name))
+
+
+def add_webhook(name, avatar=None):
+    """Registra o webhook `name` (com avatar persistente se `avatar` são os bytes de uma imagem) e devolve o id dele."""
+    webhook_id = webhook_id_for(name)
+    WEBHOOKS[webhook_id] = {"name": name, "avatar": avatar}
+    return webhook_id
+
+
+def add_media(data, mime="image/png"):
+    """Guarda `data` na mídia e devolve o sha256 dele, a referência que o perfil leva em `banner_media`."""
+    sha = hashlib.sha256(data).hexdigest()
+    MEDIA[sha] = (mime, data)
+    return sha
+
+
+def seed_profiles():
+    """Dá apelido, cargo, recado, descrição, banner e avatar a `ana`, `bia` e `caio`, para o perfil ter o que mostrar."""
+    USERS["ana"]["nickname"] = "Ana Lima"
+    USERS["ana"]["roles"] = [{"id": str(uuid.uuid5(uuid.NAMESPACE_DNS, "papo-fake-role-Design")), "name": "Design", "color": "#5B8DEF"}]
+    PROFILES["ana"] = {"status": "busy", "status_message": "Em reunião até as 15h",
+                       "description": "Desenho telas e ouço muito rock.\nPeça um protótipo, não um print."}
+    PROFILES["bia"] = {"status": None, "status_message": "Revisando o deploy", "banner": add_media(png(70, 90, 200, 300, 100)),
+                       "avatar": png(232, 108, 165, 96, 96),
+                       "description": "Cuido da infraestrutura e do café.\nDocs: https://papo.example.com/bia (isto é só texto, não um link)."}
+    PROFILES["caio"] = {"status": "away", "status_message": "De férias", "description": "Volto na segunda."}
+
+
+def seed_webhooks():
+    """No `papo`: o webhook de avatar persistente (duas mensagens seguidas), e um autor temporário com avatar externo.
+    O "Robô de Deploy", sem avatar, já tem a mensagem dele no começo do histórico."""
+    add_webhook("Robô de Deploy")
+    monitor = add_webhook("Monitor de Status", avatar=png(60, 180, 113, 96, 96))
+    persistent = {"name": "Monitor de Status", "avatar_url": "/webhooks/%s/avatar" % monitor}
+    new_message(PAPO, None, "Todos os serviços respondem.", external_author=persistent)
+    new_message(PAPO, None, "Latência normal: 42 ms.", external_author=persistent)
+    add_webhook("Maria da Ponte")
+    new_message(PAPO, None, "Mensagem encaminhada de outro chat.",
+                external_author={"name": "Maria da Ponte", "avatar_url": "https://avatars.example.com/maria.png"})
+
+
+def profile_view(name):
+    """O perfil de `name` como a OpenAPI (`UserProfile`) o descreve; sem avatar, `avatar_blob` e `avatar_format` não vão."""
+    user, extra = USERS[name], PROFILES.get(name, {})
+    avatar = {"avatar_blob": base64.b64encode(extra["avatar"]).decode(), "avatar_format": "PNG"} if extra.get("avatar") else {}
+    return {"id": user["id"], "username": name, "nickname": user.get("nickname"), **avatar,
+            "banner_media": extra.get("banner"), "description": extra.get("description"), "status": extra.get("status"),
+            "status_message": extra.get("status_message"), "typing": None, "status_updated_at": None,
+            "created_at": user["created"], "roles": summary(name)["roles"]}
+
+
+def serve_profiles(handler, path):
+    """Responde as rotas de perfil, mídia e avatar de webhook; devolve False se `path` não é uma delas. O avatar de um
+    webhook é público (`security: []` na OpenAPI); o perfil e a mídia pedem a sessão, como os outros GET autenticados."""
+    found = re.fullmatch(r"/webhooks/([^/]+)/avatar", path)
+    if found:
+        avatar = (WEBHOOKS.get(found.group(1)) or {}).get("avatar")
+        if avatar is None:
+            handler.problem(404, "Recurso não encontrado", "webhook sem avatar")
+        else:
+            handler.serve("image/png", avatar, 0)
+        return True
+    found = re.fullmatch(r"/users/([^/]+)/avatar", path)
+    if found:
+        avatar = PROFILES.get(name_of(found.group(1)) or "", {}).get("avatar")
+        if avatar is None:
+            return False   # quem não tem avatar segue a rota de sempre, que responde 404
+        handler.serve("image/png", avatar, 0)
+        return True
+    profile = re.fullmatch(r"/users/([^/]+)/profile", path)
+    media = re.fullmatch(r"/media/([^/]+)", path)
+    if not (profile or media):
+        return False
+    if session_of(handler.cookie()) is None:
+        handler.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+    elif profile and name_of(profile.group(1)) is not None:
+        handler.send(200, profile_view(name_of(profile.group(1))))
+    elif media and media.group(1) in MEDIA:
+        handler.serve(*MEDIA[media.group(1)], 0)
+    else:
+        handler.problem(404, "Recurso não encontrado", "usuário não encontrado" if profile else "mídia não encontrada")
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -833,7 +1070,10 @@ class Handler(BaseHTTPRequestHandler):
     def attachment(self, file_id, thumbnail=False):
         """`GET /attachments/{id}` como o `http.ServeContent` do servidor: 200, 206, 416 e `Accept-Ranges`. Vídeo pode ser
         entregue devagar (FAKE_VIDEO_KBPS) e ter um 401 simulado (FAKE_VIDEO_401_ONCE). Com `thumbnail` (`/thumbnail`) serve a
-        miniatura própria do anexo, se ele tem uma; senão o próprio arquivo, como o fake sempre fez para imagens."""
+        miniatura própria do anexo, se ele tem uma; senão o próprio arquivo, como o fake sempre fez para imagens. Anexo bloqueado
+        pela moderação (em `GONE`) responde 410, arquivo ou miniatura."""
+        if file_id in GONE:
+            return self.problem(410, "Recurso indisponível", "arquivo removido pela moderação de imagens")
         mime, data = THUMBS[file_id] if thumbnail and file_id in THUMBS else FILES[file_id]
         video = mime.startswith("video/")
         if video and video_session_expires():
@@ -851,7 +1091,8 @@ class Handler(BaseHTTPRequestHandler):
         if found is None or not has_channel_flag(found["channel_id"], me, "read_channel") or (relay and found["seed"] is None):
             return self.problem(404, "Recurso não encontrado", "vídeo de embed não encontrado" if relay else "embed não encontrado")
         if not relay:
-            return self.send(200, dict(found["view"], image_data=base64.b64encode(found["image"]).decode(), author_image_data=None))
+            encoded = lambda data: base64.b64encode(data).decode() if data else None
+            return self.send(200, dict(found["view"], image_data=encoded(found["image"]), author_image_data=encoded(found.get("author_image"))))
         if RELAY["fail"]:
             return self.problem(502, "Mídia indisponível", "falha ao carregar vídeo do embed")
         _, data, mime, _, _ = found["seed"]
@@ -962,6 +1203,8 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path == "/ws":
             self.websocket()
+            return True
+        if serve_profiles(self, path):
             return True
         m = re.fullmatch(r"/users/([^/]+)/avatar", path)
         if m:
@@ -1081,42 +1324,32 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if method == "POST" and path == "/messages":
             ctype = self.headers.get("Content-Type", "")
-            length = int(self.headers.get("Content-Length") or 0)
             control = send_control()
-            body = b""
-            while len(body) < length:
-                piece = self.rfile.read(min(16384, length - len(body)))
-                if not piece:
-                    break
-                body += piece
-                if control["rate"] > 0:
-                    time.sleep(len(piece) / (control["rate"] * 1024))
-            if len(body) < length:
-                # O cliente desistiu no meio do envio: como um servidor de verdade, não cria mensagem de um corpo cortado.
-                self.close_connection = True
-                return
-            time.sleep(control["delay"])
-            parsed = BytesParser().parsebytes(b"Content-Type: " + ctype.encode() + b"\r\n\r\n" + body)
-            fields, attachments = {}, []
-            for part in parsed.get_payload():
-                name = part.get_param("name", header="content-disposition")
-                data = part.get_payload(decode=True)
-                if name == "attachments":
-                    aid = str(uuid.uuid4())
-                    mime = sniffed_mime(part.get_content_type(), part.get_filename())
-                    FILES[aid] = (mime, data)
-                    image = mime.startswith("image/")
-                    attachments.append({"id": aid, "mime_type": mime, "original_file_name": part.get_filename() or "arquivo", "size_bytes": len(data),
-                                        "thumbnail_id": aid if image else None, "thumbnail_width": 96 if image else None,
-                                        "thumbnail_height": 64 if image else None, "moderation_status": "clean"})
-                else:
-                    fields[name] = data.decode()
-            cid = fields["channel_id"]
-            # Em DM o anexo não pede `send_attachment`; em canal, sim (e o envio pede `send_messages`).
-            if not has_channel_flag(cid, me, "send_messages") or (attachments and cid not in DMS and not has_role_flag(me, "send_attachment")):
-                for attachment in attachments:
-                    FILES.pop(attachment["id"], None)
-                return self.forbidden("usuário não tem permissão para enviar esta mensagem")
+            try:
+                body = read_upload(self, control["rate"] or UPLOAD["kbps"])
+                if body is None:
+                    # O cliente desistiu no meio do envio: como um servidor de verdade, não cria mensagem de um corpo cortado.
+                    self.close_connection = True
+                    return
+                time.sleep(control["delay"])
+                fields, files = parse_upload(ctype, body)
+                check_upload_form(files)
+                cid = fields["channel_id"]
+                # Em DM o anexo não pede `send_attachment`; em canal, sim (e o envio pede `send_messages`).
+                if not has_channel_flag(cid, me, "send_messages") or (files and cid not in DMS and not has_role_flag(me, "send_attachment")):
+                    return self.forbidden("usuário não tem permissão para enviar esta mensagem")
+                check_upload_sizes(files)
+            except UploadRejected as rejected:
+                return self.problem(rejected.status, rejected.title, rejected.detail)
+            attachments = []
+            for name, data, mime in files:
+                aid = str(uuid.uuid4())
+                mime = sniffed_mime(mime, name)
+                FILES[aid] = (mime, data)
+                image = mime.startswith("image/")
+                attachments.append({"id": aid, "mime_type": mime, "original_file_name": sanitized_file_name(name) or "arquivo", "size_bytes": len(data),
+                                    "thumbnail_id": aid if image else None, "thumbnail_width": 96 if image else None,
+                                    "thumbnail_height": 64 if image else None, "moderation_status": "clean"})
             if control["status"] >= 400 and not control["create"]:
                 return self.problem(control["status"], "Erro simulado", "Resposta simulada por FAKE_SEND_STATUS")
             m = new_message(fields["channel_id"], me, fields.get("content", ""), fields.get("reply_to"), attachments)
@@ -1413,17 +1646,425 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(404, "Não encontrado", "Rota inexistente")
 
 
+# Limites do `POST /messages` no servidor de verdade (`handlers/messages.go`, `services/attachments.go`, `middleware/bodylimit.go`);
+# a OpenAPI não os traz. O fake os aplica como ele, para o app mostrar o que o servidor diria.
+UPLOAD = {"kbps": 0.0}          # FAKE_UPLOAD_KBPS
+UPLOAD_BODY_LIMIT = 110 << 20   # MaxUploadBodySize: acima disso, 413 sem ler (Content-Length) ou 400 no meio da leitura (em pedaços)
+UPLOAD_FILE_LIMIT = 100 * 1024 * 1024
+UPLOAD_MAX_FILES = 10
+UPLOAD_NAME_LIMIT = 128
+NOT_MULTIPART = "corpo da requisição deve ser multipart/form-data válido"
+# O 400 de entrada inválida do servidor lista todas as causas possíveis, sem dizer qual foi (ErrInvalidInput).
+INVALID_INPUT = ("channel_id é obrigatório; content tem no máximo 8192 caracteres; a mensagem precisa de content ou attachment; "
+                 "nome do attachment inválido; reply_to deve referenciar uma mensagem do mesmo canal")
+
+
+class UploadRejected(Exception):
+    """Um envio que o servidor de verdade recusaria com 400 ou 413, no formato de `problem()`."""
+
+    def __init__(self, status, title, detail):
+        super().__init__(detail)
+        self.status, self.title, self.detail = status, title, detail
+
+
+def read_upload(handler, kbps):
+    """O corpo de `POST /messages`, lido como o servidor o faz: com `Content-Length` (acima de 110 MiB o 413 sai sem ler nada) ou em
+    pedaços (`Transfer-Encoding: chunked`, o que o app manda quando algum arquivo não tem tamanho; acima de 110 MiB a leitura é
+    cortada e o servidor responde 400). `kbps` (> 0) limita a leitura, para o envio de um arquivo grande ter o que mostrar.
+    Devolve None se o cliente desistiu no meio. Quando recusa, deixa a conexão marcada para fechar: sobra corpo por ler."""
+
+    def pace(count):
+        if kbps > 0:
+            time.sleep(count / (kbps * 1024))
+
+    def refuse(status, title, detail):
+        handler.close_connection = True
+        raise UploadRejected(status, title, detail)
+
+    if "chunked" in handler.headers.get("Transfer-Encoding", "").lower():
+        body = bytearray()
+        while True:
+            line = handler.rfile.readline(65537)
+            if not line:
+                return None
+            try:
+                size = int(line.split(b";")[0].strip() or b"0", 16)
+            except ValueError:
+                refuse(400, "Parâmetro inválido", NOT_MULTIPART)
+            if size == 0:
+                while handler.rfile.readline(65537) not in (b"\r\n", b"\n", b""):  # os campos finais, se houver
+                    pass
+                return bytes(body)
+            if len(body) + size > UPLOAD_BODY_LIMIT:
+                refuse(400, "Parâmetro inválido", NOT_MULTIPART)
+            remaining = size
+            while remaining:
+                piece = handler.rfile.read(min(16384, remaining))
+                if not piece:
+                    return None
+                body += piece
+                remaining -= len(piece)
+                pace(len(piece))
+            handler.rfile.readline()  # o CRLF depois do pedaço
+    length = int(handler.headers.get("Content-Length") or 0)
+    if length > UPLOAD_BODY_LIMIT:
+        refuse(413, "Payload muito grande", "corpo da requisição excede o tamanho máximo permitido")
+    body = bytearray()  # `bytes +=` copiaria o corpo inteiro a cada pedaço: com 100 MiB, minutos
+    while len(body) < length:
+        piece = handler.rfile.read(min(16384, length - len(body)))
+        if not piece:
+            return None
+        body += piece
+        pace(len(piece))
+    return bytes(body)
+
+
+def part_file_name(part):
+    """O `filename` do cabeçalho da parte, em UTF-8. O analisador de e-mail lê o cabeçalho como ASCII e troca cada byte de um nome
+    acentuado por um caractere à parte (ou por `?` em `get_filename`), então o nome é lido do cabeçalho cru."""
+    for name, value in part.raw_items():
+        found = re.search(r'filename="([^"]*)"', value) if name.lower() == "content-disposition" else None
+        if found:
+            return found.group(1).encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    return part.get_filename() or ""
+
+
+def parse_upload(content_type, body):
+    """(campos, arquivos) de um corpo multipart: os campos como texto e cada arquivo como (nome, bytes, tipo declarado)."""
+    parsed = BytesParser().parsebytes(b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + body)
+    if not parsed.is_multipart():
+        raise UploadRejected(400, "Parâmetro inválido", NOT_MULTIPART)
+    fields, files = {}, []
+    for part in parsed.get_payload():
+        name = part.get_param("name", header="content-disposition")
+        data = part.get_payload(decode=True)
+        if name == "attachments":
+            files.append((part_file_name(part), data, part.get_content_type()))
+        else:
+            fields[name] = data.decode()
+    if "channel_id" not in fields:
+        raise UploadRejected(400, "Parâmetro inválido", INVALID_INPUT)
+    return fields, files
+
+
+def sanitized_file_name(name):
+    """`SanitizeFileName` do servidor: sem pasta (`/` e `\\`), sem caracteres de controle e sem espaços nas pontas."""
+    name = (name or "")[max((name or "").rfind("/"), (name or "").rfind("\\")) + 1:]
+    return "".join(c for c in name if unicodedata.category(c) != "Cc").strip()
+
+
+def check_upload_form(files):
+    """O que o servidor confere antes de tudo: até 10 arquivos e, em cada um, um nome que sobra depois da limpeza, com até 128 caracteres."""
+    if len(files) > UPLOAD_MAX_FILES:
+        raise UploadRejected(400, "Parâmetro inválido", "máximo de 10 attachments por mensagem")
+    for name, _, _ in files:
+        cleaned = sanitized_file_name(name)
+        if not cleaned or len(cleaned) > UPLOAD_NAME_LIMIT:
+            raise UploadRejected(400, "Parâmetro inválido", INVALID_INPUT)
+
+
+def check_upload_sizes(files):
+    """O servidor só vê o tamanho de cada arquivo ao gravá-lo, depois de conferir a permissão: acima de 100 MiB é 400."""
+    if any(len(data) > UPLOAD_FILE_LIMIT for _, data, _ in files):
+        raise UploadRejected(400, "Parâmetro inválido", "attachment excede o tamanho máximo de 100MB")
+
+
+def seed_track_a():
+    """Sementes da trilha A do item 2 (galeria, envio, visualizador, áudio). Cada trilha escreve só na sua função, para os
+    ramos mesclarem sem conflito; o `__main__` chama as duas depois do resto das sementes.
+
+    Onda 1 (galeria e envio): não semeia mensagens, mas lê `FAKE_UPLOAD_KBPS=N`, que lê o corpo de `POST /messages` a N KB/s (o mesmo
+    que `FAKE_SEND_RATE`, que tem prioridade quando os dois estão ligados): um vídeo grande mostra a barra de envio e dá tempo de
+    cancelar no meio. O envio aceita corpo `Content-Length` e `chunked` e recusa como o servidor de verdade: 413 se o corpo declarado passa
+    de 110 MiB, e 400 com mais de 10 arquivos, nome vazio ou com mais de 128 caracteres, arquivo acima de 100 MiB ou corpo em pedaços
+    acima de 110 MiB. Valor ilegível derruba o fake na partida.
+
+    Onda 2 (visualizador): o canal `galeria`, com mensagens de várias mídias (ver `seed_gallery`).
+
+    Onda 3 (áudio): o canal `audio`, com áudios anexados (ver `seed_audio`); `FAKE_AUDIO_DIR` traz os arquivos de verdade."""
+    try:
+        UPLOAD["kbps"] = float(os.environ.get("FAKE_UPLOAD_KBPS") or 0)
+    except ValueError as error:
+        raise SystemExit("FAKE_UPLOAD_KBPS: valor ilegível (%s)" % error)
+    seed_gallery()
+    seed_audio(os.environ.get("FAKE_AUDIO_DIR"))
+
+
+def audio_attachment(name, mime, data, moderation="clean"):
+    """Registra o arquivo de um áudio e devolve o anexo como o servidor o descreve: sem miniatura e sem dimensões."""
+    aid = str(uuid.uuid4())
+    FILES[aid] = (mime, data)
+    if moderation == "blocked":   # o servidor real responde 410 a um anexo bloqueado
+        GONE.add(aid)
+    return {"id": aid, "mime_type": mime, "original_file_name": name, "size_bytes": len(data), "width": None, "height": None,
+            "thumbnail_id": None, "thumbnail_width": None, "thumbnail_height": None, "moderation_status": moderation}
+
+
+def seed_audio(folder):
+    """O canal `audio`, para o player de áudio. Sem `folder` (FAKE_AUDIO_DIR) só traz os dois casos que não precisam de arquivo: um
+    áudio que o aparelho não decodifica e um que o servidor já bloqueou, embora a lista ainda o diga limpo. Com a pasta traz cada
+    arquivo dela (o primeiro seguido de 30 mensagens curtas, para o cartão dele sair da tela), a gravação de voz do web, o envio
+    antigo de tipo genérico, o áudio sensível e dois áudios numa mensagem só."""
+    channel = {"id": "c0000000-0000-4000-8000-0000000000a2", "name": "audio", "type": "text", "position": 7,
+               "topic": "Player de áudio", "parent_id": CHANNELS[0]["id"]}
+    CHANNELS.append(channel)
+    cid = channel["id"]
+    root = Path(folder) if folder else None
+    files = sorted(p for p in root.iterdir() if p.suffix.lower() in AUDIO_TYPES) if root is not None and root.is_dir() else []
+    if folder and not files:
+        raise SystemExit("FAKE_AUDIO_DIR: nenhum .ogg, .opus, .mp3, .m4a, .wav ou .webm em %s" % folder)
+    loaded = [(path.name, path.suffix.lower(), AUDIO_TYPES[path.suffix.lower()], path.read_bytes()) for path in files]
+    for index, (name, _, mime, data) in enumerate(loaded):
+        new_message(cid, uid("bia"), "áudio %s" % name, attachments=[audio_attachment(name, mime, data)])
+        if index == 0:
+            for n in range(1, 31):
+                new_message(cid, uid("caio"), "mensagem %d, só para o áudio de cima sair da tela" % n)
+    if loaded:
+        name, ext, mime, data = min(loaded, key=lambda f: (len(f[3]), len(f[0])))   # o menor: as variações não pesam
+        new_message(cid, uid("caio"), "gravação de voz do web: o servidor a farejou como vídeo, e só o nome diz que é áudio",
+                    attachments=[audio_attachment("audio_gravado" + ext, "video/webm", data)])
+        new_message(cid, uid("bia"), "envio antigo, de tipo genérico: só a extensão diz que é áudio",
+                    attachments=[audio_attachment("antigo" + ext, "application/octet-stream", data)])
+        new_message(cid, uid("caio"), "áudio sensível: fica escondido até o toque",
+                    attachments=[audio_attachment(name, mime, data, "sensitive")])
+        if len(loaded) > 1:
+            first, second = loaded[0], loaded[1]
+            new_message(cid, uid("caio"), "dois áudios numa mensagem: só um toca por vez",
+                        attachments=[audio_attachment(first[0], first[2], first[3]), audio_attachment(second[0], second[2], second[3])])
+    new_message(cid, uid("bia"), "formato que o aparelho não decodifica (bytes que não são Ogg)",
+                attachments=[audio_attachment("quebrado.ogg", "audio/ogg", b"isto nao e um arquivo ogg" * 40)])
+    removed = audio_attachment("removido.ogg", "audio/ogg", b"OggS" + bytes(200))
+    GONE.add(removed["id"])   # a lista ainda diz `clean`, mas o servidor já bloqueou: o arquivo responde 410
+    new_message(cid, uid("caio"), "bloqueado pela moderação, mas a lista ainda não sabe (o arquivo responde 410)", attachments=[removed])
+
+
+def seed_gallery():
+    """O canal `galeria`, para o visualizador de mídia: quatro mídias de proporções e tipos diferentes numa mensagem, uma imagem
+    só (sem contador), uma imagem de 4800x3200 (passa do lado de 4096 px em que o visualizador decodifica, para o zoom), sensíveis
+    entre normais, uma bloqueada entre normais e, havendo vídeos semeados (`FAKE_VIDEO_DIR`), imagens, vídeo e GIF juntos.
+    Cada imagem é desenhada com borda e cantos coloridos, para ver se o zoom ou o arrasto passam das bordas."""
+    channel = {"id": "c0000000-0000-4000-8000-0000000000a1", "name": "galeria", "type": "text", "position": 6,
+               "topic": "Visualizador de mídia", "parent_id": CHANNELS[0]["id"]}
+    CHANNELS.append(channel)
+    cid = channel["id"]
+    gif = animated_gif()
+
+    def shot(name, w, h, hue, moderation="clean"):
+        return media_attachment(name, "image/png", frame_png(w, h, hue), w, h, moderation)
+
+    wide, tall, square = (35, 120, 200), (200, 90, 35), (120, 60, 180)
+    new_message(cid, uid("bia"), "quatro mídias: larga, alta, quadrada e um GIF",
+                attachments=[shot("larga.png", 1200, 630, wide), shot("alta.png", 600, 900, tall), shot("quadrada.png", 512, 512, square),
+                             media_attachment("danca.gif", "image/gif", gif, 320, 180)])
+    new_message(cid, uid("caio"), "uma imagem só (sem contador)", attachments=[shot("unica.png", 800, 600, wide)])
+    new_message(cid, uid("bia"), "imagem grande para o zoom (4800x3200)", attachments=[shot("grande.png", 4800, 3200, (30, 150, 110))])
+    new_message(cid, uid("caio"), "sensíveis entre normais (só a que você toca entra no visualizador)",
+                attachments=[shot("normal-1.png", 640, 480, wide), shot("sensivel-1.png", 640, 480, tall, "sensitive"),
+                             shot("sensivel-2.png", 640, 480, square, "sensitive"), shot("normal-2.png", 640, 480, (30, 150, 110))])
+    new_message(cid, uid("bia"), "uma bloqueada entre normais (o aviso fica no cartão e ela não entra no visualizador)",
+                attachments=[shot("antes.png", 640, 480, wide), shot("bloqueada.png", 640, 480, tall, "blocked"), shot("depois.png", 640, 480, square)])
+    if SEEDED:
+        # O menor vídeo semeado: as quatro mídias juntas pesam pouco quando alguém toca o vídeo.
+        name, data, mime, width, height = min(SEEDED, key=lambda f: (len(f[1]), len(f[0])))
+        new_message(cid, uid("caio"), "imagem, vídeo, GIF e imagem juntos (precisa de FAKE_VIDEO_DIR)",
+                    attachments=[shot("foto-1.png", 800, 600, wide), video_attachment(name, data, mime, width, height),
+                                 media_attachment("danca.gif", "image/gif", gif, 320, 180), shot("foto-2.png", 600, 900, tall)])
+
+
+def media_attachment(name, mime, data, width, height, moderation="clean"):
+    """Registra o arquivo de uma imagem e devolve o anexo como o servidor o descreve: com miniatura (o fake serve o próprio
+    arquivo como miniatura, então a de um GIF também é um GIF animado, como no servidor) e as dimensões dela."""
+    aid = str(uuid.uuid4())
+    FILES[aid] = (mime, data)
+    if moderation == "blocked":   # o servidor real responde 410 a um anexo bloqueado
+        GONE.add(aid)
+    return {"id": aid, "mime_type": mime, "original_file_name": name, "size_bytes": len(data), "width": width, "height": height,
+            "thumbnail_id": aid, "thumbnail_width": width, "thumbnail_height": height, "moderation_status": moderation}
+
+
+def seed_embed(message, image_bytes=None, author_bytes=None, seed=None, **fields):
+    """Põe um embed na mensagem, como o servidor o descreve (o que falta fica nulo, `fields` vazio). `image_bytes` e
+    `author_bytes` são o que `GET /embeds/{id}` devolve em `image_data` e `author_image_data`; `seed` é o vídeo que o relay serve."""
+    embed = {"id": str(uuid.uuid4()), "source_type": "link", "fetch_method": "opengraph", "provider": None, "site_name": None,
+             "url": None, "title": None, "description": None, "color": None, "author": None, "thumbnail": None, "image": None,
+             "video": None, "footer": None, "fields": [], "created_at": now(), "fetched_at": now(), **fields}
+    EMBEDS[embed["id"]] = {"view": embed, "channel_id": message["channel_id"], "image": image_bytes, "author_image": author_bytes, "seed": seed}
+    message["embeds"].append(embed)
+    return embed
+
+
+def moderate(message, attachment_id, status):
+    """O que a moderação faz com um anexo: grava o estado na mensagem; `sensitive` sai num `attachment_moderation_update`
+    (o servidor só avisa esse estado); `blocked` não avisa, só passa a responder 410 (o servidor real apaga a mensagem logo
+    depois, mas há uma janela entre as duas escritas, que é a que o app precisa tratar)."""
+    with LOCK:
+        for attachment in message["attachments"]:
+            if attachment["id"] == attachment_id:
+                attachment["moderation_status"] = status
+        if status == "blocked":
+            GONE.add(attachment_id)
+    if status == "sensitive":
+        emit({"type": "attachment_moderation_update", "channel_id": message["channel_id"], "message_id": message["id"],
+              "attachment_id": attachment_id, "status": status}, only=audience(message["channel_id"]))
+
+
+def moderation_delay():
+    """FAKE_MODERATION: desligado (vazio ou 0); `1` liga com 20 s; outro número liga com esse tanto de segundos."""
+    try:
+        value = float(os.environ.get("FAKE_MODERATION") or 0)
+    except ValueError as error:
+        raise SystemExit("FAKE_MODERATION: valor ilegível (%s)" % error)
+    return 20.0 if value == 1 else value
+
+
+CUSTOM_DESCRIPTION = (
+    "Resumo da execução:\n\n- **Testes**: 1.284 passaram, nenhum falhou\n- **Lint**: sem avisos\n- **Cobertura**: 91,4%\n"
+    "- **Pacote**: `papo-1.4.2.apk`\n\nTudo certo para a próxima etapa. Os detalhes estão no [log da execução]"
+    "(https://painel.example.com/build/42/log), com a lista completa dos módulos."
+)
+
+
+def seed_track_b():
+    """Sementes da trilha B do item 2: o canal `embeds`, com embed customizado completo (cor, autor com ícone, campos, rodapé),
+    GIFs de embed e anexados, imagens de embed de todas as proporções, embeds do YouTube e anexos em cada estado de moderação.
+
+    `FAKE_MODERATION=1` (ou N, em segundos; 1 liga com 20) acrescenta uma mensagem com uma imagem que, depois de N s, vira
+    sensível (evento ao vivo) e, depois de mais N s, bloqueada (o arquivo passa a responder 410, sem evento)."""
+    channel = {"id": "c0000000-0000-4000-8000-0000000000b1", "name": "embeds", "type": "text", "position": 5,
+               "topic": "Embeds, GIFs e moderação", "parent_id": CHANNELS[0]["id"]}
+    CHANNELS.append(channel)
+    cid = channel["id"]
+    robot = {"name": "Robô de Build"}
+
+    # Embeds customizados (webhook). Os campos vêm fora de ordem, para a grade seguir `position`.
+    build = new_message(cid, None, "Build 42 concluído.", external_author=robot)
+    seed_embed(
+        build, image_bytes=frame_png(800, 450, (46, 204, 113)), author_bytes=png(231, 76, 60, 64, 64),
+        source_type="custom", fetch_method="manual", site_name="Painel da Casa", url="https://painel.example.com/build/42",
+        title="Build 42 passou", description=CUSTOM_DESCRIPTION, color="#2ECC71",
+        author={"name": "Robô de Build", "url": "https://painel.example.com/robo", "media": {"mime_type": "image/png", "width": 64, "height": 64}},
+        image={"mime_type": "image/png", "width": 800, "height": 450},
+        footer={"text": "Executado em 3 min · ramo principal"},
+        fields=[{"position": 1, "name": "Duração", "value": "3 min", "inline": True},
+                {"position": 0, "name": "Ramo", "value": "principal", "inline": True},
+                {"position": 2, "name": "Testes", "value": "1.284", "inline": True},
+                {"position": 3, "name": "Falhas", "value": "0", "inline": True},
+                {"position": 4, "name": "Notas", "value": "Sem falhas. A cobertura subiu 0,3 ponto desde a build anterior.", "inline": False},
+                {"position": 5, "name": "Quem enviou", "value": "equipe do painel", "inline": True}],
+    )
+    backup = new_message(cid, None, "Backup noturno.", external_author={"name": "Robô de Backup"})
+    seed_embed(backup, source_type="custom", fetch_method="manual", title="Backup concluído", description="Copiados 12 GB em 4 min.",
+               footer={"text": "Próximo backup às 02h"})
+    dark = new_message(cid, None, "Alerta de disco.", external_author={"name": "Robô de Alertas"})
+    seed_embed(dark, source_type="custom", fetch_method="manual", title="Disco quase cheio", description="Restam 3% no volume de dados.",
+               color="#111111", fields=[{"position": 0, "name": "Volume", "value": "/dados", "inline": False}])
+    hostile = new_message(cid, None, "Links que o app não abre (o servidor real os recusa na criação).", external_author={"name": "Robô de Teste"})
+    seed_embed(hostile, source_type="custom", fetch_method="manual", url="javascript:alert(1)", title="Título com link inválido",
+               author={"name": "Autor com link inválido", "url": "intent://exemplo.com#Intent;scheme=https;end"},
+               description="Só texto; [link de arquivo](file:///sdcard/segredo.txt) e [link bom](https://exemplo.com/ok).")
+
+    # Embeds de GIF (Tenor, GIPHY) e um GIF que chega como imagem de OpenGraph: os três animam.
+    tenor = "https://tenor.com/view/gato-dancando-1234567890"
+    gif = animated_gif()
+    seed_embed(new_message(cid, uid("caio"), tenor), image_bytes=gif, fetch_method="gif", provider="Tenor", url=tenor, title="Gato dançando",
+               thumbnail={"mime_type": "image/gif", "width": 320, "height": 180, "size_bytes": len(gif)})
+    square = animated_gif(200, 200, 3)
+    giphy = "https://giphy.com/gifs/quadrado-9876543210"
+    seed_embed(new_message(cid, uid("bia"), giphy), image_bytes=square, fetch_method="gif", provider="GIPHY", url=giphy,
+               thumbnail={"mime_type": "image/gif", "width": 200, "height": 200, "size_bytes": len(square)})
+    seed_embed(new_message(cid, uid("bia"), "Página com GIF no OpenGraph"), image_bytes=gif, site_name="exemplo.com", url="https://exemplo.com/gif",
+               title="GIF como og:image", description="Embed comum cuja imagem é um GIF animado.",
+               thumbnail={"mime_type": "image/gif", "width": 320, "height": 180, "size_bytes": len(gif)})
+
+    # Imagens de embed 1200x630, 600x900 e 512x512, sem e com vídeo (o vídeo é 16:9 e a caixa segue a imagem), e uma sem medidas.
+    hues = {(1200, 630): (35, 120, 200), (600, 900): (200, 90, 35), (512, 512): (120, 60, 180)}
+    for (width, height), hue in hues.items():
+        for with_video in (False, True):
+            link = "https://videos.example.com/%dx%d.mp4" % (width, height)
+            found, mime = embed_seed(link)
+            seed_embed(
+                new_message(cid, uid("bia"), "imagem %dx%d %s vídeo" % (width, height, "com" if with_video else "sem")),
+                image_bytes=frame_png(width, height, hue), seed=found if with_video else None, site_name="exemplo.com",
+                url="https://exemplo.com/%dx%d" % (width, height), title="Imagem %dx%d" % (width, height),
+                description="A imagem aparece inteira, sem corte nas laterais.",
+                thumbnail={"mime_type": "image/png", "width": width, "height": height},
+                video={"url": link, "mime_type": mime, "width": 1280, "height": 720} if with_video else None,
+            )
+    seed_embed(new_message(cid, uid("bia"), "imagem 1200x630 sem medidas no embed"), image_bytes=frame_png(1200, 630), site_name="exemplo.com",
+               url="https://exemplo.com/sem-medidas", title="Sem largura nem altura", thumbnail={"mime_type": "image/png"})
+
+    # Uma mensagem com um anexo e vários embeds, para o visualizador percorrer: o anexo e depois uma página por embed com imagem
+    # (comum, custom só com `image`, GIF e custom com `thumbnail` e `image`, de que o servidor só serve a thumbnail). Ficam de
+    # fora do visualizador o embed com vídeo (o cartão tem o gesto do vídeo) e o que não tem imagem.
+    multi = new_message(cid, uid("bia"), "vários embeds com imagem e um anexo",
+                        attachments=[media_attachment("anexo.png", "image/png", frame_png(640, 360, (90, 140, 60)), 640, 360)])
+    for number, (width, height, hue) in enumerate([(1200, 630, (35, 120, 200)), (600, 900, (200, 90, 35))], start=1):
+        seed_embed(multi, image_bytes=frame_png(width, height, hue), site_name="exemplo.com", url="https://exemplo.com/galeria/%d" % number,
+                   title="Imagem %d da galeria" % number, thumbnail={"mime_type": "image/png", "width": width, "height": height})
+    seed_embed(multi, image_bytes=frame_png(512, 512, (120, 60, 180)), source_type="custom", fetch_method="manual", title="Só com image",
+               image={"mime_type": "image/png", "width": 512, "height": 512})
+    seed_embed(multi, image_bytes=gif, fetch_method="gif", provider="Tenor", url=tenor, title="Gato dançando",
+               thumbnail={"mime_type": "image/gif", "width": 320, "height": 180, "size_bytes": len(gif)})
+    seed_embed(multi, image_bytes=frame_png(800, 450, (46, 204, 113)), source_type="custom", fetch_method="manual",
+               title="Com thumbnail e image", description="O servidor serve só a thumbnail (verde); a image (600x600) não chega ao app.",
+               thumbnail={"mime_type": "image/png", "width": 800, "height": 450}, image={"mime_type": "image/png", "width": 600, "height": 600})
+    clip, clip_mime = embed_seed("https://videos.example.com/galeria.mp4")
+    seed_embed(multi, image_bytes=frame_png(1200, 630, (200, 40, 60)), seed=clip, site_name="exemplo.com", url="https://exemplo.com/galeria/video",
+               title="Embed com vídeo (fora do visualizador)", thumbnail={"mime_type": "image/png", "width": 1200, "height": 630},
+               video={"url": "https://videos.example.com/galeria.mp4", "mime_type": clip_mime, "width": 1280, "height": 720})
+    seed_embed(multi, source_type="custom", fetch_method="manual", title="Sem imagem (fora do visualizador)", description="Só texto.")
+
+    # YouTube: o servidor entrega a página do player em `video.url`, sem `mime_type`, e a miniatura em `GET /embeds/{id}`. O id é
+    # inventado (o player real responde "vídeo indisponível"); FAKE_YOUTUBE_ID põe um id de verdade para ver um vídeo tocar.
+    youtube_id = os.environ.get("FAKE_YOUTUBE_ID", "aB3dE5gH7jK")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", youtube_id):
+        raise SystemExit("FAKE_YOUTUBE_ID: precisa ter 11 caracteres de A-Z, a-z, 0-9, _ e -")
+    watch = "https://www.youtube.com/watch?v=" + youtube_id
+    seed_embed(new_message(cid, uid("caio"), "Vídeo do YouTube: " + watch), image_bytes=frame_png(480, 270, (200, 40, 60)), fetch_method="oembed",
+               provider="YouTube", site_name="YouTube", url=watch, title="Vídeo de exemplo",
+               thumbnail={"mime_type": "image/png", "width": 480, "height": 270},
+               video={"url": "https://www.youtube.com/embed/" + youtube_id})
+    # Quase certo, mas não é o player: o host só começa com `youtube.com`. Não pode virar player; fica um cartão de link comum.
+    lookalike = "https://youtube.com.evil.example.com/embed/" + youtube_id
+    seed_embed(new_message(cid, uid("bia"), "Parece do YouTube, mas o endereço do player é de outro site"), image_bytes=frame_png(480, 270, (60, 60, 60)),
+               fetch_method="oembed", provider="YouTube", site_name="YouTube", url="https://youtube.com.evil.example.com/watch?v=" + youtube_id,
+               title="Embed com endereço falso", thumbnail={"mime_type": "image/png", "width": 480, "height": 270}, video={"url": lookalike})
+
+    # Anexos: GIF animado (com selo), GIF sensível, pendente (aparece normal), bloqueado (aviso) e bloqueado no servidor antes do aviso.
+    new_message(cid, uid("caio"), "GIF anexado (anima e tem o selo GIF)", attachments=[media_attachment("danca.gif", "image/gif", gif, 320, 180)])
+    new_message(cid, uid("caio"), "GIF anexado sensível (escondido até o toque)",
+                attachments=[media_attachment("danca-sensivel.gif", "image/gif", gif, 320, 180, "sensitive")])
+    new_message(cid, uid("bia"), "imagem pendente (aparece normal: pending também é o servidor sem moderação)",
+                attachments=[media_attachment("pendente.png", "image/png", frame_png(480, 320), 480, 320, "pending")])
+    new_message(cid, uid("bia"), "imagem bloqueada (o aviso aparece e nada é pedido)",
+                attachments=[media_attachment("bloqueada.png", "image/png", frame_png(480, 320), 480, 320, "blocked")])
+    late = media_attachment("bloqueada-no-servidor.png", "image/png", frame_png(480, 320), 480, 320, "pending")
+    new_message(cid, uid("bia"), "imagem que o servidor já bloqueou, mas a lista ainda diz pending (a miniatura responde 410)", attachments=[late])
+    GONE.add(late["id"])
+
+    delay = moderation_delay()
+    if delay > 0:
+        live = media_attachment("ao-vivo.png", "image/png", frame_png(480, 320, (35, 160, 120)), 480, 320, "pending")
+        message = new_message(cid, uid("bia"), "moderação ao vivo: sensível em %g s e bloqueada em %g s" % (delay, 2 * delay), attachments=[live])
+        for after, status in ((delay, "sensitive"), (2 * delay, "blocked")):
+            timer = threading.Timer(after, moderate, (message, live["id"], status))
+            timer.daemon = True
+            timer.start()
+
+
 if __name__ == "__main__":
     USERS["ana"] = {"id": str(uuid.uuid4()), "password": "Senha@123", "created": "2026-01-01T00:00:00Z"}
     USERS["bia"] = {"id": str(uuid.uuid4()), "password": "Senha@456", "created": "2026-01-02T00:00:00Z", "nickname": "Bia Borges",
                     "roles": [{"id": str(uuid.uuid4()), "name": "Admin", "color": "#E86CA5"}]}
     USERS["caio"] = {"id": str(uuid.uuid4()), "password": "Senha@789", "created": "2026-01-03T00:00:00Z"}
+    seed_profiles()
     # Histórico longo e espalhado por vários dias: dá para paginar a conversa, a busca e os filtros de data.
     old = datetime(2026, 11, 10, 9, 0, 0, tzinfo=timezone.utc)
     for i in range(1, 261):
         when = (old + timedelta(hours=i)).isoformat().replace("+00:00", "Z")
         new_message(PAPO, uid("bia" if i % 3 else "caio"), "mensagem antiga número %d" % i, created_at=when)
     new_message(PAPO, None, "Deploy da versão 1.4 concluído em produção.", external_author={"name": "Robô de Deploy"})
+    seed_webhooks()
     first = new_message(PAPO, uid("caio"), "Alguém viu o deploy de ontem? https://papo.example.com/status")
     aid = str(uuid.uuid4())
     FILES[aid] = ("image/png", png(255, 178, 56))
@@ -1488,5 +2129,7 @@ if __name__ == "__main__":
     if os.environ.get("FAKE_PERMISSIONS"):
         setup_access(permission_spec(os.environ["FAKE_PERMISSIONS"]))
         announce_access()
+    seed_track_a()
+    seed_track_b()
     print(f"{NAME} em http://0.0.0.0:{PORT}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

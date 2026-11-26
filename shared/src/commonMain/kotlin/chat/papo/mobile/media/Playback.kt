@@ -28,7 +28,7 @@ data class PlayableMedia(
  */
 fun playableAttachment(server: ServerUrl, attachment: AttachmentDto): PlayableMedia? {
     if (!attachment.isVideo) return null
-    if (attachment.moderationStatus == MODERATION_BLOCKED) return null
+    if (moderationView(attachment.moderationStatus) == ModerationView.Blocked) return null
     if (!PATH_TOKEN.matches(attachment.id)) return null
     return PlayableMedia(
         key = "attachment:${attachment.id}",
@@ -69,8 +69,14 @@ fun relayVideo(server: ServerUrl, embed: EmbedDto): PlayableMedia? {
  * muito largo não ocupe a lista inteira. Sem dimensões válidas (o servidor só as dá para
  * alguns contêineres), 16:9.
  */
-fun videoAspect(width: Int?, height: Int?): Float {
-    if (width == null || height == null || width <= 0 || height <= 0) return DEFAULT_ASPECT
+fun videoAspect(width: Int?, height: Int?): Float = aspectOrNull(width, height) ?: DEFAULT_ASPECT
+
+/**
+ * A proporção largura/altura de [width] x [height], entre 0,5 e 2,5 como a do vídeo, ou null se alguma medida falta ou
+ * não é positiva: quem a usa decide o que fazer sem ela (a caixa de um embed espera a imagem chegar).
+ */
+fun aspectOrNull(width: Int?, height: Int?): Float? {
+    if (width == null || height == null || width <= 0 || height <= 0) return null
     return (width.toFloat() / height).coerceIn(MIN_ASPECT, MAX_ASPECT)
 }
 
@@ -163,13 +169,11 @@ private fun failureForStatus(status: Int): PlaybackFailure? = STATUS_FAILURES[st
 private val RETRYABLE = setOf(PlaybackFailure.Network, PlaybackFailure.Unavailable)
 private val RETRY_DELAYS_MS = listOf(1_000L, 3_000L)
 
-private const val MODERATION_BLOCKED = "blocked"
-
 /** O servidor só serve estes tipos pelo relay; outro vira 404. */
 private val RELAY_MIME_TYPES = setOf("video/mp4", "video/webm", "video/ogg")
 
 /** O id vai no caminho da URL: só o que um UUID tem, para o endereço nunca sair do servidor da conta. */
-private val PATH_TOKEN = Regex("[A-Za-z0-9_-]+")
+internal val PATH_TOKEN = Regex("[A-Za-z0-9_-]+")
 
 /** Páginas de player do YouTube e o encurtador: não são arquivo de vídeo e o relay não as serve. */
 private val YOUTUBE_HOSTS = setOf(

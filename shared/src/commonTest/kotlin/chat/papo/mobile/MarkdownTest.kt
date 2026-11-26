@@ -3,6 +3,7 @@ package chat.papo.mobile
 import chat.papo.mobile.chat.Markdown
 import chat.papo.mobile.chat.MarkdownBlock
 import chat.papo.mobile.chat.TextSpan
+import chat.papo.mobile.chat.hidesDestination
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
@@ -207,5 +208,148 @@ class MarkdownTest {
         assertEquals(emptyList(), Markdown.literalRanges(""))
         assertEquals(emptyList(), Markdown.literalRanges("`sem fechar"))
         assertEquals(emptyList(), Markdown.literalRanges("\\`escapada\\` e `` vazia"))
+    }
+
+    // `www.`: vira link `https://www...`, com as bordas do cliente de terminal.
+
+    private fun www(text: String) = TextSpan(text, link = "https://$text")
+
+    @Test
+    fun wwwNoInicioDoTextoViraLinkHttps() {
+        assertEquals(listOf(www("www.exemplo.com")), p("www.exemplo.com"))
+        assertEquals(listOf(TextSpan("abra "), www("www.exemplo.com/a?b=1"), TextSpan(" já")), p("abra www.exemplo.com/a?b=1 já"))
+    }
+
+    @Test
+    fun wwwDepoisDeParentesePontuacaoOuAspaVira() {
+        assertEquals(listOf(TextSpan("("), www("www.exemplo.com"), TextSpan(")")), p("(www.exemplo.com)"))
+        assertEquals(listOf(TextSpan("\""), www("www.exemplo.com"), TextSpan("\"")), p("\"www.exemplo.com\""))
+        assertEquals(listOf(TextSpan("[x] "), www("www.exemplo.com")), p("[x] www.exemplo.com"))
+    }
+
+    @Test
+    fun wwwNaoViraLinkNoMeioDePalavraNemDeEnderecoMaior() {
+        assertEquals(listOf(TextSpan("awww.exemplo.com")), p("awww.exemplo.com"))
+        assertEquals(listOf(TextSpan("1www.exemplo.com")), p("1www.exemplo.com"))
+        assertEquals(listOf(TextSpan("x/www.exemplo.com")), p("x/www.exemplo.com"))
+        assertEquals(listOf(TextSpan("a.www.exemplo.com")), p("a.www.exemplo.com"))
+        assertEquals(listOf(TextSpan("a-www.exemplo.com")), p("a-www.exemplo.com"))
+        assertEquals(listOf(TextSpan("a_www.exemplo.com")), p("a_www.exemplo.com"))
+        assertEquals(listOf(TextSpan("x:www.exemplo.com")), p("x:www.exemplo.com"))
+        // Depois de um caractere fora do ASCII, mesmo que seja aspa tipográfica.
+        assertEquals(listOf(TextSpan("éwww.exemplo.com")), p("éwww.exemplo.com"))
+        assertEquals(listOf(TextSpan("“www.exemplo.com”")), p("“www.exemplo.com”"))
+    }
+
+    @Test
+    fun wwwEmEnderecoDeEmailNaoViraLink() {
+        assertEquals(listOf(TextSpan("ana@www.exemplo.com")), p("ana@www.exemplo.com"))
+        assertEquals(listOf(TextSpan("ana@wwwx.com")), p("ana@wwwx.com"))
+    }
+
+    @Test
+    fun wwwSemPontoDepoisDoTresOuSemNomeDeSiteNaoViraLink() {
+        assertEquals(listOf(TextSpan("wwwx.com")), p("wwwx.com"))
+        assertEquals(listOf(TextSpan("www")), p("www"))
+        assertEquals(listOf(TextSpan("www.")), p("www."))
+        assertEquals(listOf(TextSpan("www. exemplo")), p("www. exemplo"))
+        assertEquals(listOf(TextSpan("www.-exemplo.com")), p("www.-exemplo.com"))
+        assertEquals(listOf(TextSpan("www..com")), p("www..com"))
+    }
+
+    @Test
+    fun wwwComLetraForaDoAsciiNoNomeDoSiteVira() {
+        assertEquals(listOf(www("www.é.com")), p("www.é.com"))
+    }
+
+    @Test
+    fun wwwTiraAPontuacaoDaFraseDoFimDoEndereco() {
+        assertEquals(listOf(TextSpan("veja "), www("www.exemplo.com"), TextSpan(".")), p("veja www.exemplo.com."))
+        assertEquals(listOf(www("www.exemplo.com/a"), TextSpan(", ok")), p("www.exemplo.com/a, ok"))
+        assertEquals(listOf(www("www.exemplo.com"), TextSpan("?!")), p("www.exemplo.com?!"))
+        assertEquals(listOf(TextSpan("("), www("www.exemplo.com/a"), TextSpan(");")), p("(www.exemplo.com/a);"))
+        assertEquals(listOf(www("www.exemplo.com"), TextSpan(":")), p("www.exemplo.com:"))
+    }
+
+    @Test
+    fun wwwAceitaMaiusculasEGuardaOTextoComoFoiEscrito() {
+        assertEquals(listOf(www("WWW.Exemplo.COM")), p("WWW.Exemplo.COM"))
+        assertEquals(listOf(www("Www.exemplo.com")), p("Www.exemplo.com"))
+    }
+
+    @Test
+    fun wwwHerdaOEstiloEFicaForaDeCodigo() {
+        assertEquals(listOf(TextSpan("www.exemplo.com", bold = true, link = "https://www.exemplo.com")), p("**www.exemplo.com**"))
+        assertEquals(listOf(TextSpan("www.exemplo.com", code = true)), p("`www.exemplo.com`"))
+        assertEquals(listOf(TextSpan("www.exemplo.com", code = true)), p("```\nwww.exemplo.com\n```"))
+    }
+
+    @Test
+    fun wwwDentroDeOutroEnderecoFicaNoEnderecoDeFora() {
+        val url = "https://exemplo.com/www.outro.com"
+        assertEquals(listOf(TextSpan(url, link = url)), p(url))
+        assertEquals(listOf(TextSpan("a "), www("www.a.com/www.b.com")), p("a www.a.com/www.b.com"))
+    }
+
+    @Test
+    fun wwwEUmTrechoLiteralParaOsEmojisDoCompositor() {
+        assertEquals(listOf(5..15), Markdown.literalRanges("veja www.a.com/x."))
+        assertEquals(emptyList(), Markdown.literalRanges("veja awww.a.com"))
+    }
+
+    // linksIn: o destino de cada link, para a folha de ações da mensagem.
+
+    @Test
+    fun linksInDevolveODestinoNaOrdemEmQueAparece() {
+        assertEquals(
+            listOf("https://a.test/1", "https://b.test", "https://www.c.test/x"),
+            Markdown.linksIn("veja https://a.test/1, [site](https://b.test) e www.c.test/x."),
+        )
+    }
+
+    @Test
+    fun linksInTrazOEnderecoDoLinkNomeadoEDoWwwComEsquema() {
+        assertEquals(listOf("https://outro.example"), Markdown.linksIn("[banco](https://outro.example)"))
+        assertEquals(listOf("https://www.exemplo.com"), Markdown.linksIn("www.exemplo.com"))
+    }
+
+    @Test
+    fun linksInNaoRepeteODestino() {
+        assertEquals(listOf("https://a.test"), Markdown.linksIn("https://a.test e [de novo](https://a.test) e https://a.test"))
+    }
+
+    @Test
+    fun linksInIgnoraCodigoEEsquemaPerigosoESemLinkDevolveVazio() {
+        assertEquals(emptyList(), Markdown.linksIn("`https://a.test` e ```\nwww.a.test\n```"))
+        assertEquals(emptyList(), Markdown.linksIn("[x](javascript:alert(1)) e ftp://a.test"))
+        assertEquals(emptyList(), Markdown.linksIn("sem nada"))
+        assertEquals(emptyList(), Markdown.linksIn(""))
+    }
+
+    @Test
+    fun linksInEnxergaOsLinksDeItensDeListaEDeCitacao() {
+        assertEquals(listOf("https://a.test", "https://b.test"), Markdown.linksIn("- https://a.test\n> [b](https://b.test)"))
+    }
+
+    // hidesDestination: o texto do link esconde para onde ele leva?
+
+    @Test
+    fun linkNomeadoComTextoDiferenteEscondeODestino() {
+        assertEquals(true, p("[banco](https://outro.example)").single().hidesDestination())
+        assertEquals(true, p("[https://banco.example](https://outro.example)").single().hidesDestination())
+        assertEquals(true, p("[www.banco.example](https://www.banco.example.outro.example)").single().hidesDestination())
+    }
+
+    @Test
+    fun enderecoSoltoENomeadoComOProprioEnderecoNaoEscondemNada() {
+        assertEquals(false, p("https://a.test/x").single().hidesDestination())
+        assertEquals(false, p("www.a.test/x").single().hidesDestination())
+        assertEquals(false, p("[https://a.test](https://a.test)").single().hidesDestination())
+        assertEquals(false, p("[www.a.test](https://www.a.test)").single().hidesDestination())
+    }
+
+    @Test
+    fun trechoSemLinkNaoEscondeNada() {
+        assertEquals(false, TextSpan("oi").hidesDestination())
     }
 }

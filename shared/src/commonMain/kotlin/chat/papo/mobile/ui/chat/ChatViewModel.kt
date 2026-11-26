@@ -1,13 +1,13 @@
 package chat.papo.mobile.ui.chat
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.coerceIn
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.AttachmentProblem
 import chat.papo.mobile.chat.ConversationAccess
 import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Draft
@@ -16,6 +16,7 @@ import chat.papo.mobile.chat.Located
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.PendingMessage
 import chat.papo.mobile.chat.PermissionSnapshot
+import chat.papo.mobile.chat.checkLimits
 import chat.papo.mobile.chat.conversationAccess
 import chat.papo.mobile.chat.encodeMentions
 import chat.papo.mobile.chat.renderMentions
@@ -47,6 +48,8 @@ data class ChatUiState(
     val replyTo: Message? = null,
     val editing: Message? = null,
     val files: List<OutgoingFile> = emptyList(),
+    /** Por que o último lote de arquivos escolhidos não entrou por inteiro; some quando o usuário fecha o aviso ou escolhe de novo. */
+    val attachProblem: AttachmentProblem? = null,
     /** Salvando a edição de uma mensagem (editar segue síncrono; enviar não trava o compositor). */
     val savingEdit: Boolean = false,
     val loadingOlder: Boolean = false,
@@ -164,6 +167,17 @@ class ChatViewModel(
 
     fun dismissReplyNotReached() = _state.update { it.copy(replyNotReached = null) }
 
+    /**
+     * Leva a tela à mensagem [target] desta conversa (a barra de áudio), procurando-a no histórico se ela não está carregada.
+     * Uma procura por vez: com outra em andamento, ou sem acesso à leitura, nada acontece.
+     */
+    fun showMessage(target: MessageTarget) {
+        val s = _state.value
+        if (s.locating || s.returning || readDenied) return
+        _state.update { it.copy(locating = true, replyNotReached = null, focusId = null) }
+        viewModelScope.launch { locate(target) }
+    }
+
     private fun searchOriginal(id: String) {
         val s = _state.value
         // Uma procura por vez, e a original já dada como apagada não se procura de novo.
@@ -255,9 +269,25 @@ class ChatViewModel(
         pickedMentions[username] = userId
     }
 
-    fun addFiles(files: List<OutgoingFile>) = _state.update { it.copy(files = (it.files + files).take(MAX_FILES)) }
+    /**
+     * Põe os arquivos escolhidos no compositor, um a um e na ordem: o que respeita os limites de uma mensagem entra, o
+     * que não respeita fica de fora e o primeiro motivo vira [ChatUiState.attachProblem]. O texto e o que já estava
+     * anexado ficam como estavam.
+     */
+    fun addFiles(picked: List<OutgoingFile>) = _state.update { state ->
+        var accepted = state.files
+        var problem: AttachmentProblem? = null
+        for (file in picked) {
+            val candidate = accepted + file
+            val refused = checkLimits(candidate)
+            if (refused == null) accepted = candidate else if (problem == null) problem = refused
+        }
+        state.copy(files = accepted, attachProblem = problem)
+    }
 
     fun removeFile(file: OutgoingFile) = _state.update { it.copy(files = it.files - file) }
+
+    fun dismissAttachProblem() = _state.update { it.copy(attachProblem = null) }
 
     fun startReply(message: Message) {
         if (_state.value.editing != null) finishEdit()
@@ -269,7 +299,7 @@ class ChatViewModel(
         // Editar uma segunda mensagem em seguida volta ao mesmo rascunho de antes, não ao texto da primeira.
         if (stashed == null) stashed = StashedDraft(draft.text, _state.value.replyTo)
         val shown = renderMentions(message.content) { chat.users.value[it]?.username }
-        draft = TextFieldValue(shown, TextRange(shown.length))
+        replaceDraft(shown)
         _state.update { it.copy(editing = message, replyTo = null, files = emptyList()) }
     }
 
@@ -316,9 +346,17 @@ class ChatViewModel(
 
     // Rascunho
 
-    /** O que está escrito no compositor. Mora aqui, e não na tela, para sobreviver a sair da conversa e voltar. */
-    var draft by mutableStateOf(TextFieldValue(""))
-        private set
+    /**
+     * O campo do compositor: o texto, o cursor e a composição do teclado. Mora aqui, e não na tela, para sobreviver a sair
+     * da conversa e voltar. A digitação o muda direto; [draftEdited] avisa o que isso significa para o rascunho.
+     */
+    val draftState = TextFieldState()
+
+    /** O que está escrito no compositor, com o cursor. */
+    val draft: TextFieldValue get() = TextFieldValue(draftState.text.toString(), draftState.selection)
+
+    /** O texto do compositor que o rascunho guardado e o aviso de "digitando" já levaram em conta. */
+    private var settledText = ""
 
     /** Texto e resposta de antes de uma edição, para voltar a eles quando ela acabar. Enquanto existe, nada é guardado. */
     private var stashed: StashedDraft? = null
@@ -332,14 +370,37 @@ class ChatViewModel(
         viewModelScope.launch { restoreDraft() }
     }
 
-    /** O compositor mudou (digitação, emoji, menção escolhida): guarda o rascunho e avisa que está digitando. */
+    /** O compositor foi mudado por quem não é o teclado (emoji, menção escolhida): põe [value] nele e guarda o rascunho. */
     fun onDraftChange(value: TextFieldValue) {
-        val changed = value.text != draft.text
-        draft = value
-        if (!changed) return
+        writeDraft(value)
+        draftEdited()
+    }
+
+    /**
+     * O texto do compositor mudou (digitação, emoji, menção escolhida): guarda o rascunho e avisa que está digitando. Sem
+     * mudança no texto (só o cursor andou) não faz nada, e pode ser chamada mais de uma vez para a mesma mudança.
+     */
+    fun draftEdited() {
+        val text = draft.text
+        if (text == settledText) return
+        settledText = text
         textChanged = true
-        if (value.text.isNotEmpty()) onTyping()
+        if (text.isNotEmpty()) onTyping()
         saveDraft()
+    }
+
+    /** Põe [value] no campo; só troca o texto se ele mudou, para não interromper a composição do teclado à toa. */
+    private fun writeDraft(value: TextFieldValue) {
+        draftState.edit {
+            if (toString() != value.text) replace(0, length, value.text)
+            selection = value.selection.coerceIn(0, length)
+        }
+    }
+
+    /** O texto veio de dentro (restaurar, editar, voltar de uma edição, enviar): é o novo ponto de partida, não digitação. */
+    private fun replaceDraft(text: String) {
+        writeDraft(TextFieldValue(text, TextRange(text.length)))
+        settledText = text
     }
 
     /** Guarda o compositor como rascunho da conversa; durante uma edição o que vale é o de antes dela. */
@@ -359,7 +420,8 @@ class ChatViewModel(
             return // sem ler o banco a conversa abre vazia, como se não houvesse rascunho
         }
         if (stashed != null) return
-        if (!textChanged) draft = TextFieldValue(saved.text, TextRange(saved.text.length))
+        // Digitação que o campo ainda não contou (o aviso vem no quadro seguinte) também vale como "já mexeu".
+        if (!textChanged && draft.text == settledText) replaceDraft(saved.text)
         if (_state.value.replyTo == null) _state.update { it.copy(replyTo = reply) }
     }
 
@@ -367,8 +429,7 @@ class ChatViewModel(
     private fun finishEdit() {
         val before = stashed
         stashed = null
-        val text = before?.text.orEmpty()
-        draft = TextFieldValue(text, TextRange(text.length))
+        replaceDraft(before?.text.orEmpty())
         _state.update { it.copy(editing = null, replyTo = before?.replyTo) }
     }
 
@@ -381,6 +442,8 @@ class ChatViewModel(
         val s = _state.value
         val text = draft.text
         if (s.savingEdit || (text.isBlank() && s.files.isEmpty())) return
+        // Arquivo que o provedor já perdeu não vai: o usuário o tira antes, e o que escreveu fica onde está.
+        if (s.files.any { it.unavailable }) return
         // Sem permissão de envio só se edita: o servidor deixa o autor editar a própria mensagem sem olhar o envio.
         if (s.editing == null && !access.value.send) return
         val content = encodeMentions(text, pickedMentions, chat.users.value.values)
@@ -388,8 +451,8 @@ class ChatViewModel(
         if (editing == null) {
             chat.enqueue(channelId, content, s.replyTo?.id, s.files)
             pickedMentions.clear()
-            _state.update { it.copy(replyTo = null, files = emptyList(), error = null) }
-            draft = TextFieldValue("")
+            _state.update { it.copy(replyTo = null, files = emptyList(), attachProblem = null, error = null) }
+            replaceDraft("")
             session.drafts.save(channelId, null)
             session.drafts.flush()
             return
@@ -455,7 +518,6 @@ class ChatViewModel(
 
     private companion object {
         const val PAGE = 60L
-        const val MAX_FILES = 10
     }
 }
 

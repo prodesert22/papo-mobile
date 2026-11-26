@@ -9,34 +9,26 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -50,20 +42,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.account.ServerUrl
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.safeLink
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackFailure
 import chat.papo.mobile.media.playableAttachment
 import chat.papo.mobile.media.relayVideo
 import chat.papo.mobile.resources.Res
-import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.action_retry
 import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.resources.video_download_failed
@@ -79,6 +70,7 @@ import chat.papo.mobile.resources.video_failed_unavailable
 import chat.papo.mobile.resources.video_failed_unsupported
 import chat.papo.mobile.resources.video_open_in_browser
 import chat.papo.mobile.ui.components.LocalPlatformUi
+import chat.papo.mobile.ui.components.VideoPlayerState
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -107,7 +99,13 @@ internal class PlayingVideo(val key: String, var positionMs: Long = 0L) {
  * (o relay do servidor), [attachment] é null e [pageUrl] é a página do embed, que o **Abrir no navegador** abre
  * (null se o embed não tem uma URL `http` ou `https`).
  */
-internal data class OpenVideo(val media: PlayableMedia, val attachment: AttachmentDto?, val pageUrl: String? = null) {
+internal data class OpenVideo(
+    val media: PlayableMedia,
+    val attachment: AttachmentDto?,
+    val pageUrl: String? = null,
+    /** A mensagem do [attachment], para gravá-lo como bloqueado se o servidor responder 410; null de um embed. */
+    val messageId: String? = null,
+) {
     /** Só há dois jeitos de chegar aqui: anexo (tem arquivo para baixar) ou embed (só o relay, sem arquivo). */
     val isEmbed: Boolean get() = attachment == null
 }
@@ -121,7 +119,7 @@ internal fun findOpenVideo(server: ServerUrl, messages: List<Message>, key: Stri
     for (message in messages) {
         for (attachment in message.attachments) {
             val media = playableAttachment(server, attachment) ?: continue
-            if (media.key == key) return OpenVideo(media, attachment)
+            if (media.key == key) return OpenVideo(media, attachment, messageId = message.id)
         }
         for (embed in message.embeds) {
             val media = relayVideo(server, embed) ?: continue
@@ -131,18 +129,8 @@ internal fun findOpenVideo(server: ServerUrl, messages: List<Message>, key: Stri
     return null
 }
 
-/** Uma página que abre fora do app: só `http` e `https`, com host e sem espaços (regra 6). Qualquer outra coisa vira null. */
-private val WEB_LINK = Regex("""https?://[^\s/?#]+\S*""", RegexOption.IGNORE_CASE)
-
-/**
- * O link da web de [url], ou null se não for um (ver [WEB_LINK]). O esquema sai em minúsculas: o Android só resolve
- * `https://` para o navegador, e `Https://` (como alguns teclados escrevem) não acha aplicativo nenhum.
- */
-internal fun webLink(url: String?): String? {
-    if (url == null || !WEB_LINK.matches(url)) return null
-    val schemeEnd = url.indexOf("://")
-    return url.substring(0, schemeEnd).lowercase() + url.substring(schemeEnd)
-}
+/** O link da web de [url], ou null se não for um: a regra é a de [safeLink] (só `http` e `https`, regra 6). */
+internal fun webLink(url: String?): String? = safeLink(url)
 
 /** O que o painel de falha oferece além de fechar. */
 internal data class FailureActions(val retry: Boolean, val download: Boolean, val browser: Boolean = false)
@@ -183,9 +171,10 @@ internal fun failureMessage(failure: PlaybackFailure, embed: Boolean): StringRes
 private class Resume(var positionMs: Long)
 
 /**
- * Tela cheia do vídeo, em fundo preto: o título, o botão de fechar e o player da plataforma, que fala com o servidor
- * pelo `PapoClient` da [session] dona da mensagem. Se o player desiste, o painel diz o motivo e oferece o que ainda
- * adianta (ver [failureActions]); **Tentar de novo** recria o player no último ponto conhecido.
+ * Tela cheia do vídeo, em fundo preto: o player da plataforma, que fala com o servidor pelo `PapoClient` da [session] dona
+ * da mensagem, com os controles do app por cima ([VideoControls]) e a barra de título com o botão de fechar, que aparece e
+ * some junto com eles. Se o player desiste, o painel diz o motivo e oferece o que ainda adianta (ver [failureActions]);
+ * **Tentar de novo** recria o player no último ponto conhecido.
  *
  * [startAtMs] é só o ponto de partida; [onPosition] recebe o ponto atual enquanto toca.
  */
@@ -202,9 +191,18 @@ internal fun VideoViewer(
     val download = video.attachment?.let { rememberAttachmentDownload(session, it) }
     var attempt by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<PlaybackFailure?>(null) }
-    // A barra de título acompanha os controles do player: some com eles e deixa o vídeo limpo.
-    var controlsVisible by remember { mutableStateOf(true) }
+    val playerState = remember { VideoPlayerState() }
+    // A barra de título acompanha os controles do vídeo: some com eles e deixa o vídeo limpo.
+    val controls = rememberVideoControlsVisibility(playerState)
     val resume = remember { Resume(startAtMs) }
+    // 410: o anexo foi bloqueado pela moderação. Gravá-lo troca o cartão pelo aviso e, sem o vídeo tocável, a tela se fecha.
+    LaunchedEffect(failure) {
+        val messageId = video.messageId
+        val attachment = video.attachment
+        if (failure == PlaybackFailure.Gone && messageId != null && attachment != null) {
+            session.chat.markBlocked(messageId, attachment.id)
+        }
+    }
     // Enquanto o vídeo está aberto as capas dos cartões esperam: o player e elas disputariam o limite de pedidos.
     DisposableEffect(session) {
         session.videoPosters.playerOpened()
@@ -226,14 +224,15 @@ internal fun VideoViewer(
                         media = video.media,
                         startAtMs = startAt,
                         modifier = Modifier.fillMaxSize(),
+                        state = playerState,
                         onPosition = {
                             resume.positionMs = it
                             onPosition(it)
                         },
                         onFailure = { failure = it },
-                        onControlsVisible = { controlsVisible = it },
                     )
                 }
+                VideoControls(playerState, controls, Modifier.fillMaxSize())
             } else {
                 FailurePanel(
                     message = failureMessage(failed, embed = video.isEmbed),
@@ -249,31 +248,12 @@ internal fun VideoViewer(
             }
             // Sem o player (painel de falha) não há controles, e o título com o fechar fica sempre à vista.
             AnimatedVisibility(
-                visible = controlsVisible || failure != null,
+                visible = controls.visible || failure != null,
                 modifier = Modifier.align(Alignment.TopStart),
                 enter = fadeIn(),
                 exit = fadeOut(),
             ) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                        .padding(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.Close, contentDescription = stringResource(Res.string.action_close), tint = Color.White)
-                    }
-                    Text(
-                        video.media.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.MiddleEllipsis,
-                        modifier = Modifier.weight(1f).padding(end = 12.dp),
-                    )
-                }
+                ViewerTopBar(title = video.media.title, counter = null, onDismiss = onDismiss)
             }
         }
     }

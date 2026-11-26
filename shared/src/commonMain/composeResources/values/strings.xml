@@ -223,6 +223,15 @@
     <string name="video_embed_failed_not_found">Vídeo indisponível.</string>
     <string name="video_embed_failed_unavailable">O servidor não conseguiu buscar o vídeo agora.</string>
     <string name="video_open_in_browser">Abrir no navegador</string>
+    <!-- Controles do player de vídeo (0.6.0-beta.2): tela cheia e visualizador de mídia -->
+    <string name="video_pause">Pausar vídeo</string>
+    <string name="video_replay">Reproduzir de novo</string>
+    <string name="video_loading">Carregando o vídeo</string>
+    <string name="video_back_10">Voltar 10 segundos</string>
+    <string name="video_forward_10">Avançar 10 segundos</string>
+    <string name="video_position">Posição do vídeo</string>
+    <string name="video_time">%1$s de %2$s</string>
+    <string name="video_controls_toggle">Mostrar ou esconder os controles</string>
     <string name="msg_select">Selecionar texto</string>
     <string name="mention_everyone_hint">Avisa todos que leem o canal</string>
     <string name="chat_empty_read_only">Nenhuma mensagem por aqui ainda.</string>
@@ -238,6 +247,17 @@
     <string name="reactors_title">Reações</string>
     <string name="reactors_empty">Ninguém reagiu com este emoji.</string>
     <string name="reactors_load_more">Carregar mais</string>
+    <string name="chat_app_badge">APP</string>
+    <string name="chat_app_badge_description">Aplicativo</string>
+
+    <!-- Perfil -->
+    <string name="profile_open">Ver perfil</string>
+    <string name="profile_message">Mensagem</string>
+    <string name="profile_copy_username">Copiar @usuário</string>
+    <string name="profile_about">Sobre</string>
+    <string name="profile_roles">Cargos</string>
+    <string name="profile_member_since">Membro desde %1$s</string>
+    <string name="profile_not_found">Este perfil não foi encontrado. A conta pode ter sido removida.</string>
 
     <!-- Busca -->
     <string name="search_title">Buscar mensagens</string>
@@ -277,6 +297,22 @@
     <string name="search_end">Fim dos resultados</string>
     <string name="search_truncated">Mostrando os primeiros %1$d resultados. Refine a busca para ver os outros.</string>
     <string name="search_no_text">Mensagem sem texto</string>
+
+    <!-- Membros -->
+    <string name="members_open">Membros</string>
+    <string name="members_title">Membros</string>
+    <plurals name="members_count">
+        <item quantity="one">%1$d membro</item>
+        <item quantity="other">%1$d membros</item>
+    </plurals>
+    <string name="members_search">Buscar membro</string>
+    <string name="members_none">Ninguém encontrado.</string>
+    <string name="members_section_online">Disponível — %1$d</string>
+    <string name="members_section_away">Ausente — %1$d</string>
+    <string name="members_section_busy">Ocupado — %1$d</string>
+    <string name="members_section_offline">Offline — %1$d</string>
+    <string name="members_you">você</string>
+    <string name="members_view_profile">Ver perfil</string>
 
     <!-- Troca rápida de conversa -->
     <string name="switcher_title">Trocar de conversa</string>
@@ -318,4 +354,69 @@
     <string name="call_end_room_closed">O canal de voz foi encerrado.</string>
     <string name="call_end_failed">Não foi possível entrar na chamada.</string>
     <string name="call_unsupported">Chamadas ainda não estão disponíveis neste aparelho.</string>
+
+    <!-- Embeds e mídia (0.6.0): cada trilha e onda escreve só no seu bloco, para os ramos mesclarem sem conflito. -->
+    <!-- 02 · trilha A · onda 1 (galeria e envio) -->
+    <string name="attach_photo_video">Foto ou vídeo</string>
+    <string name="attach_file">Arquivo</string>
+    <string name="attach_badge_gif">GIF</string>
+    <string name="attach_unavailable">Arquivo indisponível</string>
+    <string name="attach_has_location">Esta foto tem a sua localização</string>
+    <string name="attach_problem_too_many">Uma mensagem leva até %1$s arquivos. O que passou disso não foi adicionado.</string>
+    <string name="attach_problem_file_too_large">“%1$s” passa de %2$s MB, o limite de cada arquivo, e não foi adicionado.</string>
+    <string name="attach_problem_total_too_large">Os arquivos passam de %1$s MB juntos. O que não coube não foi adicionado: mande o resto em outra mensagem.</string>
+    <string name="outbox_failed_too_large">Não enviada: os arquivos passam do limite de tamanho do servidor. Tire alguns e reenvie.</string>
+    <string name="outbox_failed_file_unavailable">Não enviada: “%1$s” não está mais disponível.</string>
+    <!-- 02 · trilha B · onda 1 (embed completo, GIF, moderação) -->
+    <string name="embed_show_more">Mostrar mais</string>
+    <string name="embed_show_less">Mostrar menos</string>
+    <string name="embed_open_link">Abrir o link</string>
+    <string name="attachment_gif_badge">GIF</string>
+    <string name="attachment_blocked">Removido pela moderação</string>
+    <!-- 02 · trilha A · onda 2 (visualizador) -->
+    <string name="viewer_counter">%1$d/%2$d</string>
+    <string name="viewer_save">Salvar</string>
+    <string name="viewer_share">Compartilhar</string>
+    <string name="viewer_saved">Salvo em Downloads</string>
+    <string name="viewer_save_failed">Não foi possível salvar</string>
+    <string name="viewer_share_failed">Não foi possível compartilhar</string>
+    <string name="viewer_image_failed">Não foi possível abrir esta imagem</string>
+    <string name="attach_preview_open">Ver a imagem inteira</string>
+    <!-- 02 · trilha B · 0.6.0-beta.2 (imagem de embed no visualizador) -->
+    <string name="embed_image_open">Abrir a imagem</string>
+    <!-- 02 · trilha B · onda 2 (vídeo no cartão, YouTube) -->
+    <string name="video_open_fullscreen">Abrir em tela cheia</string>
+    <string name="embed_youtube_label">YouTube</string>
+    <string name="embed_youtube_open">Abrir no YouTube</string>
+    <string name="embed_youtube_player">Player do YouTube</string>
+    <string name="embed_youtube_stopped">O player do YouTube parou. Use Abrir no YouTube.</string>
+    <!-- 02 · trilha A · onda 3 (áudio) -->
+    <string name="audio_default_title">Áudio</string>
+    <string name="audio_play">Tocar áudio</string>
+    <string name="audio_pause">Pausar áudio</string>
+    <string name="audio_loading">Carregando o áudio</string>
+    <string name="audio_position">Posição do áudio</string>
+    <string name="audio_time">%1$s / %2$s</string>
+    <string name="audio_speed_normal">1×</string>
+    <string name="audio_speed_fast">1,5×</string>
+    <string name="audio_speed_faster">2×</string>
+    <string name="audio_speed_change">Velocidade do áudio: %1$s</string>
+    <string name="audio_failed_session_ended">Sua sessão terminou. Entre de novo para ouvir o áudio.</string>
+    <string name="audio_failed_forbidden">Você não tem acesso a este áudio.</string>
+    <string name="audio_failed_not_found">Este áudio não está mais disponível.</string>
+    <string name="audio_failed_gone">Este áudio foi removido ou mudou.</string>
+    <string name="audio_failed_rate_limited">O servidor pediu um tempo. Espere um pouco e tente de novo.</string>
+    <string name="audio_failed_unavailable">O servidor não conseguiu enviar o áudio agora.</string>
+    <string name="audio_failed_unsupported">Formato de áudio não suportado neste aparelho. Baixe o arquivo para ouvir em outro aplicativo.</string>
+    <string name="audio_failed_network">Não foi possível carregar o áudio. Confira a sua conexão.</string>
+    <string name="audio_bar_open">Ir para o áudio na conversa</string>
+    <string name="audio_bar_stop">Parar o áudio</string>
+    <!-- 02 · trilha B · onda 3 (links, teclado) -->
+    <string name="embed_youtube_unavailable">O player do YouTube não funciona neste aparelho. Use Abrir no YouTube.</string>
+    <string name="link_confirm_title">Abrir este link?</string>
+    <string name="link_confirm_body">O texto do link não mostra para onde ele leva. Ele abre:</string>
+    <string name="link_confirm_open">Abrir</string>
+    <string name="msg_links">Links</string>
+    <string name="msg_link_copy">Copiar link</string>
+    <string name="msg_link_open">Abrir link</string>
 </resources>

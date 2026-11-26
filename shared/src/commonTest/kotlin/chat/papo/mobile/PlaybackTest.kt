@@ -7,6 +7,7 @@ import chat.papo.mobile.data.api.EmbedMediaDto
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackErrorKind
 import chat.papo.mobile.media.PlaybackFailure
+import chat.papo.mobile.media.aspectOrNull
 import chat.papo.mobile.media.classifyPlayback
 import chat.papo.mobile.media.playableAttachment
 import chat.papo.mobile.media.relayVideo
@@ -251,6 +252,25 @@ class PlaybackTest {
     fun proporcaoMuitoAltaOuMuitoLargaFicaNoLimite() {
         assertEquals(0.5f, videoAspect(100, 1000), 0.0001f)
         assertEquals(2.5f, videoAspect(3000, 1000), 0.0001f)
+    }
+
+    // aspectOrNull
+
+    @Test
+    fun semMedidasValidasAProporcaoEAusente() {
+        listOf(
+            null to null, 300 to null, null to 200,
+            0 to 200, 300 to 0, -300 to 200, 300 to -200, 0 to 0,
+        ).forEach { (w, h) -> assertNull(aspectOrNull(w, h), "$w x $h") }
+    }
+
+    @Test
+    fun medidasValidasDaoALarguraSobreAlturaLimitadaEntreMeioEDoisEMeio() {
+        assertEquals(1.5f, aspectOrNull(300, 200))
+        assertEquals(0.5f, aspectOrNull(10, 100))
+        assertEquals(2.5f, aspectOrNull(100, 10))
+        assertEquals(0.5f, aspectOrNull(50, 100))
+        assertEquals(2.5f, aspectOrNull(250, 100))
     }
 
     // classifyPlayback

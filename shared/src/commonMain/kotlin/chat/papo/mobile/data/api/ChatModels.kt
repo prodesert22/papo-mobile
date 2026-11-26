@@ -168,24 +168,67 @@ data class EmbedMediaDto(
     @SerialName("mime_type") val mimeType: String? = null,
     val width: Int? = null,
     val height: Int? = null,
+    @SerialName("size_bytes") val sizeBytes: Long? = null,
 )
 
+/** Autor declarado pelo site (oEmbed) ou pelo embed customizado; o ícone vem em `author_image_data` de `GET /embeds/{id}`. */
+@Serializable
+data class EmbedAuthorDto(
+    val name: String? = null,
+    val url: String? = null,
+    val media: EmbedMediaDto? = null,
+)
+
+/** Rodapé do embed. O servidor não serve o ícone (`GET /embeds/{id}` só devolve a imagem e o ícone do autor). */
+@Serializable
+data class EmbedFooterDto(
+    val text: String? = null,
+    val icon: EmbedMediaDto? = null,
+)
+
+@Serializable
+data class EmbedFieldDto(
+    val position: Int = 0,
+    val name: String = "",
+    val value: String = "",
+    val inline: Boolean = false,
+)
+
+/**
+ * Embed de mensagem (`Embed` na OpenAPI). Todos os campos novos têm padrão: as linhas antigas do banco, gravadas antes de
+ * eles existirem, continuam decodificando, e só os ganham quando a mensagem é relida ou chega `message_embeds_update`.
+ */
 @Serializable
 data class EmbedDto(
     val id: String,
     @SerialName("source_type") val sourceType: String? = null,
+    /** `opengraph`, `oembed`, `gif` ou `manual`; outro valor é tratado como um embed comum. */
+    @SerialName("fetch_method") val fetchMethod: String? = null,
     val provider: String? = null,
     @SerialName("site_name") val siteName: String? = null,
     val url: String? = null,
     val title: String? = null,
     val description: String? = null,
+    /** `#RRGGBB` do embed customizado; qualquer outra forma é ignorada. */
+    val color: String? = null,
+    val author: EmbedAuthorDto? = null,
     val thumbnail: EmbedMediaDto? = null,
     val image: EmbedMediaDto? = null,
     val video: EmbedMediaDto? = null,
+    val footer: EmbedFooterDto? = null,
+    val fields: List<EmbedFieldDto> = emptyList(),
+    /** Obsoleto: as respostas atuais não o emitem (o iframe do YouTube vem em [video]). */
+    @SerialName("embed_url") val embedUrl: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("fetched_at") val fetchedAt: String? = null,
 )
 
+/** Resposta de `GET /embeds/{id}`: a imagem do embed (thumbnail, ou a image sem thumbnail) e o ícone do autor, em base64. */
 @Serializable
-data class EmbedWithImageDto(@SerialName("image_data") val imageData: String? = null)
+data class EmbedWithImageDto(
+    @SerialName("image_data") val imageData: String? = null,
+    @SerialName("author_image_data") val authorImageData: String? = null,
+)
 
 @Serializable
 data class MessageDto(
@@ -274,9 +317,6 @@ data class IceServerDto(val urls: List<String> = emptyList(), val username: Stri
 
 @Serializable
 data class IceServersResponse(@SerialName("ice_servers") val iceServers: List<IceServerDto> = emptyList())
-
-/** Arquivo escolhido pelo usuário para enviar. [read] abre o conteúdo do zero a cada chamada. */
-class OutgoingFile(val name: String, val mimeType: String, val size: Long, val read: () -> ByteArray)
 
 /**
  * Uma reação de alguém (`MessageReactionUser`). [createdAt] fica como o servidor mandou: junto de [id] é o cursor da

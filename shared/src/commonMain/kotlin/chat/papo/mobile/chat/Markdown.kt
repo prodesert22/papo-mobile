@@ -17,6 +17,15 @@ data class TextSpan(
     val everyone: Boolean = false,
 )
 
+/**
+ * Se o texto do link esconde o destino: `[banco](https://outro.example)` mostra "banco" e leva a outro lugar. Um endereço
+ * solto mostra o próprio destino, com ou sem o `https://` (o `www.` ganha o esquema ao virar link), e não esconde nada.
+ */
+fun TextSpan.hidesDestination(): Boolean {
+    val destination = link ?: return false
+    return text != destination && text != destination.removePrefix("https://")
+}
+
 /** Bloco de uma mensagem: texto corrido, item de lista ou régua horizontal. */
 sealed interface MarkdownBlock {
     /** Linhas de texto separadas por `\n`, como [Markdown.parse] as devolve; sem spans é uma linha em branco. */
@@ -45,6 +54,7 @@ object Markdown {
     private val bullets = listOf("•", "◦", "▪")
     private val mention = Regex("""^@mention\(<@([0-9a-fA-F-]{36})>\)""")
     private val url = Regex("""^https?://[^\s<>"]+""")
+    private val wwwUrl = Regex("""^www\.[^\s<>"]+""", RegexOption.IGNORE_CASE)
     private val namedLink = Regex("""^\[([^\]\n]+)]\((https?://[^\s)]+)\)""")
     private val heading = Regex("""^#{1,6}\s+""")
     private val fence = Regex("""```[^\n`]*\n?([\s\S]*?)```""")
@@ -60,6 +70,12 @@ object Markdown {
     /** A mensagem em blocos, na ordem em que aparecem. */
     fun blocks(content: String): List<MarkdownBlock> =
         if (content.isEmpty()) emptyList() else Scanner(structured = true).scan(logicalLines(content))
+
+    /**
+     * Os destinos dos links de [content], na ordem em que aparecem e sem repetir: o endereço de cada `[texto](url)` (não o
+     * texto), e o de cada endereço solto, com o `https://` que o `www.` ganha. Código, em linha ou em bloco, não tem link.
+     */
+    fun linksIn(content: String): List<String> = parse(content).mapNotNull { it.link }.distinct()
 
     /**
      * Onde [content] é texto literal e um `:nome:` não vira emoji: código em bloco e em linha, links nomeados e endereços
@@ -400,9 +416,20 @@ object Markdown {
             if (c == 'h') {
                 val m = url.find(rest)
                 if (m != null && (i == 0 || !text[i - 1].isLetterOrDigit())) {
-                    val address = m.value.trimEnd('.', ',', ')', '!', '?', ';', ':', '*', '_', '~')
+                    val address = withoutTrailingPunctuation(m.value)
                     flush()
                     out += style.copy(text = address, link = address)
+                    literals?.add(base + i until base + i + address.length)
+                    i += address.length
+                    continue
+                }
+            }
+            if (c == 'w' || c == 'W') {
+                val m = wwwUrl.find(rest)
+                if (m != null && wwwStartsLink(text, i)) {
+                    val address = withoutTrailingPunctuation(m.value)
+                    flush()
+                    out += style.copy(text = address, link = "https://$address")
                     literals?.add(base + i until base + i + address.length)
                     i += address.length
                     continue
@@ -434,6 +461,25 @@ object Markdown {
         }
         flush()
     }
+
+    /** O endereço sem a pontuação da frase que vem colada no fim dele. */
+    private fun withoutTrailingPunctuation(address: String) = address.trimEnd('.', ',', ')', '!', '?', ';', ':', '*', '_', '~')
+
+    /**
+     * Se o `www.` em [at] começa um link, pelas bordas do cliente de terminal: não no meio de uma palavra nem de um
+     * endereço maior (depois de letra, dígito, caractere fora do ASCII ou de `/ . - _ @ :`, como em `a@www.x.com`), e com
+     * uma letra ou dígito (ou caractere fora do ASCII) logo depois do ponto, o começo do nome do site.
+     */
+    private fun wwwStartsLink(text: String, at: Int): Boolean {
+        val before = text.getOrNull(at - 1)
+        if (before != null && (before.isAsciiAlphanumeric() || before.code >= NON_ASCII || before in "/.-_@:")) return false
+        val host = text[at + "www.".length]
+        return host.isAsciiAlphanumeric() || host.code >= NON_ASCII
+    }
+
+    private fun Char.isAsciiAlphanumeric() = this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
+
+    private const val NON_ASCII = 0x80
 
     /** Posição do fechamento de [delimiter] a partir de [from], ou -1. */
     private fun closing(text: String, from: Int, delimiter: String): Int {

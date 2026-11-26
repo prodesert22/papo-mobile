@@ -127,6 +127,14 @@ class VideoViewerTest {
     // findOpenVideo
 
     @Test
+    fun oAnexoAchadoLevaAMensagemDeOndeSaiuEOEmbedNao() {
+        val found = findOpenVideo(server, listOf(message("m1", attachment("a1")), message("m2", attachment("a2"))), "attachment:a2")
+        assertEquals("m2", found?.messageId)
+        // Só o anexo pode ser gravado como bloqueado: o embed não tem anexo nem mensagem de onde o 410 o tire.
+        assertNull(assertNotNull(findOpenVideo(server, listOf(embedMessage("m3", embed("e1"))), "embed:e1")).messageId)
+    }
+
+    @Test
     fun achaOAnexoPelaChaveEDevolveAMidiaDoServidorEOAnexoParaBaixar() {
         val wanted = attachment("a2")
         val found = findOpenVideo(server, listOf(message("m1", attachment("a1")), message("m2", wanted)), "attachment:a2")

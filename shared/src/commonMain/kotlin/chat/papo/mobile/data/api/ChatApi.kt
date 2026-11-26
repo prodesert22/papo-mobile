@@ -1,6 +1,7 @@
 package chat.papo.mobile.data.api
 
 import io.ktor.client.request.delete
+import io.ktor.client.request.forms.ChannelProvider
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.get
@@ -17,6 +18,12 @@ import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.cancel
+import kotlin.concurrent.Volatile
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** Endpoints de conversa: canais, DMs, usuários, mensagens, reações, pins e mídia. */
 class ChatApi(private val client: PapoClient) {
@@ -56,6 +63,9 @@ class ChatApi(private val client: PapoClient) {
     /** Bytes do avatar, ou null se o usuário não tem um. */
     suspend fun avatar(userId: String): ByteArray? = bytesOrNull("/users/$userId/avatar")
 
+    /** Bytes do avatar persistente de um webhook (rota pública, sem cookie), ou null se ele não tem um. */
+    suspend fun webhookAvatar(webhookId: String): ByteArray? = bytesOrNull("/webhooks/$webhookId/avatar")
+
     suspend fun messages(
         channelId: String,
         since: String? = null,
@@ -72,9 +82,11 @@ class ChatApi(private val client: PapoClient) {
         }.bodyOrThrow()
 
     /**
-     * Envia uma mensagem. [onProgress] recebe os bytes do corpo já entregues ao motor HTTP e o
-     * total (null se o motor não o conhece); quando o total é alcançado, o servidor pode ter
-     * recebido tudo. Sai do zero de novo se o cliente repete o pedido depois de renovar a sessão.
+     * Envia uma mensagem. Os arquivos vão do [OutgoingFile.open] direto para o corpo, em fluxo, sem virar `ByteArray`;
+     * o fluxo é aberto de novo se o cliente repete o pedido depois de renovar a sessão. [onProgress] recebe os bytes
+     * do corpo já entregues ao motor HTTP e o total (null se o motor não o conhece: algum arquivo sem tamanho faz o
+     * corpo sair em pedaços); quando o total é alcançado, o servidor pode ter recebido tudo. Sai do zero de novo se
+     * o cliente repete o pedido. Lança [FileUnavailableException] se um arquivo não abre ou falha na leitura.
      */
     suspend fun sendMessage(
         channelId: String,
@@ -82,29 +94,40 @@ class ChatApi(private val client: PapoClient) {
         replyTo: String?,
         files: List<OutgoingFile>,
         onProgress: ((sent: Long, total: Long?) -> Unit)? = null,
-    ): MessageDto =
-        http.submitFormWithBinaryData(
-            url = path("/messages"),
-            formData = formData {
-                append("channel_id", channelId)
-                if (content.isNotEmpty()) append("content", content)
-                replyTo?.let { append("reply_to", it) }
-                files.forEach { file ->
-                    append(
-                        "attachments",
-                        file.read(),
-                        Headers.build {
-                            append(HttpHeaders.ContentType, file.mimeType)
-                            append(HttpHeaders.ContentDisposition, "filename=\"${file.name.replace("\"", "")}\"")
-                        },
-                    )
-                }
-            },
-        ) {
-            // Envio de anexos pode demorar bem mais que uma requisição comum.
-            timeout { requestTimeoutMillis = 10 * 60_000; socketTimeoutMillis = 120_000 }
-            if (onProgress != null) onUpload { sent, total -> onProgress(sent, total) }
-        }.bodyOrThrow()
+    ): MessageDto {
+        val opened = OpenedFiles()
+        try {
+            return http.submitFormWithBinaryData(
+                url = path("/messages"),
+                formData = formData {
+                    append("channel_id", channelId)
+                    if (content.isNotEmpty()) append("content", content)
+                    replyTo?.let { append("reply_to", it) }
+                    files.forEach { file ->
+                        append(
+                            "attachments",
+                            ChannelProvider(file.size) { opened.open(file) },
+                            Headers.build {
+                                append(HttpHeaders.ContentType, file.mimeType)
+                                append(HttpHeaders.ContentDisposition, "filename=\"${file.name.replace("\"", "")}\"")
+                            },
+                        )
+                    }
+                },
+            ) {
+                // Envio de anexos pode demorar bem mais que uma requisição comum.
+                timeout { requestTimeoutMillis = 10 * 60_000; socketTimeoutMillis = 120_000 }
+                if (onProgress != null) onUpload { sent, total -> onProgress(sent, total) }
+            }.bodyOrThrow()
+        } catch (e: Throwable) {
+            // Quem cancelou o envio segue cancelando. O motor pode embrulhar o que o arquivo lançou (o OkHttp o
+            // esconde numa IOException), então a falha do arquivo vale mais que o que chegou aqui.
+            currentCoroutineContext().ensureActive()
+            throw opened.failure ?: e.fileFailure() ?: e
+        } finally {
+            opened.closeAll()
+        }
+    }
 
     suspend fun editMessage(messageId: String, content: String): MessageDto =
         http.put {
@@ -192,8 +215,9 @@ class ChatApi(private val client: PapoClient) {
 
     suspend fun media(sha: String): ByteArray = bytes("/media/$sha")
 
-    suspend fun embedImageBase64(embedId: String): String? =
-        http.get { url(path("/embeds/$embedId")) }.bodyOrThrow<EmbedWithImageDto>().imageData
+    /** `GET /embeds/{id}`: a imagem do embed e o ícone do autor, em base64, num pedido só. */
+    suspend fun embed(embedId: String): EmbedWithImageDto =
+        http.get { url(path("/embeds/$embedId")) }.bodyOrThrow()
 
     fun attachmentUrl(fileId: String): String = path("/attachments/$fileId")
 
@@ -212,3 +236,44 @@ class ChatApi(private val client: PapoClient) {
         }
     }
 }
+
+/**
+ * Abre os arquivos de um envio, que o motor HTTP lê na thread dele, e é quem os fecha: uma leitura interrompida
+ * (cancelamento, rede que caiu) não fecha o fluxo do provedor. Guarda a falha do primeiro arquivo que não abriu.
+ */
+private class OpenedFiles {
+    @Volatile var failure: FileUnavailableException? = null
+        private set
+
+    @Volatile private var channels: List<ByteReadChannel> = emptyList()
+
+    fun open(file: OutgoingFile): ByteReadChannel {
+        val channel = try {
+            file.open()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw FileUnavailableException(file.name, e).also { failure = failure ?: it }
+        }
+        channels += channel
+        return channel
+    }
+
+    /** Fecha o que ficou aberto; um fluxo já lido até o fim ignora o pedido. */
+    fun closeAll() {
+        val open = channels
+        channels = emptyList()
+        for (channel in open) {
+            try {
+                channel.cancel()
+            } catch (e: Exception) {
+                // O fluxo está sendo descartado: uma falha ao fechá-lo não muda o resultado do envio.
+            }
+        }
+    }
+}
+
+private fun Throwable.fileFailure(): FileUnavailableException? =
+    generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH).filterIsInstance<FileUnavailableException>().firstOrNull()
+
+private const val MAX_CAUSE_DEPTH = 10

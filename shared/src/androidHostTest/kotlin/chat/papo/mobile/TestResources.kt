@@ -11,9 +11,15 @@ import chat.papo.mobile.media.MediaCache
 import chat.papo.mobile.platform.JcaCrypto
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 object TestResources {
     fun driver(): JdbcSqliteDriver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { AccountDb.Schema.create(it) }
@@ -30,5 +36,13 @@ object TestResources {
         val dispatcher = StandardTestDispatcher(scope.testScheduler)
         val client = PapoClient(engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt"))
         return AccountSession("conta", userId, client, scope.backgroundScope, inMemory(dispatcher), dispatcher)
+    }
+
+    /**
+     * Espera, em tempo real e por até [timeout], [condition] valer. É para o que o motor HTTP falso faz na
+     * thread dele, como receber um pedido que saiu em paralelo, e que o relógio virtual do `runTest` não acompanha.
+     */
+    suspend fun waitUntil(timeout: Duration = 10.seconds, condition: () -> Boolean) = withContext(Dispatchers.Default) {
+        withTimeout(timeout) { while (!condition()) delay(5) }
     }
 }

@@ -46,7 +46,11 @@ tem cargos, permissões de canal e uma dona (`dona`, `Senha@000`); a docstring d
 N-ésimo pedido de vídeo.
 Uma mensagem com um link `https://videos.example.com/...` ganha um embed de vídeo cerca
 de um segundo depois (`GET /embeds/{id}` e o relay `/embeds/{id}/video`, que serve um vídeo
-semeado com `Range`), e `FAKE_RELAY_502=1` faz o relay responder 502.
+semeado com `Range`), e `FAKE_RELAY_502=1` faz o relay responder 502. `FAKE_AUDIO_DIR`
+semeia os áudios de uma pasta no canal `audio`, `FAKE_UPLOAD_KBPS` limita a velocidade dos
+envios e `FAKE_YOUTUBE_ID` define o id do embed do YouTube semeado (um inventado por padrão,
+que o YouTube responde como indisponível). Os canais `embeds` e `galeria` têm prévias de
+links, GIFs, estados de moderação e mensagens com várias imagens e vídeos.
 
 ## Builds de release
 

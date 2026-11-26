@@ -5,8 +5,11 @@ import chat.papo.mobile.chat.AccessStore
 import chat.papo.mobile.chat.ChatStore
 import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
+import chat.papo.mobile.chat.ProfileCache
 import chat.papo.mobile.chat.RecentEmojis
 import chat.papo.mobile.chat.RecentSearchFilters
+import chat.papo.mobile.chat.WebhookAvatars
+import chat.papo.mobile.chat.profileStamp
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AuthApi
 import chat.papo.mobile.data.api.ChatApi
@@ -52,6 +55,10 @@ class AccountSession(
     /** Dono do servidor, cargos e entradas por canal desta conta; o `ChatStore` o lê e o atualiza. */
     val permissions = AccessStore(db.metaQueries, api, scope, io, server = auth::server)
     val chat = ChatStore(userId, db, api, ws, scope, io, permissions)
+    /** Avatares dos webhooks: um pedido ao servidor por sessão, depois o cache de mídia cifrado da conta. */
+    val webhookAvatars = WebhookAvatars(api, media, scope)
+    /** Perfis lidos nesta sessão; a leitura vale enquanto a presença, o apelido e o avatar do usuário não mudam. */
+    val profiles = ProfileCache(api, media, scope, background, stampOf = { id -> profileStamp(chat.users.value[id], chat.presence.value[id]) })
 
     private var started = false
 
