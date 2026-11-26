@@ -403,7 +403,7 @@ fun MessageItem(
                 }
                 message.embeds.forEach { embed ->
                     Spacer(Modifier.height(6.dp))
-                    EmbedCard(session, embed, onPlay)
+                    EmbedCard(session, embed, users, emojiIds, unicodeEmojis, onPlay)
                 }
                 if (message.reactions.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
@@ -428,7 +428,7 @@ fun MessageItem(
 private val HighlightBarWidth = 3.dp
 
 /** Uma barra de [width] no começo da linha, na altura toda: à esquerda, ou à direita em idiomas da direita para a esquerda. */
-private fun Modifier.startBar(color: Color, width: Dp): Modifier = drawBehind {
+internal fun Modifier.startBar(color: Color, width: Dp): Modifier = drawBehind {
     val barWidth = width.toPx()
     val x = if (layoutDirection == LayoutDirection.Rtl) size.width - barWidth else 0f
     drawRect(color, Offset(x, 0f), Size(barWidth, size.height))

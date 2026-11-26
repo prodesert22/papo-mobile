@@ -192,8 +192,9 @@ class ChatApi(private val client: PapoClient) {
 
     suspend fun media(sha: String): ByteArray = bytes("/media/$sha")
 
-    suspend fun embedImageBase64(embedId: String): String? =
-        http.get { url(path("/embeds/$embedId")) }.bodyOrThrow<EmbedWithImageDto>().imageData
+    /** `GET /embeds/{id}`: a imagem do embed e o ícone do autor, em base64, num pedido só. */
+    suspend fun embed(embedId: String): EmbedWithImageDto =
+        http.get { url(path("/embeds/$embedId")) }.bodyOrThrow()
 
     fun attachmentUrl(fileId: String): String = path("/attachments/$fileId")
 

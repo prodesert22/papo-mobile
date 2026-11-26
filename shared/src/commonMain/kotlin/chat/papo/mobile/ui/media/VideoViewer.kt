@@ -57,6 +57,7 @@ import androidx.compose.ui.window.DialogProperties
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.account.ServerUrl
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.safeLink
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackFailure
@@ -131,18 +132,8 @@ internal fun findOpenVideo(server: ServerUrl, messages: List<Message>, key: Stri
     return null
 }
 
-/** Uma página que abre fora do app: só `http` e `https`, com host e sem espaços (regra 6). Qualquer outra coisa vira null. */
-private val WEB_LINK = Regex("""https?://[^\s/?#]+\S*""", RegexOption.IGNORE_CASE)
-
-/**
- * O link da web de [url], ou null se não for um (ver [WEB_LINK]). O esquema sai em minúsculas: o Android só resolve
- * `https://` para o navegador, e `Https://` (como alguns teclados escrevem) não acha aplicativo nenhum.
- */
-internal fun webLink(url: String?): String? {
-    if (url == null || !WEB_LINK.matches(url)) return null
-    val schemeEnd = url.indexOf("://")
-    return url.substring(0, schemeEnd).lowercase() + url.substring(schemeEnd)
-}
+/** O link da web de [url], ou null se não for um: a regra é a de [safeLink] (só `http` e `https`, regra 6). */
+internal fun webLink(url: String?): String? = safeLink(url)
 
 /** O que o painel de falha oferece além de fechar. */
 internal data class FailureActions(val retry: Boolean, val download: Boolean, val browser: Boolean = false)
