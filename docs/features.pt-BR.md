@@ -120,6 +120,8 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   celular, tira a localização que ela carrega e mostra o resultado de cada
   mudança. Também dá para remover o banner e escolher Disponível, Ausente ou
   Ocupado pelo perfil ou pelas configurações da conta.
+- O topo da lista de canais mostra seu avatar, seu nome e a cor do seu status;
+  toque nele para editar o perfil.
 - Bloqueio de pessoas pelo perfil, com lista e desbloqueio nas configurações da
   conta. Bloquear remove a conversa direta e impede mensagens diretas nos dois
   sentidos; as mensagens da pessoa nos canais continuam visíveis, e desbloquear

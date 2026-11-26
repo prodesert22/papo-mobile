@@ -119,6 +119,8 @@ release notes in [releases/](../releases/) describe each version's changes.
   and shrinks the picture on the phone, drops the location it carries, and
   shows the result of each change. You can also remove your banner, and choose
   Available, Away or Busy from your profile or from the account settings.
+- The top of the channel list shows your avatar, your name and the color of your
+  status; tap it to edit your profile.
 - Block people from their profile, and list or unblock them in the account
   settings. Blocking removes the direct conversation and stops direct messages
   in both directions; their messages in channels stay visible, and unblocking

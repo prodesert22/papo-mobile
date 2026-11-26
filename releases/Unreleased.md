@@ -18,6 +18,12 @@
 - The account settings show the server's details: name, icon, public or closed,
   owner, and how many members, channels and roles it has.
 
+- The top of the channel list was reworked: the server name now has room and
+  wraps to a second line instead of being cut off, the account settings button is
+  now a vertical three-dot menu, and a new row under the name shows your avatar,
+  a disc with the color of your status (green available, amber away, red busy,
+  gray offline) and your name. Tapping that row opens the profile editor.
+
 ## Fixes
 
 - The account nickname no longer loses its last character when you leave the
