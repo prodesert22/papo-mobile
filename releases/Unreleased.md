@@ -62,3 +62,6 @@
   those messages keep the initials.
 - Fixed the avatar of a person who has none being requested from the server
   again every time it came into view.
+- Screens now slide in from the right over the previous one and slide back out
+  the same way. With the back gesture the screen follows your finger instead of
+  shrinking toward the middle, and comes back if you let go early.

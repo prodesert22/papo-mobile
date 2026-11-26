@@ -1,5 +1,12 @@
 package chat.papo.mobile.ui
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -19,6 +26,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -62,6 +70,12 @@ import chat.papo.mobile.ui.switcher.QuickSwitcherViewModel
 import chat.papo.mobile.ui.theme.PapoTheme
 import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.stringResource
+
+/** O deslize de uma tela que entra ou sai sozinha (um toque, o botão de voltar). */
+private val ScreenSlide = tween<IntOffset>(durationMillis = 300, easing = FastOutSlowInEasing)
+
+/** O deslize conduzido pelo gesto de voltar: linear, para a tela andar na mesma proporção do dedo. */
+private val ScreenFollow = tween<IntOffset>(durationMillis = 300, easing = LinearEasing)
 
 @Serializable
 private data object HomeRoute
@@ -155,7 +169,19 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
         }
     }
 
-    NavHost(navController, startDestination = HomeRoute, modifier = activity) {
+    // Uma tela nova entra deslizando da borda direita por cima da anterior, que fica parada embaixo, e sai pelo mesmo
+    // caminho. No gesto de voltar ela acompanha o dedo; o padrão da biblioteca era encolher a tela para o centro.
+    NavHost(
+        navController,
+        startDestination = HomeRoute,
+        modifier = activity,
+        enterTransition = { slideInHorizontally(ScreenSlide) { it } },
+        exitTransition = { ExitTransition.KeepUntilTransitionsFinished },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { slideOutHorizontally(ScreenSlide) { it } },
+        predictivePopEnterTransition = { EnterTransition.None },
+        predictivePopExitTransition = { slideOutHorizontally(ScreenFollow) { it } },
+    ) {
         composable<HomeRoute> {
             if (accounts.isEmpty()) {
                 // Sem contas, a tela inicial é o próprio fluxo de entrar num servidor.
