@@ -1,8 +1,6 @@
 package chat.papo.mobile.ui.home
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -23,27 +20,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.papo.mobile.account.Account
 import chat.papo.mobile.account.AccountSession
-import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.account_settings
-import chat.papo.mobile.resources.presence_away
-import chat.papo.mobile.resources.presence_busy
-import chat.papo.mobile.resources.presence_offline
-import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.profile_edit_action
 import chat.papo.mobile.resources.search_title
 import chat.papo.mobile.resources.switcher_title
+import chat.papo.mobile.ui.components.StatusDisc
 import chat.papo.mobile.ui.components.UserAvatar
-import chat.papo.mobile.ui.theme.LocalPapoColors
 import org.jetbrains.compose.resources.stringResource
 
 private val HeaderButton = 40.dp
@@ -107,7 +96,7 @@ private fun OwnUserRow(account: Account, session: AccountSession, onEditProfile:
     ) {
         UserAvatar(session, me, size = 32.dp, fallbackName = account.username)
         Spacer(Modifier.width(10.dp))
-        StatusDisc(status)
+        StatusDisc(status?.status)
         Spacer(Modifier.width(8.dp))
         Text(
             name,
@@ -118,17 +107,4 @@ private fun OwnUserRow(account: Account, session: AccountSession, onEditProfile:
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-/** O disco do status da conta: verde disponível, âmbar ausente, vermelho ocupado e cinza sem presença (offline). */
-@Composable
-private fun StatusDisc(presence: Presence?) {
-    val colors = LocalPapoColors.current
-    val (color: Color, label) = when (presence?.status) {
-        "online" -> colors.online to stringResource(Res.string.presence_online)
-        "away" -> colors.accent to stringResource(Res.string.presence_away)
-        "busy" -> MaterialTheme.colorScheme.error to stringResource(Res.string.presence_busy)
-        else -> MaterialTheme.colorScheme.outline to stringResource(Res.string.presence_offline)
-    }
-    Box(Modifier.size(12.dp).background(color, CircleShape).semantics { contentDescription = label })
 }

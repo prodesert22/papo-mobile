@@ -17,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.profile_edit_row_body
@@ -25,12 +24,11 @@ import chat.papo.mobile.resources.profile_edit_row_title
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * "Perfil e status" nas configurações da conta: abre a edição do perfil e escolhe Disponível, Ausente ou Ocupado, sem
- * entrar na tela de perfil. Só para uma conta com sessão aberta.
+ * "Perfil e status" nas configurações da conta: leva à edição do perfil, onde também se escolhe Disponível, Ausente ou
+ * Ocupado. Só para uma conta com sessão aberta.
  */
 @Composable
-fun ProfileSettingsSection(session: AccountSession, onEdit: () -> Unit) {
-    val statusModel = viewModel(key = "own-status/${session.accountId}/${session.hashCode()}") { OwnStatusViewModel(session) }
+fun ProfileSettingsSection(@Suppress("UNUSED_PARAMETER") session: AccountSession, onEdit: () -> Unit) {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -44,8 +42,6 @@ fun ProfileSettingsSection(session: AccountSession, onEdit: () -> Unit) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(8.dp))
-        OwnStatusPicker(statusModel)
-        Spacer(Modifier.height(16.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
