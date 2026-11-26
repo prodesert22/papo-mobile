@@ -27,6 +27,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -411,14 +412,19 @@ private fun ReopenChatOnReturn(
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val activeId by session.accounts.activeId.collectAsStateWithLifecycle()
     val shownId = (accounts.firstOrNull { it.id == activeId } ?: accounts.firstOrNull())?.id
+    // O efeito vive a composição inteira: lê a conta e o `openChat` de agora, não os do primeiro quadro (quando as contas
+    // ainda carregavam e a conta mostrada podia ser outra, ou nenhuma).
+    val currentShownId by rememberUpdatedState(shownId)
+    val currentOpenChat by rememberUpdatedState(openChat)
     var stopped by remember { mutableStateOf(false) }
     LifecycleStartEffect(Unit) {
         if (stopped) {
             stopped = false
             val onHome = navController.previousBackStackEntry == null
-            if (onHome && panel.isClosed && shownId != null) {
-                val parked = panel.chats[shownId]
-                if (parked != null) openChat(shownId, parked) else panel.startup = StartupOpening.Fresh
+            val account = currentShownId
+            if (onHome && panel.isClosed && account != null) {
+                val parked = panel.chats[account]
+                if (parked != null) currentOpenChat(account, parked) else panel.startup = StartupOpening.Fresh
             }
         }
         onStopOrDispose { stopped = true }
