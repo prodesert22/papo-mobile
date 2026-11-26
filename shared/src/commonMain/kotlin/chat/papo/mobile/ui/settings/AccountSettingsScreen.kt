@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
@@ -56,6 +58,7 @@ import chat.papo.mobile.core.formatDateTime
 import chat.papo.mobile.core.parseInstant
 import chat.papo.mobile.data.api.ConnectionDto
 import chat.papo.mobile.resources.Res
+import chat.papo.mobile.resources.account_blocked_users
 import chat.papo.mobile.resources.account_color
 import chat.papo.mobile.resources.account_color_none
 import chat.papo.mobile.resources.account_device_drop
@@ -71,6 +74,7 @@ import chat.papo.mobile.resources.account_remove
 import chat.papo.mobile.resources.account_remove_body
 import chat.papo.mobile.resources.account_remove_confirm
 import chat.papo.mobile.resources.account_remove_title
+import chat.papo.mobile.resources.account_security
 import chat.papo.mobile.resources.account_settings
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
@@ -84,7 +88,7 @@ import org.jetbrains.compose.resources.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> Unit) {
+fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> Unit, onOpenBlocked: () -> Unit) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val account = accounts.firstOrNull { it.id == accountId }
     val scope = rememberCoroutineScope()
@@ -149,6 +153,10 @@ fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> 
             ServerSection(session.accounts, account)
 
             if (!account.sessionExpired) {
+                Spacer(Modifier.height(28.dp))
+                Text(stringResource(Res.string.account_security), style = MaterialTheme.typography.titleMedium)
+                SettingsLink(stringResource(Res.string.account_blocked_users), onOpenBlocked)
+
                 Spacer(Modifier.height(28.dp))
                 Text(stringResource(Res.string.account_devices), style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(4.dp))
@@ -227,6 +235,18 @@ fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> 
                 }
             },
         )
+    }
+}
+
+/** Uma linha que leva a outra tela. */
+@Composable
+private fun SettingsLink(title: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

@@ -108,6 +108,27 @@
     </plurals>
     <string name="server_created">Criado em %1$s</string>
     <string name="server_stale">Mostrando o que está gravado neste aparelho.</string>
+    <string name="error_dm_blocked">Não é possível trocar mensagens diretas com esta pessoa.</string>
+
+    <!-- Resultado de uma mudança no servidor (bloqueio, senha) -->
+    <string name="mutation_rate_limited">O servidor pediu para esperar um pouco. Tente de novo daqui a pouco.</string>
+    <string name="mutation_not_sent">Sem conexão com o servidor. Nada foi alterado.</string>
+    <string name="mutation_unauthorized">A sessão desta conta terminou. Entre de novo.</string>
+    <string name="mutation_rejected">O servidor recusou o pedido.</string>
+
+    <!-- Segurança e bloqueios -->
+    <string name="account_security">Segurança</string>
+    <string name="account_blocked_users">Usuários bloqueados</string>
+    <string name="account_change_password">Trocar a senha</string>
+    <string name="blocked_title">Usuários bloqueados</string>
+    <string name="blocked_empty">Você não bloqueou ninguém.</string>
+    <string name="blocked_help">Quem você bloqueia não troca mensagens diretas com você. As mensagens nos canais continuam visíveis.</string>
+    <string name="blocked_unblock">Desbloquear</string>
+    <string name="blocked_uncertain">Não foi possível confirmar. Confira a lista antes de tentar de novo.</string>
+    <string name="profile_block">Bloquear</string>
+    <string name="profile_unblock">Desbloquear</string>
+    <string name="profile_block_title">Bloquear %1$s?</string>
+    <string name="profile_block_body">Vocês não poderão trocar mensagens diretas. Mensagens em canais continuam visíveis.</string>
 
     <!-- Configurações do app -->
     <string name="settings_title">Configurações</string>

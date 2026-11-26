@@ -150,6 +150,9 @@ ON CONFLICT (id) DO UPDATE SET
 deleteDm:
 DELETE FROM dm WHERE id = ?;
 
+deleteDmsWithUser:
+DELETE FROM dm WHERE user_id = ?;
+
 deleteDmsNotIn:
 DELETE FROM dm WHERE id NOT IN ?;
 

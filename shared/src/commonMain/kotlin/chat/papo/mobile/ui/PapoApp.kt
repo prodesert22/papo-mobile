@@ -83,6 +83,8 @@ import chat.papo.mobile.ui.search.SearchScreen
 import chat.papo.mobile.ui.search.SearchViewModel
 import chat.papo.mobile.ui.settings.AccountSettingsScreen
 import chat.papo.mobile.ui.settings.AppSettingsScreen
+import chat.papo.mobile.ui.settings.BlockedUsersScreen
+import chat.papo.mobile.ui.settings.BlockedUsersViewModel
 import chat.papo.mobile.ui.switcher.QuickSwitcherScreen
 import chat.papo.mobile.ui.switcher.QuickSwitcherViewModel
 import chat.papo.mobile.ui.theme.PapoTheme
@@ -120,6 +122,10 @@ private data class SearchRoute(val accountId: String, val channelId: String? = n
 /** Perfil de [userId], um usuário da conta [accountId]. */
 @Serializable
 private data class ProfileRoute(val accountId: String, val userId: String)
+
+/** Os usuários que a conta [accountId] bloqueou. */
+@Serializable
+private data class BlockedRoute(val accountId: String)
 
 /** Troca rápida entre as conversas de todas as contas; [accountId] e [channelId] são a conversa de onde veio, se houve. */
 @Serializable
@@ -325,7 +331,25 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
             )
         }
         composable<AccountSettingsRoute> { entry ->
-            AccountSettingsScreen(session, entry.toRoute<AccountSettingsRoute>().accountId, onBack = { navController.popBackStack() })
+            val accountId = entry.toRoute<AccountSettingsRoute>().accountId
+            AccountSettingsScreen(
+                session,
+                accountId,
+                onBack = { navController.popBackStack() },
+                onOpenBlocked = { navController.navigate(BlockedRoute(accountId)) },
+            )
+        }
+        composable<BlockedRoute> { entry ->
+            val route = entry.toRoute<BlockedRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                // A sessão entra na chave: a lista de uma conta nunca aparece em outra.
+                val vm = viewModel(key = "blocked/${route.accountId}/${accountSession.hashCode()}") { BlockedUsersViewModel(accountSession.blocks) }
+                BlockedUsersScreen(accountSession, vm, onBack = { navController.popBackStack() })
+            }
         }
         composable<AppSettingsRoute> {
             AppSettingsScreen(lock, appVersion, onBack = { navController.popBackStack() })

@@ -153,6 +153,8 @@ fun ProfileScreen(
 
                 if (!isSelf && state.load != ProfileLoad.NotFound) {
                     Actions(header?.username, state, onMessage = { viewModel.openChat(onOpenChat) })
+                    Spacer(Modifier.height(8.dp))
+                    BlockAction(session, userId, header?.displayName ?: "?")
                     Spacer(Modifier.height(16.dp))
                 }
 

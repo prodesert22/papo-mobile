@@ -2,6 +2,7 @@ package chat.papo.mobile.account
 
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.chat.AccessStore
+import chat.papo.mobile.chat.BlockList
 import chat.papo.mobile.chat.ChatStore
 import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
@@ -57,6 +58,8 @@ class AccountSession(
     val chat = ChatStore(userId, db, api, ws, scope, io, permissions)
     /** Avatares dos webhooks: um pedido ao servidor por sessão, depois o cache de mídia cifrado da conta. */
     val webhookAvatars = WebhookAvatars(api, media, scope)
+    /** Quem esta conta bloqueou; a lista é desta sessão e não vale para outra conta. */
+    val blocks = BlockList(api, db.chatQueries, ws.state, scope, io)
     /** Perfis lidos nesta sessão; a leitura vale enquanto a presença, o apelido e o avatar do usuário não mudam. */
     val profiles = ProfileCache(api, media, scope, background, stampOf = { id -> profileStamp(chat.users.value[id], chat.presence.value[id]) })
 
@@ -68,6 +71,7 @@ class AccountSession(
         if (!started) {
             started = true
             chat.start()
+            blocks.start()
         } else {
             ws.start()
         }
