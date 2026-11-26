@@ -282,7 +282,7 @@ private const val EMOJI_JUMBO_PX = 128
 /**
  * A imagem de um emoji do servidor, do cache cifrado. Enquanto carrega fica vazia, ou
  * mostra um círculo que pulsa com [placeholder] (lido só no desenho, sem recompor). Um emoji
- * animado anima com [animate]; sem ele (seletor e sugestões) mostra o primeiro quadro.
+ * animado anima com [animate]; sem ele (as sugestões depois do `:`) mostra o primeiro quadro.
  */
 @Composable
 fun EmojiImage(

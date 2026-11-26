@@ -53,7 +53,7 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Emojis: seletor com busca com todos os emojis Unicode e os do servidor,
   sugestões ao digitar `:nome`, emojis do servidor dentro das mensagens e emojis
   maiores nas mensagens que só têm emojis. Os emojis do servidor em GIF e WebP se
-  mexem nas mensagens e nas reações; ficam no primeiro quadro no seletor e nas
+  mexem nas mensagens, nas reações e no seletor; ficam no primeiro quadro nas
   sugestões, e quando o celular está com as animações removidas.
 
 ## Voz, câmera e transmissão de tela

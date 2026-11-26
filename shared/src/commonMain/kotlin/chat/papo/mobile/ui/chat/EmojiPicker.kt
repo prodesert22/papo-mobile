@@ -351,7 +351,7 @@ private fun EmojiGrid(
                     EmojiGlyph(cell.emoji.char, measurer, glyphStyle)
                 }
                 is PickerCell.Server -> EmojiCell(":${cell.emoji.name}:", onClick = { pick(EmojiRef.Custom(cell.emoji.id)) }) {
-                    EmojiImage(session, cell.emoji.id, Modifier.size(32.dp), placeholder = pulse, animate = false)
+                    EmojiImage(session, cell.emoji.id, Modifier.size(32.dp), placeholder = pulse)
                 }
                 is PickerCell.Placeholder -> PlaceholderCell(pulse)
             }

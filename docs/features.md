@@ -52,8 +52,8 @@ release notes in [releases/](../releases/) describe each version's changes.
 - Emoji: a searchable picker with every Unicode emoji and the server's own,
   suggestions as you type `:name`, the server's emoji shown inside messages,
   and larger emoji in messages that have nothing else. The server's emoji in
-  GIF and WebP move in messages and reactions; they stay on their first frame in
-  the picker and the suggestions, and when the phone has animations removed.
+  GIF and WebP move in messages, reactions and the picker; they stay on their
+  first frame in the suggestions, and when the phone has animations removed.
 
 ## Voice, camera and screen sharing
 
