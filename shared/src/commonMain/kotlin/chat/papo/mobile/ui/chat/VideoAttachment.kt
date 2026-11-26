@@ -119,7 +119,7 @@ internal fun VideoAttachment(
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(aspect), contentAlignment = Alignment.Center) {
             if (revealed) {
-                VideoBox(session, messageId, media, videos, embed = false) {
+                ServerVideoBox(session, messageId, media, videos, embed = false) {
                     val bitmap = poster
                     // A capa entra com um fade em vez de aparecer de uma vez; o valor só é lido ao desenhar, sem recompor por quadro.
                     val alpha by animateFloatAsState(if (bitmap != null) 1f else 0f, tween(durationMillis = 250), label = "poster")

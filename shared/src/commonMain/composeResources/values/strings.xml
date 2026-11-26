@@ -330,6 +330,10 @@
     <!-- 02 · trilha A · onda 2 (visualizador) -->
     <!-- 02 · trilha B · onda 2 (vídeo no cartão, YouTube) -->
     <string name="video_open_fullscreen">Abrir em tela cheia</string>
+    <string name="embed_youtube_label">YouTube</string>
+    <string name="embed_youtube_open">Abrir no YouTube</string>
+    <string name="embed_youtube_player">Player do YouTube</string>
+    <string name="embed_youtube_stopped">O player do YouTube parou. Use Abrir no YouTube.</string>
     <!-- 02 · trilha A · onda 3 (áudio) -->
     <!-- 02 · trilha B · onda 3 (links, teclado) -->
 </resources>

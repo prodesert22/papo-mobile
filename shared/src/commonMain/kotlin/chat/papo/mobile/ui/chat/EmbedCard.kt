@@ -57,6 +57,7 @@ import chat.papo.mobile.chat.embedMediaAspect
 import chat.papo.mobile.chat.fieldRows
 import chat.papo.mobile.chat.isGifEmbed
 import chat.papo.mobile.chat.safeLink
+import chat.papo.mobile.chat.youTubeId
 import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.EmbedFieldDto
 import chat.papo.mobile.media.PlayableMedia
@@ -130,7 +131,8 @@ internal fun EmbedCard(
  * Cartão de um embed de link ou customizado: barra lateral com a cor do embed (ou a de contorno), provedor, autor com o
  * ícone, título com link, descrição em Markdown, campos em grade, imagem e rodapé. Tudo é texto: o conteúdo é remoto, e
  * os links só abrem se forem `http` ou `https` ([safeLink]). Se o embed traz um vídeo que o relay do servidor serve
- * ([relayVideo]), a caixa da imagem leva o ▶, que o toca ali mesmo, e tocar fora dele abre a tela cheia ([VideoBox]).
+ * ([relayVideo]), a caixa da imagem leva o ▶, que o toca ali mesmo, e tocar fora dele abre a tela cheia ([VideoBox]). Um
+ * embed do YouTube ([youTubeId]) tem a mídia própria de [YouTubeMedia], que não passa pelo relay.
  *
  * O servidor serve uma imagem por embed (a `thumbnail` ou, sem ela, a `image`) e não serve o ícone do rodapé.
  */
@@ -145,6 +147,7 @@ private fun LinkEmbedCard(
     videos: VideoHost,
 ) {
     val video = relayVideo(session.client.server, embed)
+    val youtubeId = youTubeId(embed)
     val image = if (embed.hasImage()) rememberEmbedImage(session, embed) else null
     val accent = MaterialTheme.colorScheme.primary
     val barColor = parseHexColor(embed.color) ?: MaterialTheme.colorScheme.outline
@@ -171,7 +174,9 @@ private fun LinkEmbedCard(
         }
         embed.description?.takeIf { it.isNotBlank() }?.let { EmbedDescription(session, it, users, emojiIds, unicodeEmojis) }
         if (embed.fields.isNotEmpty()) EmbedFields(embed.fields)
-        if (video != null || embed.hasImage()) {
+        if (youtubeId != null) {
+            YouTubeMedia(messageId, youtubeId, image, videos, Modifier.padding(top = 4.dp))
+        } else if (video != null || embed.hasImage()) {
             val aspect = embedMediaAspect(embed) ?: image?.let { aspectOrNull(it.width, it.height) } ?: PLACEHOLDER_ASPECT
             EmbedMediaBox(session, messageId, image, aspect, video, videos, Modifier.padding(top = 4.dp))
         }
@@ -343,7 +348,7 @@ private fun EmbedMediaBox(
         val cover: @Composable BoxScope.() -> Unit = {
             image?.let { Image(it.rememberedPainter(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
         }
-        if (video != null) VideoBox(session, messageId, video, videos, embed = true, cover = cover) else cover()
+        if (video != null) ServerVideoBox(session, messageId, video, videos, embed = true, cover = cover) else cover()
     }
 }
 

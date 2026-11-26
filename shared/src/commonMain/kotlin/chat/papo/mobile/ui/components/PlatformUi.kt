@@ -73,6 +73,19 @@ interface PlatformUi {
      * não altera [bytes] (o `ByteArray` do cache é compartilhado) e não deixa nada aberto se for cancelada.
      */
     suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage?
+
+    /**
+     * O player do YouTube embutido, que toca o vídeo [videoId] (um id já validado por `isYouTubeId`) assim que entra na
+     * composição. Só entra depois do toque do usuário no ▶, que é o consentimento: antes disso nada é pedido ao YouTube.
+     * Preenche [modifier] e mostra os controles do próprio YouTube; o dono é a composição, que o fecha (e apaga o que ele
+     * guardou) quando sai dela, e o app o fecha também ao travar.
+     *
+     * Com [fullscreenButton] o botão de tela cheia do YouTube leva o mesmo player para a tela cheia, sem recarregar (é o do
+     * cartão da mensagem); sem ele (a tela cheia do app) o botão não existe. Qualquer navegação que o player tente fora da
+     * página do vídeo não acontece nele: chama [onOpenExternally], que abre o vídeo no YouTube fora do app.
+     */
+    @Composable
+    fun YouTubePlayer(videoId: String, modifier: Modifier, fullscreenButton: Boolean, onOpenExternally: () -> Unit)
 }
 
 val LocalPlatformUi = staticCompositionLocalOf<PlatformUi> { error("PlatformUi não fornecido") }

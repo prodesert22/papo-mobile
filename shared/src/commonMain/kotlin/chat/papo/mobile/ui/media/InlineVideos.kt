@@ -3,6 +3,7 @@ package chat.papo.mobile.ui.media
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.saveable.Saver
+import chat.papo.mobile.chat.isYouTubeKey
 
 /**
  * Os vídeos de uma conversa: o que toca no cartão da mensagem ([inline]) e o que está em tela cheia ([fullscreen]).
@@ -32,9 +33,16 @@ internal data class InlineVideos(val inline: PlayingVideo? = null, val fullscree
     fun release(video: PlayingVideo) = if (inline === video) copy(inline = null) else this
 
     companion object {
-        /** Sobrevive a girar o aparelho: as duas chaves e os pontos. */
+        /**
+         * Sobrevive a girar o aparelho: as duas chaves e os pontos. O vídeo do YouTube fica de fora: ele só carrega depois de
+         * um toque no ▶, e um estado restaurado (inclusive depois de o sistema matar o processo) o carregaria sozinho.
+         */
         val Saver: Saver<InlineVideos, Any> = Saver(
-            save = { slots -> with(PlayingVideo.Saver) { listOf(save(slots.inline), save(slots.fullscreen)) } },
+            save = { slots ->
+                with(PlayingVideo.Saver) {
+                    listOf(save(slots.inline?.takeUnless { isYouTubeKey(it.key) }), save(slots.fullscreen?.takeUnless { isYouTubeKey(it.key) }))
+                }
+            },
             restore = { saved ->
                 val parts = saved as? List<*>
                 InlineVideos(

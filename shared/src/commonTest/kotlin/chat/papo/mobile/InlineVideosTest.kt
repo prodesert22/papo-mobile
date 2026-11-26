@@ -144,6 +144,27 @@ class InlineVideosTest {
     }
 
     @Test
+    fun oYouTubeNaoSobreviveAGirarNemAMatarOProcessoPoisSoCarregaDepoisDeUmToque() {
+        val saved = InlineVideos(PlayingVideo(cardKey("m1", "youtube:aB3dE5gH7jK"), 7_000), PlayingVideo("youtube:aB3dE5gH7jK", 12_000))
+
+        val restored = InlineVideos.Saver.restore(assertNotNull(save(saved)))
+
+        assertNull(restored?.inline)
+        assertNull(restored?.fullscreen)
+    }
+
+    @Test
+    fun oVideoDoServidorSobreviveMesmoComOYouTubeNoOutroLugar() {
+        val saved = InlineVideos(PlayingVideo(cardKey("m1", "youtube:aB3dE5gH7jK"), 7_000), PlayingVideo("embed:e1", 12_000))
+
+        val restored = InlineVideos.Saver.restore(assertNotNull(save(saved)))
+
+        assertNull(restored?.inline)
+        assertEquals("embed:e1", restored?.fullscreen?.key)
+        assertEquals(12_000L, restored?.fullscreen?.positionMs)
+    }
+
+    @Test
     fun semNadaTocandoOEstadoRestauradoEstaVazio() {
         val restored = InlineVideos.Saver.restore(assertNotNull(save(InlineVideos())))
 

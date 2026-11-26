@@ -96,6 +96,10 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
     @Composable
     override fun HideSystemBars() = HideSystemBarsInDialog()
 
+    @Composable
+    override fun YouTubePlayer(videoId: String, modifier: Modifier, fullscreenButton: Boolean, onOpenExternally: () -> Unit) =
+        AndroidYouTubePlayer(videoId, modifier, fullscreenButton, onOpenExternally)
+
     private fun describe(uri: Uri): OutgoingFile {
         var name = uri.lastPathSegment ?: "arquivo"
         var size = 0L
@@ -138,7 +142,7 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
  * deslizar da borda para vê-las de passagem. Fora de um diálogo não faz nada: a janela do app é da tela de conversa.
  */
 @Composable
-private fun HideSystemBarsInDialog() {
+internal fun HideSystemBarsInDialog() {
     val view = LocalView.current
     DisposableEffect(view) {
         val window = (view.parent as? DialogWindowProvider)?.window

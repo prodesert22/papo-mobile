@@ -45,26 +45,26 @@ import org.jetbrains.compose.resources.stringResource
  *
  * - **na capa** ([cover]): o ▶ do meio é um botão e toca o vídeo ali mesmo ([VideoHost.playInline]); tocar em qualquer
  *   outro ponto abre a tela cheia ([VideoHost.openFullscreen]);
- * - **tocando no cartão**: o player da plataforma, no lugar da capa e na mesma caixa (a lista não pula), com os controles
- *   dele e o botão de tela cheia, que leva o ponto atual;
- * - **com falha**: a capa com o motivo curto por cima; tocar abre a tela cheia, que tem o painel completo.
+ * - **tocando no cartão**: o [player], no lugar da capa e na mesma caixa (a lista não pula);
+ * - **com falha**: a capa com o motivo curto por cima; tocar abre a tela cheia, que tem o painel completo. Quem avisa é o
+ *   [player], por `onFailure`; o do YouTube não avisa (o player dele mostra o próprio erro).
  *
- * O player existe só enquanto este cartão está na composição: rolar para fora da lista, trocar de conversa e travar o app
- * o liberam, e o vídeo volta à capa sem guardar o ponto. Enquanto ele toca, as capas dos outros vídeos esperam, como na
- * tela cheia. [embed] só escolhe o texto da falha (o servidor é quem busca o vídeo de um embed).
+ * O [player] existe só enquanto este cartão está na composição: rolar para fora da lista, trocar de conversa e travar o app
+ * o liberam, e o vídeo volta à capa sem guardar o ponto. [embed] só escolhe o texto da falha (o servidor é quem busca o
+ * vídeo de um embed). O cartão é o da mensagem [messageId] e da mídia [mediaKey]: o mesmo link em duas mensagens é a mesma
+ * mídia e só o cartão tocado toca.
  */
 @Composable
 internal fun VideoBox(
-    session: AccountSession,
     messageId: String,
-    media: PlayableMedia,
+    mediaKey: String,
     host: VideoHost,
     embed: Boolean,
+    player: @Composable (video: PlayingVideo, onFailure: (PlaybackFailure) -> Unit) -> Unit,
     modifier: Modifier = Modifier.fillMaxSize(),
     cover: @Composable BoxScope.() -> Unit,
 ) {
-    // O embed de um link é o mesmo em toda mensagem que o cita: o cartão se distingue pela mensagem, senão tocariam todos.
-    val cardKey = cardKey(messageId, media.key)
+    val cardKey = cardKey(messageId, mediaKey)
     val playing = host.inline(cardKey)
     var failure by remember(playing) { mutableStateOf<PlaybackFailure?>(null) }
     // O dono é este cartão, não o player: com a falha o player já saiu, e o cartão continua dono do vídeo até sair de cena.
@@ -73,13 +73,13 @@ internal fun VideoBox(
     }
     Box(modifier, contentAlignment = Alignment.Center) {
         if (playing != null && failure == null) {
-            InlineVideoPlayer(session, media, playing, host, onFailure = { failure = it })
+            player(playing) { failure = it }
         } else {
             cover()
             Box(
                 Modifier
                     .fillMaxSize()
-                    .clickable(role = Role.Button, onClickLabel = stringResource(Res.string.video_open_fullscreen)) { host.openFullscreen(media.key) },
+                    .clickable(role = Role.Button, onClickLabel = stringResource(Res.string.video_open_fullscreen)) { host.openFullscreen(mediaKey) },
                 contentAlignment = Alignment.Center,
             ) {
                 failure?.let { FailureHint(it, embed) }
@@ -87,6 +87,30 @@ internal fun VideoBox(
             if (failure == null) PlayBadge { host.playInline(cardKey) }
         }
     }
+}
+
+/**
+ * A caixa de um vídeo do servidor ([media]: um anexo ou o relay de um embed): o player da plataforma, com os controles
+ * dele e o botão de tela cheia, que leva o ponto atual. Enquanto ele toca as capas dos outros vídeos esperam, como na tela
+ * cheia. Ver [VideoBox].
+ */
+@Composable
+internal fun ServerVideoBox(
+    session: AccountSession,
+    messageId: String,
+    media: PlayableMedia,
+    host: VideoHost,
+    embed: Boolean,
+    cover: @Composable BoxScope.() -> Unit,
+) {
+    VideoBox(
+        messageId = messageId,
+        mediaKey = media.key,
+        host = host,
+        embed = embed,
+        player = { video, onFailure -> InlineVideoPlayer(session, media, video, host, onFailure) },
+        cover = cover,
+    )
 }
 
 /** O player no lugar da capa: da posição em que o vídeo está, com o botão de tela cheia que o leva para o visualizador. */

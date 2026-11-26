@@ -212,7 +212,9 @@ import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.media.InlineVideos
 import chat.papo.mobile.ui.media.VideoHost
 import chat.papo.mobile.ui.media.VideoViewer
+import chat.papo.mobile.ui.media.YouTubeViewer
 import chat.papo.mobile.ui.media.findOpenVideo
+import chat.papo.mobile.ui.media.findOpenYouTube
 import chat.papo.mobile.ui.settings.ConfirmDialog
 import kotlinx.coroutines.delay
 import kotlin.math.max
@@ -693,9 +695,12 @@ fun ChatScreen(
     }
     viewing?.let { ImageViewer(session, it.messageId, it.attachment) { viewing = null } }
     playing?.let { current ->
+        val youtube = remember(current, messages) { findOpenYouTube(messages, current.key) }
         val video = remember(current, messages) { findOpenVideo(session.client.server, messages, current.key) }
         // Sem o vídeo nas mensagens (apagado, ou ainda carregando depois de girar) o visualizador não aparece.
-        if (video != null) {
+        if (youtube != null) {
+            YouTubeViewer(video = youtube, onDismiss = { videos = videos.closeFullscreen() })
+        } else if (video != null) {
             VideoViewer(
                 session = session,
                 video = video,
