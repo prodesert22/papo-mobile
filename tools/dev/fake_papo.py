@@ -71,6 +71,10 @@ servidor bloqueou (o arquivo e a miniatura respondem 410). Os vídeos desses emb
                               `attachment_moderation_update`) depois de 20 s e `blocked` (410, sem evento) depois de mais 20 s.
                               Outro número é o intervalo em segundos
 
+Visualizador de mídia (sempre ligado): o canal `galeria` traz uma mensagem com quatro mídias (imagem larga, alta, quadrada e um
+GIF), uma com uma imagem só, uma de 4800x3200 (para o zoom), uma com dois anexos sensíveis entre normais, uma com um anexo
+bloqueado entre normais e, com `FAKE_VIDEO_DIR`, uma com imagem, vídeo, GIF e imagem juntos.
+
 Renovação da sessão (sempre ligada). `POST /auth/refresh` rotaciona o token como o servidor (`RefreshConnection`): troca o
 `Auth` por outro, com outro id de conexão e o mesmo usuário, no `Set-Cookie`. O token trocado ainda vale por 60 s (a janela de
 graça do servidor); reapresentado depois disso é reuso: o servidor revoga todas as sessões do usuário e responde 401. Um
@@ -1645,11 +1649,47 @@ def seed_track_a():
     que `FAKE_SEND_RATE`, que tem prioridade quando os dois estão ligados): um vídeo grande mostra a barra de envio e dá tempo de
     cancelar no meio. O envio aceita corpo `Content-Length` e `chunked` e recusa como o servidor de verdade: 413 se o corpo declarado passa
     de 110 MiB, e 400 com mais de 10 arquivos, nome vazio ou com mais de 128 caracteres, arquivo acima de 100 MiB ou corpo em pedaços
-    acima de 110 MiB. Valor ilegível derruba o fake na partida."""
+    acima de 110 MiB. Valor ilegível derruba o fake na partida.
+
+    Onda 2 (visualizador): o canal `galeria`, com mensagens de várias mídias (ver `seed_gallery`)."""
     try:
         UPLOAD["kbps"] = float(os.environ.get("FAKE_UPLOAD_KBPS") or 0)
     except ValueError as error:
         raise SystemExit("FAKE_UPLOAD_KBPS: valor ilegível (%s)" % error)
+    seed_gallery()
+
+
+def seed_gallery():
+    """O canal `galeria`, para o visualizador de mídia: quatro mídias de proporções e tipos diferentes numa mensagem, uma imagem
+    só (sem contador), uma imagem de 4800x3200 (passa do lado de 4096 px em que o visualizador decodifica, para o zoom), sensíveis
+    entre normais, uma bloqueada entre normais e, havendo vídeos semeados (`FAKE_VIDEO_DIR`), imagens, vídeo e GIF juntos.
+    Cada imagem é desenhada com borda e cantos coloridos, para ver se o zoom ou o arrasto passam das bordas."""
+    channel = {"id": "c0000000-0000-4000-8000-0000000000a1", "name": "galeria", "type": "text", "position": 6,
+               "topic": "Visualizador de mídia", "parent_id": CHANNELS[0]["id"]}
+    CHANNELS.append(channel)
+    cid = channel["id"]
+    gif = animated_gif()
+
+    def shot(name, w, h, hue, moderation="clean"):
+        return media_attachment(name, "image/png", frame_png(w, h, hue), w, h, moderation)
+
+    wide, tall, square = (35, 120, 200), (200, 90, 35), (120, 60, 180)
+    new_message(cid, uid("bia"), "quatro mídias: larga, alta, quadrada e um GIF",
+                attachments=[shot("larga.png", 1200, 630, wide), shot("alta.png", 600, 900, tall), shot("quadrada.png", 512, 512, square),
+                             media_attachment("danca.gif", "image/gif", gif, 320, 180)])
+    new_message(cid, uid("caio"), "uma imagem só (sem contador)", attachments=[shot("unica.png", 800, 600, wide)])
+    new_message(cid, uid("bia"), "imagem grande para o zoom (4800x3200)", attachments=[shot("grande.png", 4800, 3200, (30, 150, 110))])
+    new_message(cid, uid("caio"), "sensíveis entre normais (só a que você toca entra no visualizador)",
+                attachments=[shot("normal-1.png", 640, 480, wide), shot("sensivel-1.png", 640, 480, tall, "sensitive"),
+                             shot("sensivel-2.png", 640, 480, square, "sensitive"), shot("normal-2.png", 640, 480, (30, 150, 110))])
+    new_message(cid, uid("bia"), "uma bloqueada entre normais (o aviso fica no cartão e ela não entra no visualizador)",
+                attachments=[shot("antes.png", 640, 480, wide), shot("bloqueada.png", 640, 480, tall, "blocked"), shot("depois.png", 640, 480, square)])
+    if SEEDED:
+        # O menor vídeo semeado: as quatro mídias juntas pesam pouco quando alguém toca o vídeo.
+        name, data, mime, width, height = min(SEEDED, key=lambda f: (len(f[1]), len(f[0])))
+        new_message(cid, uid("caio"), "imagem, vídeo, GIF e imagem juntos (precisa de FAKE_VIDEO_DIR)",
+                    attachments=[shot("foto-1.png", 800, 600, wide), video_attachment(name, data, mime, width, height),
+                                 media_attachment("danca.gif", "image/gif", gif, 320, 180), shot("foto-2.png", 600, 900, tall)])
 
 
 def media_attachment(name, mime, data, width, height, moderation="clean"):
