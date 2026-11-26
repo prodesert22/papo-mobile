@@ -7,6 +7,7 @@ import chat.papo.mobile.chat.UserProfile
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.toUiError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,6 +51,25 @@ class ProfileViewModel(private val session: AccountSession, val userId: String) 
 
     /** Lê o perfil de novo do servidor depois de um erro. */
     fun retry() = load(refresh = true)
+
+    /**
+     * Mostra o que o `ProfileCache` da sessão tem agora, sem passar por "carregando": é para quando a tela volta a ficar
+     * à vista depois de o próprio perfil ser editado, que deixa no cache a leitura nova. Dentro da validade não vai ao
+     * servidor. Só vale com o perfil já na tela; uma falha aqui deixa o que estava.
+     */
+    fun showCached() {
+        if (_state.value.load !is ProfileLoad.Loaded) return
+        viewModelScope.launch {
+            try {
+                val profile = session.profiles.get(userId)
+                _state.update { if (it.load is ProfileLoad.Loaded) it.copy(load = ProfileLoad.Loaded(profile)) else it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // O perfil que já está na tela segue valendo.
+            }
+        }
+    }
 
     private fun load(refresh: Boolean) {
         job?.cancel()

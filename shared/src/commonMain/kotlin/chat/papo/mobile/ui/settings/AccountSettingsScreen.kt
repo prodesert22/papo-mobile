@@ -79,14 +79,16 @@ import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.readableOn
 import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.components.toUiError
+import chat.papo.mobile.ui.profile.ProfileSettingsSection
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> Unit) {
+fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> Unit, onEditProfile: () -> Unit) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val account = accounts.firstOrNull { it.id == accountId }
+    val accountSession = session.accounts.sessionMap.collectAsStateWithLifecycle().value[accountId]
     val scope = rememberCoroutineScope()
     var confirmRemove by remember { mutableStateOf(false) }
     var confirmDropAll by remember { mutableStateOf(false) }
@@ -129,6 +131,9 @@ fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> 
                     Text(account.handle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+
+            // Sem sessão aberta (conta expirada) não há perfil a editar.
+            accountSession?.let { ProfileSettingsSection(it, onEditProfile) }
 
             LabelField(account) { label -> scope.launch { session.accounts.setAppearance(account.id, label, account.color) } }
             Spacer(Modifier.height(20.dp))
