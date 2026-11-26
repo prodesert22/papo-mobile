@@ -131,7 +131,7 @@ class ChatStoreEventsTest {
         chat.handle(event)
 
         val embed = chat.messages("c1", 10).first().single().embeds.single()
-        assertEquals(EmbedMediaDto("https://cdn.example.com/passeio.mp4", "video/mp4", 640, 360), embed.video)
+        assertEquals(EmbedMediaDto("https://cdn.example.com/passeio.mp4", "video/mp4", 640, 360, sizeBytes = 1234), embed.video)
         // O que o `EmbedCard` decide: o vídeo toca pelo relay do servidor da conta, e a imagem continua sendo a da miniatura.
         val media = relayVideo(session.client.server, embed)
         assertNotNull(media)

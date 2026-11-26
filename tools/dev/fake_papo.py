@@ -1413,6 +1413,15 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(404, "Não encontrado", "Rota inexistente")
 
 
+def seed_track_a():
+    """Sementes da trilha A do item 2 (galeria, envio, visualizador, áudio). Cada trilha escreve só na sua função, para os
+    ramos mesclarem sem conflito; o `__main__` chama as duas depois do resto das sementes."""
+
+
+def seed_track_b():
+    """Sementes da trilha B do item 2 (embed completo, GIF, moderação, vídeo no cartão, YouTube, links)."""
+
+
 if __name__ == "__main__":
     USERS["ana"] = {"id": str(uuid.uuid4()), "password": "Senha@123", "created": "2026-01-01T00:00:00Z"}
     USERS["bia"] = {"id": str(uuid.uuid4()), "password": "Senha@456", "created": "2026-01-02T00:00:00Z", "nickname": "Bia Borges",
@@ -1488,5 +1497,7 @@ if __name__ == "__main__":
     if os.environ.get("FAKE_PERMISSIONS"):
         setup_access(permission_spec(os.environ["FAKE_PERMISSIONS"]))
         announce_access()
+    seed_track_a()
+    seed_track_b()
     print(f"{NAME} em http://0.0.0.0:{PORT}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
