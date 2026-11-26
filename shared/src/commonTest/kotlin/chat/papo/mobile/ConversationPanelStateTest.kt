@@ -5,6 +5,7 @@ import chat.papo.mobile.ui.home.ConversationPanelState
 import chat.papo.mobile.ui.home.PanelValue
 import chat.papo.mobile.ui.home.ParkedChat
 import chat.papo.mobile.ui.home.ParkedChats
+import chat.papo.mobile.ui.home.StartupOpening
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -27,6 +28,29 @@ class ConversationPanelStateTest {
         assertEquals(PanelValue.Closed, state.anchored.targetValue)
         assertEquals(ParkedChats.Empty, state.chats)
         assertNull(state.request)
+    }
+
+    @Test
+    fun comecaComAAberturaAutomaticaPorFazer() {
+        assertEquals(StartupOpening.Fresh, ConversationPanelState().startup)
+    }
+
+    @Test
+    fun abrirUmaConversaEncerraAAberturaAutomatica() {
+        val state = ConversationPanelState()
+
+        state.open("conta-ana", geral)
+
+        assertEquals(StartupOpening.Done, state.startup)
+    }
+
+    @Test
+    fun fecharOPainelEncerraAAberturaAutomatica() {
+        val state = ConversationPanelState(ParkedChats.Empty, open = false, startup = StartupOpening.Waiting("conta-ana"))
+
+        state.close()
+
+        assertEquals(StartupOpening.Done, state.startup)
     }
 
     @Test
@@ -120,10 +144,37 @@ class ConversationPanelStateTest {
     }
 
     @Test
-    fun estadoSalvoSemNadaVoltaFechadoESemConversas() {
+    fun estadoSalvoSemNadaVoltaFechadoESemConversasEComAAberturaAutomaticaResolvida() {
         val after = restored(emptyList<Any>())
 
         assertEquals(PanelValue.Closed, after.anchored.targetValue)
         assertEquals(ParkedChats.Empty, after.chats)
+        assertEquals(StartupOpening.Done, after.startup)
+    }
+
+    @Test
+    fun girarOAparelhoGuardaOndeEstaAAberturaAutomatica() {
+        listOf(StartupOpening.Fresh, StartupOpening.Waiting("conta-ana"), StartupOpening.Done).forEach { phase ->
+            val before = ConversationPanelState(ParkedChats.Empty.opened("conta-bia", cafe), open = false, startup = phase)
+
+            val after = restored(saved(before))
+
+            assertEquals(phase, after.startup)
+            assertEquals(cafe, after.chats["conta-bia"])
+        }
+    }
+
+    @Test
+    fun girarOAparelhoNaoMisturaAFaseDaAberturaComAsConversas() {
+        val before = ConversationPanelState(
+            ParkedChats.Empty.opened("conta-ana", geral).opened("conta-bia", cafe),
+            open = true,
+            startup = StartupOpening.Waiting("conta-ana"),
+        )
+
+        val after = restored(saved(before))
+
+        assertEquals(before.chats, after.chats)
+        assertEquals(PanelValue.Open, after.anchored.targetValue)
     }
 }

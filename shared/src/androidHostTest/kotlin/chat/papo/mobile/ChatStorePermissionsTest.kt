@@ -175,6 +175,53 @@ class ChatStorePermissionsTest {
     }
 
     @Test
+    fun sincronizadaSoDepoisDeUmaSincronizacaoInteira() = runTest {
+        val account = account(engine)
+        assertFalse(account.chat.synced.value)
+
+        account.chat.sync()
+
+        assertTrue(account.chat.synced.value)
+    }
+
+    @Test
+    fun sincronizacaoQueFalhaNaLeituraDosUsuariosNaoMarcaComoSincronizada() = runTest {
+        usersHandler = { problem(HttpStatusCode.InternalServerError) }
+        val account = account(engine)
+
+        account.chat.runSync()
+
+        assertNotNull(account.chat.syncError.value)
+        assertFalse(account.chat.synced.value)
+    }
+
+    @Test
+    fun sincronizacaoCanceladaNoMeioNaoMarcaComoSincronizada() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        serverGate = gate
+        val account = account(engine)
+        val job = launch { account.chat.runSync() }
+
+        serverStarted.await()
+        job.cancel()
+        job.join()
+
+        assertFalse(account.chat.synced.value)
+    }
+
+    @Test
+    fun umaFalhaDepoisDeSincronizarNaoDesfazOSincronizada() = runTest {
+        val account = account(engine)
+        account.chat.runSync()
+
+        usersHandler = { problem(HttpStatusCode.InternalServerError) }
+        account.chat.runSync()
+
+        assertNotNull(account.chat.syncError.value)
+        assertTrue(account.chat.synced.value)
+    }
+
+    @Test
     fun roleAddMeuDecideAntesDeLerOsUsuarios() = runTest {
         val account = account(engine)
         account.chat.sync()

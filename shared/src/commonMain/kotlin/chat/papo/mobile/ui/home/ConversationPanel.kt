@@ -70,14 +70,22 @@ internal class PanelRequest(val target: PanelValue)
 /**
  * O painel da conversa por cima da lista de canais: a última conversa de cada conta ([chats]) e onde o painel está.
  * Vive acima da navegação, então abrir o perfil ou a busca por cima da tela principal e voltar o encontra como estava;
- * girar o aparelho guarda os dois ([Saver]). Quem trava o app o perde, e ao destravar a lista aparece.
+ * girar o aparelho guarda os dois ([Saver]). Quem trava o app o perde, e ao destravar a lista aparece, ou a conversa do
+ * topo, que a abertura automática ([startup]) abre uma vez por abertura do app.
  */
 @Stable
-class ConversationPanelState internal constructor(chats: ParkedChats, open: Boolean) {
+class ConversationPanelState internal constructor(
+    chats: ParkedChats,
+    open: Boolean,
+    startup: StartupOpening = StartupOpening.Fresh,
+) {
     constructor() : this(ParkedChats.Empty, open = false)
 
     var chats: ParkedChats by mutableStateOf(chats)
         private set
+
+    /** Onde está a abertura automática; abrir ou fechar o painel a encerra, porque quem usa já mexeu. */
+    internal var startup: StartupOpening by mutableStateOf(startup)
 
     internal val anchored = AnchoredDraggableState(if (open) PanelValue.Open else PanelValue.Closed)
 
@@ -88,11 +96,13 @@ class ConversationPanelState internal constructor(chats: ParkedChats, open: Bool
     fun open(accountId: String, chat: ParkedChat) {
         chats = chats.opened(accountId, chat)
         request = PanelRequest(PanelValue.Open)
+        startup = StartupOpening.Done
     }
 
     /** Fecha o painel, deixando a lista à vista. */
     fun close() {
         request = PanelRequest(PanelValue.Closed)
+        startup = StartupOpening.Done
     }
 
     /** As contas que saíram levam as conversas delas. */
@@ -106,9 +116,15 @@ class ConversationPanelState internal constructor(chats: ParkedChats, open: Bool
 
     companion object {
         val Saver: Saver<ConversationPanelState, Any> = listSaver(
-            save = { state -> listOf<Any>(state.anchored.targetValue == PanelValue.Open) + state.chats.encode() },
+            save = { state ->
+                listOf<Any>(state.anchored.targetValue == PanelValue.Open, state.startup.encode()) + state.chats.encode()
+            },
             restore = { saved ->
-                ConversationPanelState(ParkedChats.decode(saved.drop(1).filterIsInstance<String>()), open = saved.firstOrNull() == true)
+                ConversationPanelState(
+                    chats = ParkedChats.decode(saved.drop(2).filterIsInstance<String>()),
+                    open = saved.firstOrNull() == true,
+                    startup = StartupOpening.decode(saved.getOrNull(1) as? String),
+                )
             },
         )
     }

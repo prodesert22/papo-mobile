@@ -13,3 +13,8 @@
   in the panel, so going back shows the channel list instead of the search
   results or the call.
 - A little space now separates the newest message from the message box.
+- Opening the app, or unlocking it, now opens the first text channel of the
+  selected account, the one at the top of the channel list, once the list has
+  loaded. It happens once: if you open another conversation, switch accounts or
+  leave the main screen first, or the account has no text channel you can read,
+  you stay on the channel list.

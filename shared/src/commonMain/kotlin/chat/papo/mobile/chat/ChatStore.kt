@@ -127,6 +127,14 @@ class ChatStore(
     private val _syncError = MutableStateFlow<Throwable?>(null)
     val syncError: StateFlow<Throwable?> = _syncError.asStateFlow()
 
+    private val _synced = MutableStateFlow(false)
+
+    /**
+     * Os canais, as permissões e os usuários já chegaram do servidor ao menos uma vez desde que a sessão abriu. Antes
+     * disso a lista é a do banco, de uma sessão anterior, e o que a conta pode ler ainda é desconhecido.
+     */
+    val synced: StateFlow<Boolean> = _synced.asStateFlow()
+
     val connection: StateFlow<WsState> get() = ws.state
 
     private val hasOlder = HashMap<String, Boolean>()
@@ -196,6 +204,7 @@ class ChatStore(
                 }
             }
             syncUsers()
+            _synced.value = true
         } finally {
             _syncing.value = false
         }

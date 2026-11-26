@@ -36,11 +36,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.AppSession
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.Channel
 import chat.papo.mobile.chat.OpenConversation
 import chat.papo.mobile.media.AudioTrack
 import chat.papo.mobile.resources.Res
@@ -66,7 +68,10 @@ import chat.papo.mobile.ui.home.ConversationPanelState
 import chat.papo.mobile.ui.home.HomeScreen
 import chat.papo.mobile.ui.home.ParkedChat
 import chat.papo.mobile.ui.home.ParkedChatStores
+import chat.papo.mobile.ui.home.StartupInput
+import chat.papo.mobile.ui.home.StartupOpening
 import chat.papo.mobile.ui.home.rememberConversationPanelState
+import chat.papo.mobile.ui.home.step
 import chat.papo.mobile.ui.lock.LockScreen
 import chat.papo.mobile.ui.members.MembersDrawer
 import chat.papo.mobile.ui.profile.ProfileScreen
@@ -78,6 +83,8 @@ import chat.papo.mobile.ui.settings.AppSettingsScreen
 import chat.papo.mobile.ui.switcher.QuickSwitcherScreen
 import chat.papo.mobile.ui.switcher.QuickSwitcherViewModel
 import chat.papo.mobile.ui.theme.PapoTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.stringResource
 
@@ -186,6 +193,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
         navController.popBackStack(HomeRoute, inclusive = false)
         panel.open(accountId, chat)
     }
+    OpenTopChatOnStart(session, panel, navController, openChat)
 
     // Uma tela nova entra deslizando da borda direita por cima da anterior, que fica parada embaixo, e sai pelo mesmo
     // caminho. No gesto de voltar ela acompanha o dedo; o padrão da biblioteca era encolher a tela para o centro.
@@ -328,6 +336,54 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                 onOpen = { target -> openChat(target.accountId, ParkedChat(target.channelId)) },
             )
         }
+    }
+}
+
+/** Os dois valores de uma conta sem sessão para a abertura automática: nenhum canal, e nada sincronizado. */
+private val NoChannels: StateFlow<List<Channel>> = MutableStateFlow(emptyList())
+private val NotSynced: StateFlow<Boolean> = MutableStateFlow(false)
+
+/**
+ * Ao abrir o app, ou destravá-lo, abre no painel o canal de texto mais ao topo da conta selecionada, pelo mesmo [openChat]
+ * dos outros pedidos de abrir conversa. A decisão (qual canal, quando, uma vez só) é de [StartupOpening]; aqui só se juntam
+ * as entradas dela. Resolvida a abertura, não observa mais nada.
+ *
+ * A conta é a `activeId`, que depois de carregar é a de uma conta gravada ou nula: a lista de contas pode chegar um instante
+ * depois, e uma conta ainda sem sessão só espera.
+ */
+@Composable
+private fun OpenTopChatOnStart(
+    session: AppSession,
+    panel: ConversationPanelState,
+    navController: NavHostController,
+    openChat: (accountId: String, chat: ParkedChat) -> Unit,
+) {
+    if (panel.startup == StartupOpening.Done) return
+    val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
+    val activeId by session.accounts.activeId.collectAsStateWithLifecycle()
+    val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+    val entry by navController.currentBackStackEntryAsState()
+    // Antes de a navegação montar o grafo não se sabe que tela está por cima: espera o próximo quadro.
+    if (entry == null) return
+    val chat = activeId?.let { sessions[it] }?.chat
+    val channels by (chat?.visibleChannels ?: NoChannels).collectAsStateWithLifecycle()
+    val synced by (chat?.synced ?: NotSynced).collectAsStateWithLifecycle()
+
+    val step = panel.startup.step(
+        StartupInput(
+            accountId = activeId,
+            sessionExpired = accounts.firstOrNull { it.id == activeId }?.sessionExpired == true,
+            hasParkedChat = activeId?.let { panel.chats[it] } != null,
+            // A tela principal é a raiz da navegação: sem tela anterior a ela, nada está por cima.
+            onHome = navController.previousBackStackEntry == null,
+            synced = synced,
+            channels = channels,
+        ),
+    )
+    LaunchedEffect(step) {
+        panel.startup = step.next
+        val channelId = step.open ?: return@LaunchedEffect
+        activeId?.let { openChat(it, ParkedChat(channelId)) }
     }
 }
 

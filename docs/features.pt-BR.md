@@ -53,9 +53,13 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   deslize a lista de canais para a esquerda para voltar a ela. O painel
   acompanha o dedo e, ao soltar, assenta aberto ou fechado; o botão e o gesto de
   voltar também o fecham. Cada conta guarda a sua última conversa, e depois que o
-  app trava nenhuma conversa fica esperando fora da tela: a lista de canais
-  aparece. As mensagens que chegam numa conversa esperando fora da tela continuam
-  não lidas.
+  app trava nenhuma conversa fica esperando fora da tela. Ao abrir o app, ou
+  destravá-lo, o primeiro canal de texto da conta selecionada aparece no painel
+  assim que a lista de canais chega, uma vez só: se você abrir outra conversa,
+  trocar de conta ou sair da tela principal antes disso, ou a conta não tiver
+  canal de texto que você possa ler, a lista de canais fica. Ela também fica
+  quando não há conexão ou a sessão foi encerrada. As mensagens que chegam numa
+  conversa esperando fora da tela continuam não lidas.
   Deslizar uma mensagem para a esquerda continua respondendo, e as áreas que
   rolam para o lado, como as prévias de anexos, ficam com o deslize primeiro.
 - Segure uma reação, ou escolha "Ver reações" nas ações de uma mensagem, para ver
