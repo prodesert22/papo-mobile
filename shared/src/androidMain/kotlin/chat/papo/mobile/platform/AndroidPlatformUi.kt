@@ -1,9 +1,15 @@
 package chat.papo.mobile.platform
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.graphics.Paint
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Size
@@ -43,9 +49,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.FileNotFoundException
+import kotlin.time.Duration.Companion.seconds
 
 class AndroidPlatformUi(context: Context) : PlatformUi {
     private val app = context.applicationContext
+
+    // Quem abre a folha de compartilhamento: com a atividade ela entra na pilha do app, sem a atividade precisa de uma pilha nova.
+    private val host = context
     private val images = AndroidImages(app)
 
     // Paint não é seguro entre threads; as consultas são curtas, então um cadeado basta.
@@ -200,6 +210,36 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
     }
 
     override suspend fun decodeImage(bytes: ByteArray, maxPx: Int, animate: Boolean): PlatformImage? = images.decode(bytes, maxPx, animate)
+
+    override fun shareMedia(name: String, mimeType: String, bytes: ByteArray): Boolean {
+        // O tipo e o nome vêm do servidor: só passa o que tem a forma de um tipo, e o resto segue como arquivo qualquer.
+        val type = mimeType.takeIf(MIME_TYPE::matches) ?: "application/octet-stream"
+        val token = SharedMedia.store.put(name, type, bytes)
+        // O depósito só se limpa quando alguém o usa; sem isto os bytes de um compartilhamento esquecido ficariam na memória.
+        Handler(Looper.getMainLooper()).postDelayed({ SharedMedia.store.purge() }, (SharedMediaStore.LIFETIME + 1.seconds).inWholeMilliseconds)
+        val uri = SharedMedia.uri(app, token, name)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            this.type = type
+            putExtra(Intent.EXTRA_STREAM, uri)
+            // O `ClipData` leva a concessão de leitura pelo seletor até o aplicativo escolhido.
+            clipData = ClipData.newRawUri(name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(send, null)
+        if (host !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            host.startActivity(chooser)
+            true
+        } catch (e: ActivityNotFoundException) {
+            SharedMedia.store.discard(token)
+            false
+        }
+    }
+
+    private companion object {
+        /** `tipo/subtipo` sem parâmetros: o que o sistema aceita como tipo de um `ACTION_SEND`. */
+        val MIME_TYPE = Regex("[A-Za-z0-9][A-Za-z0-9.+_-]*/[A-Za-z0-9][A-Za-z0-9.+_-]*")
+    }
 }
 
 /**

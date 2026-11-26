@@ -1,9 +1,7 @@
 package chat.papo.mobile.ui.chat
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,7 +71,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -88,12 +85,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
@@ -110,8 +103,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.NavigationEventInfo
@@ -146,10 +137,8 @@ import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.suggestMentions
 import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
-import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.ReactionSummaryDto
-import chat.papo.mobile.media.guardGone
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
@@ -202,11 +191,12 @@ import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.switcher_title
 import chat.papo.mobile.ui.components.UserAvatar
-import chat.papo.mobile.ui.components.rememberMediaPainter
-import chat.papo.mobile.ui.components.rememberedPainter
 import chat.papo.mobile.ui.components.text
+import chat.papo.mobile.ui.media.MediaViewer
+import chat.papo.mobile.ui.media.PendingImageViewer
 import chat.papo.mobile.ui.media.PlayingVideo
 import chat.papo.mobile.ui.media.VideoViewer
+import chat.papo.mobile.ui.media.ViewingMedia
 import chat.papo.mobile.ui.media.findOpenVideo
 import chat.papo.mobile.ui.settings.ConfirmDialog
 import kotlinx.coroutines.delay
@@ -279,7 +269,10 @@ fun ChatScreen(
     var selecting by remember { mutableStateOf<Message?>(null) }
     var columnPx by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
-    var viewing by remember { mutableStateOf<ViewingImage?>(null) }
+    // A mídia da mensagem aberta no visualizador: a mensagem e a página sobrevivem a girar o aparelho, e a mídia sai das mensagens de novo.
+    var viewing by rememberSaveable(stateSaver = ViewingMedia.Saver) { mutableStateOf<ViewingMedia?>(null) }
+    // A imagem de um anexo pendente aberta em tela cheia; o arquivo é do compositor, então girar o aparelho a fecha.
+    var previewing by remember { mutableStateOf<OutgoingFile?>(null) }
     var reactorsOf by remember { mutableStateOf<ReactorsRequest?>(null) }
     // Um vídeo por vez. Gira o aparelho e a atividade se recria: a chave e o ponto sobrevivem, e a mídia sai das mensagens de novo.
     var playing by rememberSaveable(stateSaver = PlayingVideo.Saver) { mutableStateOf<PlayingVideo?>(null) }
@@ -291,6 +284,7 @@ fun ChatScreen(
             selecting = null
             confirmDelete = null
             viewing = null
+            previewing = null
             reactorsOf = null
             playing = null
         }
@@ -512,7 +506,7 @@ fun ChatScreen(
                                 // A folha só abre se tiver o que oferecer (copiar não existe numa mensagem só de anexo).
                                 onLongPress = { if (messageActionOffer(access, message, session.userId).any) actionsFor = message },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
-                                onOpenImage = { viewing = ViewingImage(message.id, it) },
+                                onOpenImage = { viewing = ViewingMedia.image(message.id, it) },
                                 onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
                                 onPlay = { playing = PlayingVideo(it.key) },
                             )
@@ -608,6 +602,7 @@ fun ChatScreen(
                 onPickMention = viewModel::pickMention,
                 onAddFiles = viewModel::addFiles,
                 onRemoveFile = viewModel::removeFile,
+                onPreviewFile = { previewing = it },
                 onCancelContext = viewModel::cancelContext,
                 onSubmit = viewModel::submit,
             )
@@ -681,7 +676,11 @@ fun ChatScreen(
             ReactorsSheet(session, message, users, request.first) { reactorsOf = null }
         }
     }
-    viewing?.let { ImageViewer(session, it.messageId, it.attachment) { viewing = null } }
+    viewing?.let { current ->
+        // Sem a mensagem (apagada, ou ainda carregando depois de girar) o visualizador não aparece.
+        byId[current.messageId]?.let { message -> MediaViewer(session, message, current) { viewing = null } }
+    }
+    previewing?.let { file -> PendingImageViewer(file) { previewing = null } }
     playing?.let { current ->
         val video = remember(current, messages) { findOpenVideo(session.client.server, messages, current.key) }
         // Sem o vídeo nas mensagens (apagado, ou ainda carregando depois de girar) o visualizador não aparece.
@@ -909,6 +908,7 @@ private fun Composer(
     onPickMention: (username: String, userId: String) -> Unit,
     onAddFiles: (List<OutgoingFile>) -> Unit,
     onRemoveFile: (OutgoingFile) -> Unit,
+    onPreviewFile: (OutgoingFile) -> Unit,
     onCancelContext: () -> Unit,
     onSubmit: () -> Unit,
 ) {
@@ -1099,7 +1099,7 @@ private fun Composer(
                 }
             }
 
-            AttachmentTray(state.files, onRemoveFile)
+            AttachmentTray(state.files, onRemoveFile, onPreviewFile)
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
                 if (canAttach) {
@@ -1460,51 +1460,6 @@ private fun PinnedSheet(session: AccountSession, pinned: List<Message>, users: M
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-/** A imagem aberta em tela cheia e a mensagem dela, para gravar o bloqueio se o servidor responder 410. */
-private data class ViewingImage(val messageId: String, val attachment: AttachmentDto)
-
-/** Lado maior da imagem original decodificada: cobre o zoom de 5x de uma tela cheia sem estourar a memória com uma foto enorme. */
-private const val VIEWER_IMAGE_PX = 4096
-
-/**
- * Imagem original em tela cheia, com zoom por pinça. Um GIF anima em laço. Se o servidor responde 410 ao original, o anexo
- * foi bloqueado pela moderação: ele é gravado como tal ([guardGone]) e a tela se fecha.
- */
-@Composable
-private fun ImageViewer(session: AccountSession, messageId: String, attachment: AttachmentDto, onDismiss: () -> Unit) {
-    val image by rememberMediaPainter(session, "att/${attachment.id}", VIEWER_IMAGE_PX, animate = true) {
-        session.guardGone(messageId, attachment.id, onGone = onDismiss) { session.api.attachment(attachment.id) }
-    }
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            val loaded = image
-            if (loaded == null) {
-                CircularProgressIndicator(color = Color.White)
-            } else {
-                Image(
-                    loaded.rememberedPainter(),
-                    contentDescription = attachment.fileName,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                scale = (scale * zoom).coerceIn(1f, 5f)
-                                offset = if (scale == 1f) Offset.Zero else offset + pan
-                            }
-                        }
-                        .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-                )
-            }
-            IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
-                Icon(Icons.Filled.Close, contentDescription = stringResource(Res.string.action_close), tint = Color.White)
             }
         }
     }

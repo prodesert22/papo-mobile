@@ -53,6 +53,7 @@ kotlin {
             implementation(libs.ktor.client.websockets)
             implementation(libs.ktor.serialization.json)
             implementation(libs.sqldelight.coroutines)
+            implementation(libs.zoomable)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

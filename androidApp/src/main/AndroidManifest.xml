@@ -44,5 +44,15 @@
             android:name="chat.papo.mobile.platform.CallService"
             android:exported="false"
             android:foregroundServiceType="microphone|camera|mediaProjection" />
+
+        <!--
+            Entrega a outros aplicativos o que o visualizador compartilha, direto da memória (sem arquivo em disco).
+            Não é exportado: só lê quem o sistema autoriza naquele compartilhamento, pela concessão do endereço.
+        -->
+        <provider
+            android:name="chat.papo.mobile.platform.SharedMediaProvider"
+            android:authorities="${applicationId}.shared"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

@@ -7,6 +7,7 @@ import chat.papo.mobile.chat.MAX_ATTACHMENT_BYTES
 import chat.papo.mobile.chat.MAX_ATTACHMENT_NAME
 import chat.papo.mobile.chat.checkLimits
 import chat.papo.mobile.chat.isGif
+import chat.papo.mobile.chat.isImage
 import chat.papo.mobile.chat.isVisualMedia
 import chat.papo.mobile.chat.nameFor
 import kotlin.test.Test
@@ -176,6 +177,14 @@ class FileKindTest {
         assertTrue(sizedFile("a", 1, "IMAGE/GIF; x=y").isGif())
         assertFalse(sizedFile("a", 1, "image/png").isGif())
         assertFalse(sizedFile("a", 1, "application/octet-stream").isGif())
+    }
+
+    @Test
+    fun soImagemAbreInteiraNaPreviaEOGifTambemELida() {
+        assertTrue(sizedFile("a", 1, "image/jpeg").isImage())
+        assertTrue(sizedFile("a", 1, "IMAGE/GIF; x=y").isImage())
+        assertFalse(sizedFile("a", 1, "video/mp4").isImage())
+        assertFalse(sizedFile("a", 1, "application/octet-stream").isImage())
     }
 
     @Test

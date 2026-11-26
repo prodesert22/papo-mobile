@@ -23,6 +23,7 @@ navigation = "2.10.0"
 lifecycle = "2.11.0"
 coil = "3.6.3"
 accompanist = "0.37.3"
+zoomable = "2.16.0"
 sqlcipher = "4.20.0"
 webrtc = "1.3.10"
 androidx-activity = "1.13.0"
@@ -83,6 +84,8 @@ androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidx-s
 # Imagens
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanist" }
+# Pinça, toque duplo e arrasto do visualizador de imagens (Compose Multiplatform, Apache-2.0).
+zoomable = { module = "net.engawapg.lib:zoomable", version.ref = "zoomable" }
 
 # Android
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }

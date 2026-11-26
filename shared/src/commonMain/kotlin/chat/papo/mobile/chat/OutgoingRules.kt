@@ -59,6 +59,9 @@ fun nameFor(displayName: String?, mimeType: String): String {
 /** É um GIF (a prévia leva o selo). */
 fun OutgoingFile.isGif(): Boolean = baseType(mimeType) == "image/gif"
 
+/** É uma imagem (um GIF também): a prévia do cartão abre a imagem inteira no visualizador. */
+fun OutgoingFile.isImage(): Boolean = baseType(mimeType).startsWith("image/")
+
 /** É imagem ou vídeo: o cartão do anexo mostra uma prévia em vez de nome e tamanho. */
 fun OutgoingFile.isVisualMedia(): Boolean = baseType(mimeType).let { it.startsWith("image/") || it.startsWith("video/") }
 
