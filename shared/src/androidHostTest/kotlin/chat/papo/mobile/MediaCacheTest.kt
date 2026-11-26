@@ -1,6 +1,7 @@
 package chat.papo.mobile
 
 import chat.papo.mobile.media.MediaCache
+import chat.papo.mobile.media.MediaUnavailableException
 import chat.papo.mobile.platform.JcaCrypto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -18,9 +19,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.fail
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TestTimeSource
+import kotlin.time.TimeSource
 
 /**
  * Busca única por nome no cache de mídia. Tudo roda numa thread só, com o relógio virtual; a contenção
@@ -32,7 +37,11 @@ class MediaCacheTest {
     private val key = crypto.randomBytes(32)
     private val secret = "conteúdo da imagem".encodeToByteArray()
 
-    private fun TestScope.cache() = MediaCache(TestResources.tempDir(), key, crypto, StandardTestDispatcher(testScheduler))
+    private fun TestScope.cache(timeSource: TimeSource = TimeSource.Monotonic) =
+        MediaCache(TestResources.tempDir(), key, crypto, StandardTestDispatcher(testScheduler), timeSource = timeSource)
+
+    /** Instância sobre um disco e a chave dadas, como depois de reabrir a conta. */
+    private fun TestScope.cacheOn(directory: String) = MediaCache(directory, key, crypto, StandardTestDispatcher(testScheduler))
 
     /** `get` que entrega a exceção como valor, para o teste falhar com mensagem em vez de abortar no meio. */
     private suspend fun MediaCache.getOrCancelled(name: String, fetch: suspend () -> ByteArray?): ByteArray? =
@@ -54,15 +63,245 @@ class MediaCacheTest {
     }
 
     @Test
-    fun recursoInexistenteNaoFicaGuardadoEEBuscadoDeNovo() = runTest(timeout = 5.seconds) {
+    fun recursoInexistenteFicaLembradoEOServidorNaoEPerguntadoDeNovo() = runTest(timeout = 5.seconds) {
         val cache = cache()
         var fetches = 0
 
-        assertNull(cache.get("att/1") { fetches++; null })
-        assertNull(cache.get("att/1") { fetches++; null })
-        assertContentEquals(secret, cache.get("att/1") { fetches++; secret })
+        repeat(5) { assertNull(cache.get("avatar/u1/0") { fetches++; null }) }
 
+        assertEquals(1, fetches)
+    }
+
+    @Test
+    fun quemEsperavaUmaBuscaSemResultadoRecebeNuloEOsSeguintesNaoBuscam() = runTest(timeout = 5.seconds) {
+        val cache = cache()
+        val gate = CompletableDeferred<Unit>()
+        var fetches = 0
+        val owner = async { cache.get("avatar/u1/0") { fetches++; gate.await(); null } }
+        runCurrent()
+        val waiter = async { cache.get("avatar/u1/0") { fetches++; secret } }
+        runCurrent()
+
+        gate.complete(Unit)
+
+        assertNull(owner.await())
+        assertNull(waiter.await())
+        assertNull(cache.get("avatar/u1/0") { fetches++; secret })
+        assertEquals(1, fetches)
+    }
+
+    @Test
+    fun outroNomeDoMesmoUsuarioNaoHerdaAAusencia() = runTest(timeout = 5.seconds) {
+        val cache = cache()
+        var fetches = 0
+        assertNull(cache.get("avatar/u1/0") { fetches++; null })
+
+        // O servidor trocou o avatar: a versão sobe e o nome é outro.
+        assertContentEquals(secret, cache.get("avatar/u1/1") { fetches++; secret })
+        assertNull(cache.get("avatar/u1/0") { fetches++; secret })
+
+        assertEquals(2, fetches)
+    }
+
+    @Test
+    fun evictEsqueceAAusenciaEAFalhaDoNome() = runTest(timeout = 5.seconds) {
+        val cache = cache(TestTimeSource())
+        var fetches = 0
+        assertNull(cache.get("a") { fetches++; null })
+        assertFailsWith<IOException> { cache.get("b") { fetches++; throw IOException("rede caiu") } }
+
+        cache.evict("a")
+        cache.evict("b")
+
+        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertContentEquals(secret, cache.get("b") { fetches++; secret })
+        assertEquals(4, fetches)
+    }
+
+    @Test
+    fun clearMemoryEsqueceAAusenciaEAFalhaDosNomes() = runTest(timeout = 5.seconds) {
+        val cache = cache(TestTimeSource())
+        var fetches = 0
+        assertNull(cache.get("a") { fetches++; null })
+        assertFailsWith<IOException> { cache.get("b") { fetches++; throw IOException("rede caiu") } }
+
+        cache.clearMemory()
+
+        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertContentEquals(secret, cache.get("b") { fetches++; secret })
+        assertEquals(4, fetches)
+    }
+
+    @Test
+    fun putDepoisDeAusenciaOuFalhaServeOQueFoiGuardado() = runTest(timeout = 5.seconds) {
+        val cache = cache(TestTimeSource())
+        var fetches = 0
+        assertNull(cache.get("a") { fetches++; null })
+        assertFailsWith<IOException> { cache.get("b") { fetches++; throw IOException("rede caiu") } }
+
+        cache.put("a", secret)
+        cache.put("b", secret, keepInMemory = false)
+
+        assertContentEquals(secret, cache.get("a") { fetches++; null })
+        assertContentEquals(secret, cache.get("b") { fetches++; null })
+        assertEquals(2, fetches)
+    }
+
+    @Test
+    fun putDuranteABuscaQueTerminaSemResultadoNaoDeixaAusenciaLembrada() = runTest(timeout = 5.seconds) {
+        val cache = cache()
+        val gate = CompletableDeferred<Unit>()
+        var fetches = 0
+        val owner = async { cache.get("a") { fetches++; gate.await(); null } }
+        runCurrent()
+
+        cache.put("a", secret, keepInMemory = false)
+        gate.complete(Unit)
+        owner.await()
+
+        assertContentEquals(secret, cache.get("a") { fetches++; null })
+        assertEquals(1, fetches)
+    }
+
+    @Test
+    fun duasInstanciasNaoCompartilhamAusenciaNemFalha() = runTest(timeout = 5.seconds) {
+        val directory = TestResources.tempDir()
+        val first = cacheOn(directory)
+        val second = cacheOn(directory)
+        var fetches = 0
+        assertNull(first.get("a") { fetches++; null })
+        assertFailsWith<IOException> { first.get("b") { fetches++; throw IOException("rede caiu") } }
+
+        assertContentEquals(secret, second.get("a") { fetches++; secret })
+        assertContentEquals(secret, second.get("b") { fetches++; secret })
+
+        assertNull(first.get("a") { fetches++; secret })
+        assertFailsWith<MediaUnavailableException> { first.get("b") { fetches++; secret } }
+        assertEquals(4, fetches)
+    }
+
+    @Test
+    fun falhaDaBuscaNaoEBuscadaDeNovoDentroDaJanelaEUmaVezDepoisDela() = runTest(timeout = 5.seconds) {
+        val time = TestTimeSource()
+        val cache = cache(time)
+        var fetches = 0
+        val failure = IOException("rede caiu")
+
+        assertSame(failure, assertFailsWith<IOException> { cache.get("a") { fetches++; throw failure } })
+        val blocked = assertFailsWith<MediaUnavailableException> { cache.get("a") { fetches++; secret } }
+        time += MediaCache.FAILURE_WINDOW - 1.milliseconds
+        assertFailsWith<MediaUnavailableException> { cache.get("a") { fetches++; secret } }
+
+        assertSame(failure, blocked.cause)
+        assertEquals(1, fetches)
+        // Outro nome não é afetado pela falha deste.
+        assertContentEquals(secret, cache.get("b") { fetches++; secret })
+
+        time += 1.milliseconds
+        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertContentEquals(secret, cache.get("a") { fetches++; null })
         assertEquals(3, fetches)
+    }
+
+    @Test
+    fun novaFalhaDepoisDaJanelaAbreOutraJanela() = runTest(timeout = 5.seconds) {
+        val time = TestTimeSource()
+        val cache = cache(time)
+        var fetches = 0
+        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("rede caiu") } }
+
+        time += MediaCache.FAILURE_WINDOW
+        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("ainda fora") } }
+        assertFailsWith<MediaUnavailableException> { cache.get("a") { fetches++; secret } }
+
+        assertEquals(2, fetches)
+        time += MediaCache.FAILURE_WINDOW
+        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+    }
+
+    @Test
+    fun chamadasSimultaneasDepoisDaJanelaCompartilhamUmaSoBusca() = runTest(timeout = 5.seconds) {
+        val time = TestTimeSource()
+        val cache = cache(time)
+        val gate = CompletableDeferred<Unit>()
+        var fetches = 0
+        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("rede caiu") } }
+        time += MediaCache.FAILURE_WINDOW
+
+        val owner = async { cache.get("a") { fetches++; gate.await(); secret } }
+        runCurrent()
+        val waiter = async { cache.get("a") { fetches++; secret } }
+        runCurrent()
+        gate.complete(Unit)
+
+        assertContentEquals(secret, owner.await())
+        assertContentEquals(secret, waiter.await())
+        assertEquals(2, fetches)
+    }
+
+    @Test
+    fun cancelamentoNaoViraAusenciaNemFalha() = runTest(timeout = 5.seconds) {
+        val cache = cache(TestTimeSource())
+        val gate = CompletableDeferred<Unit>()
+        var fetches = 0
+        val owner = launch { cache.get("a") { fetches++; gate.await(); null } }
+        runCurrent()
+        owner.cancel()
+        runCurrent()
+
+        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertEquals(2, fetches)
+    }
+
+    @Test
+    fun cancelamentoLancadoPelaBuscaNaoViraFalha() = runTest(timeout = 5.seconds) {
+        val cache = cache(TestTimeSource())
+        var fetches = 0
+
+        assertFailsWith<CancellationException> { cache.get("a") { fetches++; throw CancellationException("tempo esgotado") } }
+
+        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertEquals(2, fetches)
+    }
+
+    @Test
+    fun falhaDeQuemJaFoiCanceladoNaoViraFalhaDoRecurso() = runTest(timeout = 5.seconds) {
+        val cache = cache(TestTimeSource())
+        val gate = CompletableDeferred<Unit>()
+        var fetches = 0
+        // O motor HTTP aborta o pedido cancelado com IOException, não com CancellationException.
+        val owner = launch {
+            runCatching {
+                cache.get("a") {
+                    fetches++
+                    try {
+                        gate.await()
+                    } catch (e: CancellationException) {
+                        throw IOException("Canceled")
+                    }
+                    secret
+                }
+            }
+        }
+        runCurrent()
+        owner.cancel()
+        runCurrent()
+
+        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertEquals(2, fetches)
+    }
+
+    @Test
+    fun passandoDoLimiteEsqueceOsNomesMaisAntigos() = runTest(timeout = 20.seconds) {
+        val cache = cache()
+        var fetches = 0
+        for (n in 0..MediaCache.MAX_MISSES) assertNull(cache.get("avatar/u$n/0") { fetches++; null })
+        val total = fetches
+
+        assertNull(cache.get("avatar/u${MediaCache.MAX_MISSES}/0") { fetches++; null })
+        assertEquals(total, fetches, "o mais recente continua lembrado")
+        assertNull(cache.get("avatar/u0/0") { fetches++; null })
+        assertEquals(total + 1, fetches, "o mais antigo foi esquecido e busca de novo")
     }
 
     @Test
@@ -83,8 +322,9 @@ class MediaCacheTest {
     }
 
     @Test
-    fun falhaDaBuscaChegaAQuemEsperaELiberaONomeParaUmaNovaTentativa() = runTest(timeout = 5.seconds) {
-        val cache = cache()
+    fun falhaDaBuscaChegaAQuemEsperaELiberaONomeParaUmaNovaTentativaDepoisDaJanela() = runTest(timeout = 5.seconds) {
+        val time = TestTimeSource()
+        val cache = cache(time)
         val gate = CompletableDeferred<Unit>()
         val owner = async { runCatching { cache.get("att/1") { gate.await(); throw IOException("rede caiu") } } }
         runCurrent()
@@ -95,6 +335,7 @@ class MediaCacheTest {
 
         assertEquals("rede caiu", assertFailsWith<IOException> { owner.await().getOrThrow() }.message)
         assertEquals("rede caiu", assertFailsWith<IOException> { waiter.await().getOrThrow() }.message)
+        time += MediaCache.FAILURE_WINDOW
         assertContentEquals(secret, cache.get("att/1") { secret })
     }
 
