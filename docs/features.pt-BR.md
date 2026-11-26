@@ -116,8 +116,10 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   entra pela borda direita, com todos agrupados por presença e busca por nome.
   Toque em alguém para abrir o perfil.
 - Edição do próprio perfil: apelido, recado, descrição e frase de digitação, com
-  avatar e banner escolhidos da galeria. O app corta e reduz a imagem no
-  celular, tira a localização que ela carrega e mostra o resultado de cada
+  avatar e banner escolhidos da galeria por um lápis sobre cada imagem, no formato
+  de um cartão de perfil. A imagem escolhida abre um editor em que você move, amplia
+  e gira a foto sob uma moldura fixa (quadrada no avatar, 3:1 no banner); depois o
+  app a corta e reduz no celular, tira a localização que ela carrega e mostra o resultado de cada
   mudança. Também dá para remover o banner e escolher Disponível, Ausente ou
   Ocupado pelo editor de perfil ou pelo seu próprio perfil, cada um com um disco
   na cor do status.
@@ -169,9 +171,9 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   reconecta ou volta para a frente. Um canal posto em "nada" pelo cliente web não
   recebe notificações do servidor, então fica sem número.
 - Sem administração do servidor.
-- O avatar não pode ser removido depois de definido, só trocado, e a imagem é
-  cortada no centro, sem recorte manual. Avatar ou banner animado vai como está
-  quando cabe nos limites de tamanho e é recusado quando não cabe; não há status
+- O avatar não pode ser removido depois de definido, só trocado, e avatar ou banner
+  animado não é recortado: vai como está quando cabe nos limites de tamanho e é
+  recusado quando não cabe; não há status
   "invisível".
 - Trocar a senha encerra todas as sessões da conta, inclusive esta, e o servidor
   não confere a senha atual, então o app só pede confirmação. A checagem da senha

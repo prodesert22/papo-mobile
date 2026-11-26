@@ -1,12 +1,10 @@
 package chat.papo.mobile.ui.profile
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -45,6 +43,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import chat.papo.mobile.resources.profile_edit_discard_all
+import chat.papo.mobile.resources.profile_edit_unsaved
+import androidx.compose.material3.Surface
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
+import chat.papo.mobile.chat.UserProfile
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.clickable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigationevent.NavigationEventInfo
@@ -59,9 +77,7 @@ import chat.papo.mobile.media.codePoints
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_retry
-import chat.papo.mobile.resources.profile_edit_avatar
 import chat.papo.mobile.resources.profile_edit_avatar_help
-import chat.papo.mobile.resources.profile_edit_banner
 import chat.papo.mobile.resources.profile_edit_banner_help
 import chat.papo.mobile.resources.profile_edit_banner_removal
 import chat.papo.mobile.resources.profile_edit_counter
@@ -73,11 +89,9 @@ import chat.papo.mobile.resources.profile_edit_outcome_sending
 import chat.papo.mobile.resources.profile_edit_outcome_skipped
 import chat.papo.mobile.resources.profile_edit_pick_avatar
 import chat.papo.mobile.resources.profile_edit_pick_banner
-import chat.papo.mobile.resources.profile_edit_preparing
 import chat.papo.mobile.resources.profile_edit_reload
 import chat.papo.mobile.resources.profile_edit_remove_banner
 import chat.papo.mobile.resources.profile_edit_save
-import chat.papo.mobile.resources.profile_edit_saving
 import chat.papo.mobile.resources.profile_edit_status_message
 import chat.papo.mobile.resources.profile_edit_step_avatar
 import chat.papo.mobile.resources.profile_edit_step_banner
@@ -95,10 +109,12 @@ import chat.papo.mobile.ui.components.text
 import org.jetbrains.compose.resources.stringResource
 
 private val AvatarSize = 88.dp
+private val AvatarRing = 4.dp
+private val PencilSize = 36.dp
 
 /**
  * Edita o próprio perfil: apelido, frase de status, descrição, frase de digitação, avatar e banner. A imagem escolhida é
- * recortada e reduzida aqui, antes de qualquer envio; "Salvar" manda só o que mudou e mostra o resultado de cada pedido.
+ * recortada pelo usuário ([ImageCropper]) e reduzida aqui, antes de qualquer envio; "Salvar" manda só o que mudou e mostra o resultado de cada pedido.
  * Enquanto salva, nada muda e o voltar espera. Tudo o que o servidor devolve é texto simples.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -125,126 +141,180 @@ fun EditProfileScreen(session: AccountSession, viewModel: EditProfileViewModel, 
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(Res.string.action_back))
                     }
                 },
+                // "Salvar" fica ao lado do título, sempre à vista, como nos outros apps de perfil.
+                actions = {
+                    TextButton(onClick = viewModel::save, enabled = state.canSave, modifier = Modifier.padding(end = 8.dp)) {
+                        if (state.saving) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(stringResource(Res.string.profile_edit_save), style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                },
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+      Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             when (val load = state.load) {
-                EditLoad.Loading -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                EditLoad.Loading -> Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(32.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
                 }
-                is EditLoad.Failed -> Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                is EditLoad.Failed -> Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(load.error.text(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = viewModel::reload) { Text(stringResource(Res.string.action_retry)) }
                 }
                 is EditLoad.Ready -> {
-                    // A sessão entra na chave: o estado de uma conta nunca aparece na tela de outra.
-                    val statusModel = viewModel<OwnStatusViewModel>(key = "own-status/${session.accountId}/${session.hashCode()}") { OwnStatusViewModel(session) }
-                    OwnStatusPicker(statusModel)
-                    Spacer(Modifier.height(20.dp))
-                    BannerSection(session, load.profile.id, load.profile.bannerSha, state, viewModel, pickBanner)
-                    Spacer(Modifier.height(20.dp))
-                    AvatarSection(session, users[session.userId], load.profile.displayName, state, viewModel, pickAvatar)
-                    Spacer(Modifier.height(20.dp))
-                    TextFields(state, viewModel)
-                    Spacer(Modifier.height(20.dp))
-                    SaveArea(state, viewModel)
+                    ProfileHeader(session, users[session.userId], load.profile, state, viewModel, pickAvatar, pickBanner)
+                    Column(Modifier.padding(horizontal = 20.dp)) {
+                        ImageNotes(stringResource(Res.string.profile_edit_banner_help), state.refusals[ProfileImageKind.Banner]?.text())
+                        ImageNotes(stringResource(Res.string.profile_edit_avatar_help), state.refusals[ProfileImageKind.Avatar]?.text())
+                        SaveResults(state, viewModel)
+                        Spacer(Modifier.height(20.dp))
+                        // A sessão entra na chave: o estado de uma conta nunca aparece na tela de outra.
+                        val statusModel = viewModel<OwnStatusViewModel>(key = "own-status/${session.accountId}/${session.hashCode()}") { OwnStatusViewModel(session) }
+                        OwnStatusPicker(statusModel)
+                        Spacer(Modifier.height(20.dp))
+                        TextFields(state, viewModel)
+                    }
                 }
             }
-            Spacer(Modifier.height(24.dp))
+            // Espaço para a barra flutuante não cobrir o último campo.
+            Spacer(Modifier.height(96.dp))
+        }
+        state.cropping?.let { pending ->
+            ImageCropper(pending, onConfirm = viewModel::confirmCrop, onCancel = viewModel::cancelCrop)
+        }
+        UnsavedBar(
+            visible = state.hasUnsavedChanges && !state.saving,
+            canSave = state.canSave,
+            onDiscard = viewModel::discardAll,
+            onSave = viewModel::save,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+      }
+    }
+}
+
+/** O aviso que flutua sobre a tela enquanto há alterações não salvas, com "Descartar" e "Salvar". */
+@Composable
+private fun UnsavedBar(visible: Boolean, canSave: Boolean, onDiscard: () -> Unit, onSave: () -> Unit, modifier: Modifier = Modifier) {
+    AnimatedVisibility(visible = visible, modifier = modifier, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+        Surface(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            // As cores do tema do app (como o aviso da lista de canais), não as invertidas do Material.
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shadowElevation = 6.dp,
+        ) {
+            Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(Res.string.profile_edit_unsaved), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = onDiscard) { Text(stringResource(Res.string.profile_edit_discard_all)) }
+                Button(onClick = onSave, enabled = canSave) { Text(stringResource(Res.string.profile_edit_save)) }
+            }
         }
     }
 }
 
+/**
+ * O alto da tela como no Discord: o banner de ponta a ponta, o avatar sobreposto à sua borda de baixo, cada um com um lápis
+ * que escolhe a imagem (e, quando cabe, remove o banner ou desfaz a escolha), e embaixo o nome com o `@usuário`.
+ * O nome acompanha o apelido que está sendo digitado.
+ */
 @Composable
-private fun BannerSection(
-    session: AccountSession,
-    userId: String,
-    bannerSha: String?,
-    state: EditProfileState,
-    viewModel: EditProfileViewModel,
-    onPick: () -> Unit,
-) {
-    val current by rememberMediaImage(session, bannerSha?.let { "media/$it" }) { bannerSha?.let { session.api.media(it) } }
-    val change = state.banner
-    SectionTitle(stringResource(Res.string.profile_edit_banner))
-    Box(
-        Modifier.fillMaxWidth().aspectRatio(3f).clip(MaterialTheme.shapes.medium).background(colorFor(userId).copy(alpha = 0.55f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        when {
-            change is BannerChange.Replace -> PickedImageView(change.picked.image, Modifier.fillMaxSize())
-            change == BannerChange.Remove -> Text(
-                stringResource(Res.string.profile_edit_banner_removal),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(12.dp),
-            )
-            else -> current?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-        }
-    }
-    Spacer(Modifier.height(8.dp))
-    ImageActions(
-        busy = state.reducing == ProfileImageKind.Banner,
-        pickLabel = stringResource(Res.string.profile_edit_pick_banner),
-        enabled = !state.saving,
-        onPick = onPick,
-    ) {
-        if (change != BannerChange.Keep) {
-            TextButton(onClick = viewModel::discardBanner, enabled = !state.saving) { Text(stringResource(Res.string.profile_edit_discard)) }
-        } else if (state.hasBanner) {
-            TextButton(onClick = viewModel::removeBanner, enabled = !state.saving) { Text(stringResource(Res.string.profile_edit_remove_banner)) }
-        }
-    }
-    ImageNotes(stringResource(Res.string.profile_edit_banner_help), state.refusals[ProfileImageKind.Banner]?.text())
-}
-
-@Composable
-private fun AvatarSection(
+private fun ProfileHeader(
     session: AccountSession,
     user: User?,
-    displayName: String,
+    profile: UserProfile,
     state: EditProfileState,
     viewModel: EditProfileViewModel,
-    onPick: () -> Unit,
+    onPickAvatar: () -> Unit,
+    onPickBanner: () -> Unit,
 ) {
-    SectionTitle(stringResource(Res.string.profile_edit_avatar))
+    val bannerSha = profile.bannerSha
+    val current by rememberMediaImage(session, bannerSha?.let { "media/$it" }) { bannerSha?.let { session.api.media(it) } }
+    val change = state.banner
     val picked = state.avatar
-    Box(Modifier.size(AvatarSize).clip(CircleShape)) {
-        if (picked != null) {
-            PickedImageView(picked.image, Modifier.fillMaxSize())
-        } else {
-            UserAvatar(session, user, size = AvatarSize, fallbackName = displayName)
+    val name = state.draft[ProfileField.Nickname].trim().ifEmpty { profile.username }
+    val ring = AvatarSize + AvatarRing * 2
+    Box(Modifier.fillMaxWidth()) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(3f).background(colorFor(profile.id).copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                change is BannerChange.Replace -> PickedImageView(change.picked.image, Modifier.fillMaxSize())
+                change == BannerChange.Remove -> Text(
+                    stringResource(Res.string.profile_edit_banner_removal),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(12.dp),
+                )
+                else -> current?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+            }
+            if (state.reducing == ProfileImageKind.Banner) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+        }
+        PencilButton(
+            Modifier.align(Alignment.TopEnd).padding(12.dp),
+            pickLabel = stringResource(Res.string.profile_edit_pick_banner),
+            enabled = !state.saving && state.reducing == null,
+            onPick = onPickBanner,
+            extras = when {
+                change != BannerChange.Keep -> listOf(stringResource(Res.string.profile_edit_discard) to viewModel::discardBanner)
+                state.hasBanner -> listOf(stringResource(Res.string.profile_edit_remove_banner) to viewModel::removeBanner)
+                else -> emptyList()
+            },
+        )
+        Box(Modifier.align(Alignment.BottomStart).padding(start = 16.dp).offset(y = ring / 2)) {
+            Box(Modifier.size(ring).background(MaterialTheme.colorScheme.background, CircleShape).padding(AvatarRing).clip(CircleShape)) {
+                if (picked != null) {
+                    PickedImageView(picked.image, Modifier.fillMaxSize())
+                } else {
+                    UserAvatar(session, user, size = AvatarSize, fallbackName = name)
+                }
+                if (state.reducing == ProfileImageKind.Avatar) {
+                    CircularProgressIndicator(Modifier.align(Alignment.Center).size(24.dp), strokeWidth = 3.dp)
+                }
+            }
+            PencilButton(
+                Modifier.align(Alignment.TopEnd),
+                pickLabel = stringResource(Res.string.profile_edit_pick_avatar),
+                enabled = !state.saving && state.reducing == null,
+                onPick = onPickAvatar,
+                extras = if (picked != null) listOf(stringResource(Res.string.profile_edit_discard) to viewModel::discardAvatar) else emptyList(),
+            )
         }
     }
-    Spacer(Modifier.height(8.dp))
-    ImageActions(
-        busy = state.reducing == ProfileImageKind.Avatar,
-        pickLabel = stringResource(Res.string.profile_edit_pick_avatar),
-        enabled = !state.saving,
-        onPick = onPick,
-    ) {
-        if (picked != null) {
-            TextButton(onClick = viewModel::discardAvatar, enabled = !state.saving) { Text(stringResource(Res.string.profile_edit_discard)) }
-        }
+    Spacer(Modifier.height(ring / 2 + 8.dp))
+    Column(Modifier.padding(horizontal = 20.dp)) {
+        Text(name, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("@${profile.username}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    ImageNotes(stringResource(Res.string.profile_edit_avatar_help), state.refusals[ProfileImageKind.Avatar]?.text())
 }
 
-/** "Escolher …" mais o que mais couber ao lado; com a imagem sendo preparada, o botão espera e um aviso aparece. */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * O lápis redondo sobre uma imagem. Sem [extras], um toque escolhe a imagem; com eles abre um menu com "escolher" e o que
+ * mais couber (remover, desfazer).
+ */
 @Composable
-private fun ImageActions(busy: Boolean, pickLabel: String, enabled: Boolean, onPick: () -> Unit, more: @Composable () -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
-        OutlinedButton(onClick = onPick, enabled = enabled) { Text(pickLabel) }
-        more()
-    }
-    if (busy) {
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.profile_edit_preparing), style = MaterialTheme.typography.bodySmall)
+private fun PencilButton(modifier: Modifier, pickLabel: String, enabled: Boolean, onPick: () -> Unit, extras: List<Pair<String, () -> Unit>>) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Box(
+            Modifier
+                .size(PencilSize)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = if (enabled) 0.65f else 0.35f))
+                .clickable(enabled = enabled, role = Role.Button, onClickLabel = pickLabel) { if (extras.isEmpty()) onPick() else open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Edit, contentDescription = pickLabel, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(pickLabel) }, onClick = { open = false; onPick() })
+            extras.forEach { (label, action) -> DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() }) }
         }
     }
 }
@@ -302,18 +372,9 @@ private fun Field(
     )
 }
 
-/** "Salvar", o resultado de cada pedido e, depois de uma resposta incerta, "Recarregar perfil" (um GET, nunca um novo envio). */
+/** O resultado de cada pedido de "Salvar" e, depois de uma resposta incerta, "Recarregar perfil" (um GET, nunca um novo envio). */
 @Composable
-private fun SaveArea(state: EditProfileState, viewModel: EditProfileViewModel) {
-    Button(onClick = viewModel::save, enabled = state.canSave, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-        if (state.saving) {
-            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.profile_edit_saving))
-        } else {
-            Text(stringResource(Res.string.profile_edit_save))
-        }
-    }
+private fun SaveResults(state: EditProfileState, viewModel: EditProfileViewModel) {
     SaveStep.entries.forEach { step ->
         val outcome = state.outcomes[step] ?: return@forEach
         Spacer(Modifier.height(10.dp))
@@ -351,12 +412,6 @@ private fun Outcome(step: SaveStep, outcome: StepOutcome) {
             color = if (outcome is StepOutcome.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-@Composable
-private fun SectionTitle(title: String) {
-    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Spacer(Modifier.height(6.dp))
 }
 
 /** A prévia de uma imagem já reduzida, parada (uma animação aparece no primeiro quadro). A imagem decodificada é fechada ao sair. */

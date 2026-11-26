@@ -115,8 +115,10 @@ release notes in [releases/](../releases/) describe each version's changes.
   from the right edge with everyone grouped by presence and a search by name.
   Tap a person to open their profile.
 - Edit your own profile: nickname, status message, description and typing
-  phrase, with your avatar and banner chosen from the gallery. The app crops
-  and shrinks the picture on the phone, drops the location it carries, and
+  phrase, with your avatar and banner chosen from the gallery through a pencil button
+  on each image, laid out like a profile card. A picked picture opens an editor where you
+  move, zoom and rotate it under a fixed frame (square for the avatar, 3:1 for the
+  banner); the app then crops and shrinks it on the phone, drops the location it carries, and
   shows the result of each change. You can also remove your banner, and choose
   Available, Away or Busy from the profile editor or from your own profile, each
   with a disc in the color of the status.
@@ -168,9 +170,9 @@ release notes in [releases/](../releases/) describe each version's changes.
   reconnects or comes back to the front. A channel set to "nothing" in the web
   client gets no notifications from the server, so it shows no count.
 - No server administration.
-- Your avatar cannot be removed once set, only replaced, and pictures are cropped
-  to the center, with no manual crop. An animated avatar or banner goes as it is
-  when it fits the size limits and is refused otherwise; there is no "invisible"
+- Your avatar cannot be removed once set, only replaced, and an animated avatar or
+  banner is not cropped: it goes as it is when it fits the size limits and is
+  refused otherwise; there is no "invisible"
   status.
 - Changing your password ends every session of the account, this one included,
   and the server does not check the current password, so the app only asks you

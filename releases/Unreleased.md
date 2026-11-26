@@ -2,9 +2,15 @@
 
 - Edit your own profile from your profile or from the account settings:
   nickname, status message, description and typing phrase, plus your avatar and
-  banner from the gallery. Pictures are cropped and shrunk on the phone, lose
-  the location they carry, and the result of each change is shown. You can
-  remove your banner.
+  banner from the gallery. The editor is laid out like a profile card: the banner
+  and the avatar show in place, each with a pencil button to change it, and the
+  Save button sits next to the title, where it stays in view. A floating notice
+  warns about unsaved changes and offers to discard them.
+- Picking an avatar or banner opens an image editor: move and zoom the picture
+  under a fixed frame (square for the avatar, 3:1 for the banner), rotate it, or
+  reset it with "Tamanho". Pictures are shrunk on the phone and lose the location
+  they carry, and the result of each change is shown. You can remove your banner.
+  Animated pictures are not cropped.
 - Choose Available, Away or Busy from the profile editor or from your own
   profile, with a disc in the color of each status.
 - Block people from their profile and manage the list in the account settings.
