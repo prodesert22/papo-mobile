@@ -155,6 +155,18 @@ class AccountManager(
         return server
     }
 
+    /**
+     * A sessão de [accountId] acabou do lado do servidor (a troca de senha encerra todas, inclusive esta): desliga o
+     * tempo real e marca a conta como expirada, para a tela principal levar ao "Entrar de novo". Não chama
+     * `POST /auth/logout` (a sessão já não vale) nem sobe o alerta de violação, que é de outro caso. Os dados da conta
+     * ficam no aparelho.
+     */
+    suspend fun endSession(accountId: String) {
+        val session = sessions.value[accountId] ?: return
+        session.pause()
+        session.client.cookies.set(null)
+    }
+
     /** Sai da conta no servidor (melhor esforço) e apaga tudo o que é dela no aparelho. */
     suspend fun remove(accountId: String) = mutex.withLock {
         pendingLabels.update { it - accountId }
@@ -237,6 +249,12 @@ class AccountManager(
             api.register(username.trim(), password)
             return login(username, password)
         }
+
+        /**
+         * Troca a senha com o token de um link de redefinição (público, limitado por endereço: quem chama não repete
+         * sozinho). O pedido vai ao servidor desta conta em andamento, nunca ao endereço do link.
+         */
+        suspend fun resetPassword(token: String, password: String) = api.consumePasswordReset(token, password)
 
         fun cancel() = client.close()
 

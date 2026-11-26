@@ -415,4 +415,50 @@ class AccountManagerTest {
 
         assertEquals("papo.test", manager.accounts.value.single().serverName)
     }
+
+    @Test
+    fun encerrarASessaoMarcaExpiradaSemLogoutNemAlertaDeViolacao() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        runCurrent()
+        val session = manager.session(ana.account.id)!!
+
+        manager.endSession(ana.account.id)
+        runCurrent()
+
+        assertTrue(manager.accounts.value.single().sessionExpired)
+        assertNull(session.client.cookieHeader())
+        assertEquals(emptyList(), f.backend.loggedOut)
+        assertEquals(emptySet(), manager.securityAlerts.value)
+        assertEquals(ana.account.userId, manager.accounts.value.single().userId) // os dados da conta ficam
+        assertEquals(listOf(ana.account.id), manager.accounts.value.map { it.id })
+        assertTrue(f.deleted.isEmpty())
+    }
+
+    @Test
+    fun encerrarASessaoDeUmaContaNaoMexeNaOutra() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+
+        manager.endSession(ana.account.id)
+        runCurrent()
+
+        val byId = manager.accounts.value.associateBy { it.id }
+        assertTrue(byId.getValue(ana.account.id).sessionExpired)
+        assertEquals(false, byId.getValue(bia.account.id).sessionExpired)
+        assertEquals("Auth=jwt-papo.test-bia", manager.session(bia.account.id)!!.client.cookieHeader())
+    }
+
+    @Test
+    fun encerrarASessaoDeContaDesconhecidaNaoFazNada() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+
+        manager.endSession("nao-existe")
+
+        assertEquals(0, f.backend.engine.requestHistory.size)
+    }
 }

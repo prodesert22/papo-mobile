@@ -85,6 +85,8 @@ import chat.papo.mobile.ui.settings.AccountSettingsScreen
 import chat.papo.mobile.ui.settings.AppSettingsScreen
 import chat.papo.mobile.ui.settings.BlockedUsersScreen
 import chat.papo.mobile.ui.settings.BlockedUsersViewModel
+import chat.papo.mobile.ui.settings.ChangePasswordScreen
+import chat.papo.mobile.ui.settings.ChangePasswordViewModel
 import chat.papo.mobile.ui.switcher.QuickSwitcherScreen
 import chat.papo.mobile.ui.switcher.QuickSwitcherViewModel
 import chat.papo.mobile.ui.theme.PapoTheme
@@ -126,6 +128,10 @@ private data class ProfileRoute(val accountId: String, val userId: String)
 /** Os usuários que a conta [accountId] bloqueou. */
 @Serializable
 private data class BlockedRoute(val accountId: String)
+
+/** A troca da senha da conta [accountId]. */
+@Serializable
+private data class PasswordRoute(val accountId: String)
 
 /** Troca rápida entre as conversas de todas as contas; [accountId] e [channelId] são a conversa de onde veio, se houve. */
 @Serializable
@@ -337,7 +343,27 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                 accountId,
                 onBack = { navController.popBackStack() },
                 onOpenBlocked = { navController.navigate(BlockedRoute(accountId)) },
+                onOpenPassword = { navController.navigate(PasswordRoute(accountId)) },
             )
+        }
+        composable<PasswordRoute> { entry ->
+            val route = entry.toRoute<PasswordRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                // A sessão entra na chave: nada de uma troca de senha passa para outra conta.
+                val vm = viewModel(key = "password/${route.accountId}/${accountSession.hashCode()}") {
+                    ChangePasswordViewModel(accountSession, endSession = { session.accounts.endSession(route.accountId) })
+                }
+                ChangePasswordScreen(
+                    vm,
+                    onBack = { navController.popBackStack() },
+                    // A sessão acabou: a tela principal mostra a conta como expirada e leva ao "Entrar de novo".
+                    onDone = { navController.popBackStack(HomeRoute, inclusive = false) },
+                )
+            }
         }
         composable<BlockedRoute> { entry ->
             val route = entry.toRoute<BlockedRoute>()

@@ -130,6 +130,26 @@
     <string name="profile_block_title">Bloquear %1$s?</string>
     <string name="profile_block_body">Vocês não poderão trocar mensagens diretas. Mensagens em canais continuam visíveis.</string>
 
+    <!-- Senha -->
+    <string name="password_new">Nova senha</string>
+    <string name="password_repeat">Repita a nova senha</string>
+    <string name="password_rules">Pelo menos 8 caracteres, com uma letra maiúscula e um símbolo. O servidor pode exigir mais.</string>
+    <string name="password_problem_short">Use pelo menos 8 caracteres.</string>
+    <string name="password_problem_upper">Falta uma letra maiúscula.</string>
+    <string name="password_problem_symbol">Falta um símbolo: algo que não seja letra nem número.</string>
+    <string name="password_mismatch">As duas senhas são diferentes.</string>
+    <string name="password_change_title">Trocar a senha</string>
+    <string name="password_change_body">O servidor não pede a senha de agora, então confira que é você quem está trocando.</string>
+    <string name="password_change_submit">Trocar a senha</string>
+    <string name="password_change_confirm_title">Trocar a senha?</string>
+    <string name="password_change_confirm_body">Todas as sessões desta conta terminam, inclusive esta. Você vai entrar de novo com a senha nova.</string>
+    <plurals name="password_change_queue">
+        <item quantity="one">%1$d mensagem ainda não saiu e vai se perder.</item>
+        <item quantity="other">%1$d mensagens ainda não saíram e vão se perder.</item>
+    </plurals>
+    <string name="password_change_uncertain_prepare">Não foi possível confirmar o pedido. A senha não mudou; você pode tentar de novo.</string>
+    <string name="password_change_uncertain">Não foi possível confirmar se a senha mudou. Tente entrar com a senha nova antes de repetir.</string>
+
     <!-- Configurações do app -->
     <string name="settings_title">Configurações</string>
     <string name="settings_security">Segurança</string>

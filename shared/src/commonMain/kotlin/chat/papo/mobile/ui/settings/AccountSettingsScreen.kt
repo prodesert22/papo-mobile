@@ -59,6 +59,7 @@ import chat.papo.mobile.core.parseInstant
 import chat.papo.mobile.data.api.ConnectionDto
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.account_blocked_users
+import chat.papo.mobile.resources.account_change_password
 import chat.papo.mobile.resources.account_color
 import chat.papo.mobile.resources.account_color_none
 import chat.papo.mobile.resources.account_device_drop
@@ -88,7 +89,7 @@ import org.jetbrains.compose.resources.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> Unit, onOpenBlocked: () -> Unit) {
+fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> Unit, onOpenBlocked: () -> Unit, onOpenPassword: () -> Unit) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val account = accounts.firstOrNull { it.id == accountId }
     val scope = rememberCoroutineScope()
@@ -156,6 +157,7 @@ fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> 
                 Spacer(Modifier.height(28.dp))
                 Text(stringResource(Res.string.account_security), style = MaterialTheme.typography.titleMedium)
                 SettingsLink(stringResource(Res.string.account_blocked_users), onOpenBlocked)
+                SettingsLink(stringResource(Res.string.account_change_password), onOpenPassword)
 
                 Spacer(Modifier.height(28.dp))
                 Text(stringResource(Res.string.account_devices), style = MaterialTheme.typography.titleMedium)
