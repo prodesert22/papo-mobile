@@ -3,16 +3,19 @@ package chat.papo.mobile
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.PixelSize
 import chat.papo.mobile.media.PosterSource
+import chat.papo.mobile.media.isNearlyBlack
 import chat.papo.mobile.media.posterKey
+import chat.papo.mobile.media.posterRetryTimeUs
 import chat.papo.mobile.media.posterSize
 import chat.papo.mobile.media.posterSource
-import chat.papo.mobile.media.posterTimeUs
 import chat.papo.mobile.media.videoCardAspect
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
-/** As decisões puras da capa de um vídeo: de onde vem, onde fica no cache, que instante e que proporção. */
+/** As decisões puras da capa de um vídeo: de onde vem, onde fica no cache, que instante, se o quadro é preto e que proporção. */
 class VideoPosterTest {
     private fun attachment(
         thumbnailId: String? = null,
@@ -80,25 +83,52 @@ class VideoPosterTest {
         assertEquals(PosterSource.Server, posterSource(attachment(thumbnailId = "thumb-1", sizeBytes = 0), revealed = true))
     }
 
-    // posterTimeUs
+    // posterRetryTimeUs
 
     @Test
     fun semDuracaoOuComDuracaoInvalidaUsaOPrimeiroQuadro() {
-        assertEquals(0L, posterTimeUs(null))
-        assertEquals(0L, posterTimeUs(0))
-        assertEquals(0L, posterTimeUs(-5))
+        assertEquals(0L, posterRetryTimeUs(null))
+        assertEquals(0L, posterRetryTimeUs(0))
+        assertEquals(0L, posterRetryTimeUs(-5))
     }
 
     @Test
     fun videoCurtoUsaAMetadeDaDuracao() {
-        assertEquals(300_000L, posterTimeUs(600))
-        assertEquals(999_500L, posterTimeUs(1_999))
+        assertEquals(300_000L, posterRetryTimeUs(600))
+        assertEquals(999_500L, posterRetryTimeUs(1_999))
     }
 
     @Test
     fun videoDeDoisSegundosOuMaisUsaUmSegundo() {
-        assertEquals(1_000_000L, posterTimeUs(2_000))
-        assertEquals(1_000_000L, posterTimeUs(600_000))
+        assertEquals(1_000_000L, posterRetryTimeUs(2_000))
+        assertEquals(1_000_000L, posterRetryTimeUs(600_000))
+    }
+
+    // isNearlyBlack
+
+    private val black = 0xFF000000.toInt()
+
+    @Test
+    fun semPontosNaoHaOQueJulgarEOQuadroNaoEhPreto() {
+        assertFalse(isNearlyBlack(IntArray(0)))
+    }
+
+    @Test
+    fun quadroSoDePontosPretosEhPreto() {
+        assertTrue(isNearlyBlack(IntArray(144) { black }))
+        assertTrue(isNearlyBlack(intArrayOf(0x00000000, 0xFF140000.toInt()))) // o alfa não conta; vermelho bem escuro também é preto
+    }
+
+    @Test
+    fun umPontoClaroBastaParaOQuadroNaoSerPreto() {
+        assertFalse(isNearlyBlack(IntArray(144) { black }.also { it[100] = 0xFFFFFFFF.toInt() }))
+        assertFalse(isNearlyBlack(intArrayOf(0xFF0000FF.toInt()))) // azul puro: brilho 29, acima do limite
+    }
+
+    @Test
+    fun oLimiteDeBrilhoEhVinteInclusive() {
+        assertTrue(isNearlyBlack(intArrayOf(0xFF141414.toInt()))) // 20
+        assertFalse(isNearlyBlack(intArrayOf(0xFF151515.toInt()))) // 21
     }
 
     // posterSize

@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +41,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import chat.papo.mobile.account.AccountSession
@@ -54,6 +57,7 @@ import chat.papo.mobile.resources.chat_sensitive
 import chat.papo.mobile.resources.msg_download
 import chat.papo.mobile.resources.video_download_failed
 import chat.papo.mobile.resources.video_play
+import chat.papo.mobile.resources.video_poster_loading
 import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.media.rememberAttachmentDownload
@@ -69,9 +73,10 @@ private val MaxHeight = 320.dp
  *
  * A capa é a miniatura do servidor, quando ele a gerou (só gera para imagem, então quase nunca), ou um quadro do próprio
  * vídeo tirado neste aparelho (`VideoPosters`), guardado no cache cifrado. Enquanto não chega a caixa fica como está e
- * a capa aparece com um fade, sob o ▶; sem capa (formato que o aparelho não lê, falha) o cartão fica simples. Vídeo
- * marcado como sensível fica escondido, sem pedir capa nenhuma, com nome, tamanho e Baixar, até o primeiro toque (o
- * segundo toca), como a imagem.
+ * a capa aparece com um fade, sob o ▶, e um anel de progresso em volta do ▶ mostra que ela está sendo feita (só enquanto
+ * é extraída: a que já estava no cache aparece sem ele); sem capa (formato que o aparelho não lê, falha) o cartão fica
+ * simples, sem o anel. Vídeo marcado como sensível fica escondido, sem pedir capa nenhuma, com nome, tamanho e Baixar,
+ * até o primeiro toque (o segundo toca), como a imagem.
  */
 @Composable
 internal fun VideoAttachment(session: AccountSession, attachment: AttachmentDto, media: PlayableMedia, onPlay: (PlayableMedia) -> Unit) {
@@ -94,6 +99,8 @@ internal fun VideoAttachment(session: AccountSession, attachment: AttachmentDto,
             PosterSource.None -> null
         }
     }
+    // Só a capa extraída demora o bastante para mostrar progresso; a do cache nunca chama o `fetch`, então nunca está "sendo feita".
+    val making by remember(session, attachment.id) { session.videoPosters.making(attachment.id) }.collectAsState(false)
     // A largura sai da proporção para a caixa caber na altura máxima: um vídeo em retrato fica estreito, não esticado.
     Column(
         Modifier
@@ -115,6 +122,16 @@ internal fun VideoAttachment(session: AccountSession, attachment: AttachmentDto,
                 // Inteira, sem recorte: o quadro tem a proporção real do vídeo, que a caixa só segue de perto.
                 if (bitmap != null) {
                     Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }, contentScale = ContentScale.Fit)
+                }
+                // O anel entra e sai com um fade: some junto com o início do fade da capa, sem um vazio entre os dois.
+                val progress by animateFloatAsState(if (making && bitmap == null) 1f else 0f, tween(durationMillis = 250), label = "posterProgress")
+                if (progress > 0f) {
+                    val loading = stringResource(Res.string.video_poster_loading)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(64.dp).graphicsLayer { this.alpha = progress }.semantics { contentDescription = loading },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        strokeWidth = 2.dp,
+                    )
                 }
                 PlayBadge()
             } else {

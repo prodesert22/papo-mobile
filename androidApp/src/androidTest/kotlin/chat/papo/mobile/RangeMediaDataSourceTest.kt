@@ -8,6 +8,7 @@ import chat.papo.mobile.data.api.MemoryCookieStore
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.media.HttpRangeFetch
 import chat.papo.mobile.media.RangeReader
+import chat.papo.mobile.media.RequestPacer
 import chat.papo.mobile.platform.AndroidVideoPosterExtractor
 import chat.papo.mobile.platform.RangeMediaDataSource
 import io.ktor.client.engine.mock.MockEngine
@@ -81,8 +82,8 @@ class RangeMediaDataSourceTest {
         if (range == null) respond(content, HttpStatusCode.OK) else partial(content, range)
     }
 
-    private fun reader(client: PapoClient, size: Int, budget: Long = 1_000_000, pauseMs: Long = 0) =
-        RangeReader(size.toLong(), HttpRangeFetch(client, url), blockSize = blockSize, budget = budget, pauseMs = pauseMs)
+    private fun reader(client: PapoClient, size: Int, budget: Long = 1_000_000, pacer: RequestPacer = RequestPacer(0)) =
+        RangeReader(size.toLong(), HttpRangeFetch(client, url), blockSize = blockSize, budget = budget, pacer = pacer)
 
     private val HttpRequestData.cookie get() = headers[HttpHeaders.Cookie]
     private val HttpRequestData.range get() = headers[HttpHeaders.Range]

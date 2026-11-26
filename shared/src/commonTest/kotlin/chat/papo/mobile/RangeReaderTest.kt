@@ -4,6 +4,7 @@ import chat.papo.mobile.media.ByteBudgetExceeded
 import chat.papo.mobile.media.RangeFetch
 import chat.papo.mobile.media.RangeReadFailed
 import chat.papo.mobile.media.RangeReader
+import chat.papo.mobile.media.RequestPacer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
@@ -44,8 +45,8 @@ class RangeReaderTest {
         }
     }
 
-    private fun reader(file: FakeFile, budget: Long = 10_000, pauseMs: Long = 0) =
-        RangeReader(file.size.toLong(), file, blockSize = block, budget = budget, pauseMs = pauseMs)
+    private fun reader(file: FakeFile, budget: Long = 10_000, pacer: RequestPacer = RequestPacer(0)) =
+        RangeReader(file.size.toLong(), file, blockSize = block, budget = budget, pacer = pacer)
 
     private suspend fun RangeReader.read(position: Long, length: Int): ByteArray {
         val into = ByteArray(length)
@@ -241,7 +242,7 @@ class RangeReaderTest {
             val bytes = ByteArray((end - start + 1).toInt())
             if (short) bytes.copyOf(bytes.size - 1) else bytes
         }
-        val reader = RangeReader(1_000, source, blockSize = block, budget = 10_000, pauseMs = 0)
+        val reader = RangeReader(1_000, source, blockSize = block, budget = 10_000, pacer = RequestPacer(0))
 
         assertFailsWith<RangeReadFailed> { reader.read(0, 10) }
         assertEquals(0L, reader.fetchedBytes)
@@ -259,7 +260,7 @@ class RangeReaderTest {
             if (broken) error("conexão caiu")
             ByteArray((end - start + 1).toInt())
         }
-        val reader = RangeReader(1_000, source, blockSize = block, budget = 10_000, pauseMs = 0)
+        val reader = RangeReader(1_000, source, blockSize = block, budget = 10_000, pacer = RequestPacer(0))
 
         assertFailsWith<IllegalStateException> { reader.read(0, 10) }
         broken = false
@@ -267,21 +268,54 @@ class RangeReaderTest {
         assertEquals(10, reader.read(0, 10).size)
     }
 
-    // Pausa entre pedidos
+    // Ritmo dos pedidos
 
     @Test
-    fun entrePedidosHaUmaPausaMasNaoDepoisDoUltimoNemParaOQueEstaEmCache() = runTest {
+    fun osPedidosSaemEspacadosPeloRitmoMasNaoParaOQueEstaEmCache() = runTest {
         val file = FakeFile(1_000)
         file.clock = { testScheduler.currentTime }
-        val reader = reader(file, pauseMs = 100)
+        val reader = reader(file, pacer = RequestPacer(100) { testScheduler.currentTime })
 
-        reader.read(0, 10)
-        reader.read(5, 10) // do mesmo bloco: sem pedido, sem pausa
+        reader.read(0, 10) // o primeiro sai na hora
+        reader.read(5, 10) // do mesmo bloco: sem pedido, sem espera
         reader.read(200, 10)
         reader.read(500, 10)
 
         assertEquals(listOf(0L, 100L, 200L), file.times)
         assertEquals(200L, testScheduler.currentTime)
+    }
+
+    @Test
+    fun leitoresQueDividemORitmoEspacamOsPedidosUmDoOutro() = runTest {
+        val first = FakeFile(1_000)
+        val second = FakeFile(1_000)
+        val clock = { testScheduler.currentTime }
+        first.clock = clock
+        second.clock = clock
+        val pacer = RequestPacer(100, clock)
+        val a = reader(first, pacer = pacer)
+        val b = reader(second, pacer = pacer)
+
+        a.read(0, 10)
+        b.read(0, 10)
+        a.read(200, 10)
+        b.read(200, 10)
+
+        assertEquals(listOf(0L, 200L), first.times)
+        assertEquals(listOf(100L, 300L), second.times)
+    }
+
+    @Test
+    fun oOrcamentoEstouradoNaoGastaAVagaDoRitmo() = runTest {
+        val file = FakeFile(1_000)
+        val pacer = RequestPacer(100) { testScheduler.currentTime }
+        val reader = reader(file, budget = 100, pacer = pacer)
+
+        reader.read(0, 10)
+        assertFailsWith<ByteBudgetExceeded> { reader.read(100, 10) }
+        pacer.pace() // a vaga seguinte é só a do primeiro pedido mais o intervalo
+
+        assertEquals(100L, testScheduler.currentTime)
     }
 
     // Concorrência e cancelamento

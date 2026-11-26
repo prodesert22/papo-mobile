@@ -5,7 +5,10 @@ import chat.papo.mobile.data.api.MemoryCookieStore
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.media.ByteBudgetExceeded
 import chat.papo.mobile.media.POSTER_MAX_PX
+import chat.papo.mobile.media.POSTER_PARALLEL
+import chat.papo.mobile.media.POSTER_SETTLE_MS
 import chat.papo.mobile.media.RangeReader
+import chat.papo.mobile.media.RequestPacer
 import chat.papo.mobile.media.VideoPosterExtractor
 import chat.papo.mobile.media.VideoPosters
 import io.ktor.client.engine.mock.MockEngine
@@ -17,6 +20,7 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -24,13 +28,15 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * A fila das capas de uma conta: uma extração por vez, sem repetir o que falhou, esperando o visualizador, e sempre pelo
- * cliente da própria conta. O extrator é um falso; o decodificador de verdade só roda no aparelho.
+ * A fila das capas de uma conta: poucas extrações por vez, sem repetir o que falhou, esperando o visualizador, sempre pelo
+ * cliente da própria conta e com o ritmo de pedidos dividido entre elas. O extrator é um falso; o decodificador de verdade
+ * só roda no aparelho.
  */
 class VideoPostersTest {
     private val server = ServerUrl("https://papo.test")
@@ -47,8 +53,12 @@ class VideoPostersTest {
         MemoryCookieStore(cookie),
     ).also(clients::add)
 
-    private fun posters(extractor: VideoPosterExtractor?, client: PapoClient = client()) =
-        VideoPosters(client, extractor, settleMs = settle, blockBytes = 100, budgetBytes = 300, pauseMs = 0)
+    private fun posters(
+        extractor: VideoPosterExtractor?,
+        client: PapoClient = client(),
+        parallel: Int = 1,
+        pacer: RequestPacer = RequestPacer(0),
+    ) = VideoPosters(client, extractor, settleMs = settle, blockBytes = 100, budgetBytes = 300, parallel = parallel, pacer = pacer)
 
     /** Um extrator falso: [body] roda a cada extração e devolve o que o decodificador devolveria. */
     private class FakeExtractor(private val body: suspend FakeExtractor.(RangeReader) -> ByteArray?) : VideoPosterExtractor {
@@ -70,6 +80,8 @@ class VideoPostersTest {
             }
         }
     }
+
+    private suspend fun VideoPosters.estaSendoFeita(id: String = "att-1") = making(id).first()
 
     /** A capa do anexo [id] com [size] bytes, como o cartão a pede: pelo endereço do anexo no servidor. */
     private suspend fun VideoPosters.capa(id: String = "att-1", size: Long = 1_000) =
@@ -254,6 +266,203 @@ class VideoPostersTest {
         assertContentEquals(jpeg, running.await())
         assertContentEquals(jpeg, last.await())
         assertEquals(listOf(1L, 3L), extractor.readers.map { it.size })
+    }
+
+    // Em paralelo
+
+    @Test
+    fun comDuasVagasDuasExtracoesRodamJuntasEATerceiraEsperaUmaVaga() = runTest {
+        val gates = mapOf(1L to CompletableDeferred<Unit>(), 2L to CompletableDeferred<Unit>())
+        val order = mutableListOf<Long>()
+        val extractor = FakeExtractor { reader ->
+            order += reader.size
+            gates[reader.size]?.await()
+            jpeg
+        }
+        val posters = posters(extractor, parallel = 2)
+
+        val results = listOf(1L, 2L, 3L).map { size -> async { posters.capa("att-$size", size = size) } }
+        advanceTimeBy(settle + 1)
+        runCurrent()
+        assertEquals(listOf(1L, 2L), order) // a terceira espera uma vaga
+        assertEquals(2, extractor.active)
+
+        gates.getValue(2L).complete(Unit)
+        runCurrent()
+        assertEquals(listOf(1L, 2L, 3L), order)
+        gates.getValue(1L).complete(Unit)
+        advanceUntilIdle()
+
+        results.forEach { assertContentEquals(jpeg, it.await()) }
+        assertEquals(2, extractor.maxActive)
+    }
+
+    @Test
+    fun falharNumaExtracaoParalelaNaoAtrapalhaAOutra() = runTest {
+        val extractor = FakeExtractor { reader -> if (reader.size == 1L) error("quebrou") else jpeg }
+        val posters = posters(extractor, parallel = 2)
+
+        val broken = async { posters.capa("att-1", size = 1) }
+        val fine = async { posters.capa("att-2", size = 2) }
+        advanceUntilIdle()
+
+        assertNull(broken.await())
+        assertContentEquals(jpeg, fine.await())
+    }
+
+    @Test
+    fun asExtracoesEmParaleloDividemOMesmoRitmoDePedidos() = runTest {
+        // Cada extração lê dois blocos: quatro pedidos, que com 100 ms de intervalo só terminam 300 ms depois do primeiro.
+        val extractor = FakeExtractor { reader ->
+            reader.readAt(0, ByteArray(1), 0, 1)
+            reader.readAt(100, ByteArray(1), 0, 1)
+            jpeg
+        }
+        val posters = posters(extractor, parallel = 2, pacer = RequestPacer(100) { testScheduler.currentTime })
+
+        val results = listOf(async { posters.capa("att-1") }, async { posters.capa("att-2") })
+        advanceUntilIdle()
+
+        results.forEach { assertContentEquals(jpeg, it.await()) }
+        assertEquals(2, extractor.maxActive)
+        assertTrue(testScheduler.currentTime - settle >= 300, "levou ${testScheduler.currentTime - settle} ms")
+    }
+
+    @Test
+    fun osPadroesDeProducaoSaoDuasExtracoesPorVezDepoisDoTempoDeAssentar() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val extractor = FakeExtractor { gate.await(); jpeg }
+        val posters = VideoPosters(client(), extractor)
+
+        val results = (1..3).map { n -> async { posters.capa("att-$n") } }
+        advanceTimeBy(POSTER_SETTLE_MS - 1)
+        runCurrent()
+        assertEquals(0, extractor.calls)
+        advanceTimeBy(1)
+        runCurrent()
+
+        assertEquals(POSTER_PARALLEL, extractor.calls)
+        assertEquals(2, POSTER_PARALLEL)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        results.forEach { assertContentEquals(jpeg, it.await()) }
+        assertEquals(POSTER_PARALLEL, extractor.maxActive)
+    }
+
+    @Test
+    fun semVagasNaoHaExtracaoQueNaoRodeNenhuma() {
+        assertFailsWith<IllegalArgumentException> { VideoPosters(client(), null, parallel = 0) }
+    }
+
+    // O que está sendo feito (o progresso do cartão)
+
+    @Test
+    fun aCapaEstaSendoFeitaDesdeOPedidoAteSair() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val extractor = FakeExtractor { gate.await(); jpeg }
+        val posters = posters(extractor)
+        assertFalse(posters.estaSendoFeita())
+
+        val result = async { posters.capa() }
+        runCurrent()
+        assertTrue(posters.estaSendoFeita()) // assentando
+        advanceTimeBy(settle + 1)
+        runCurrent()
+        assertEquals(1, extractor.calls)
+        assertTrue(posters.estaSendoFeita()) // extraindo
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertContentEquals(jpeg, result.await())
+        assertFalse(posters.estaSendoFeita())
+    }
+
+    @Test
+    fun quemEsperaAVezNaFilaTambemEstaSendoFeito() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val extractor = FakeExtractor { gate.await(); jpeg }
+        val posters = posters(extractor)
+
+        val first = async { posters.capa("att-1") }
+        val second = async { posters.capa("att-2") }
+        advanceTimeBy(settle + 1)
+        runCurrent()
+
+        assertEquals(1, extractor.calls)
+        assertTrue(posters.estaSendoFeita("att-1"))
+        assertTrue(posters.estaSendoFeita("att-2")) // na fila
+        assertFalse(posters.estaSendoFeita("att-3")) // nunca pedido
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        first.await()
+        second.await()
+        assertFalse(posters.estaSendoFeita("att-2"))
+    }
+
+    @Test
+    fun comOVisualizadorAbertoACapaContinuaSendoFeitaEsperando() = runTest {
+        val posters = posters(FakeExtractor { jpeg })
+        posters.playerOpened()
+
+        val result = async { posters.capa() }
+        advanceUntilIdle()
+        assertTrue(posters.estaSendoFeita())
+
+        posters.playerClosed()
+        advanceUntilIdle()
+        assertContentEquals(jpeg, result.await())
+        assertFalse(posters.estaSendoFeita())
+    }
+
+    @Test
+    fun semCapaPorFalhaDoExtratorOuPorExcecaoNaoEstaMaisSendoFeita() = runTest {
+        val broken = posters(FakeExtractor { error("codec quebrou") })
+        val unsupported = posters(FakeExtractor { null })
+
+        assertNull(broken.capa())
+        assertNull(unsupported.capa())
+
+        assertFalse(broken.estaSendoFeita())
+        assertFalse(unsupported.estaSendoFeita())
+    }
+
+    @Test
+    fun cancelarTiraACapaDeSendoFeita() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val posters = posters(FakeExtractor { gate.await(); jpeg })
+
+        val settling = async { posters.capa("att-1") }
+        runCurrent()
+        assertTrue(posters.estaSendoFeita("att-1"))
+        settling.cancel() // o cartão saiu antes de assentar
+        runCurrent()
+        assertFalse(posters.estaSendoFeita("att-1"))
+
+        val extracting = async { posters.capa("att-2") }
+        advanceTimeBy(settle + 1)
+        runCurrent()
+        assertTrue(posters.estaSendoFeita("att-2"))
+        extracting.cancel() // e outro no meio da extração
+        runCurrent()
+        assertFalse(posters.estaSendoFeita("att-2"))
+    }
+
+    @Test
+    fun oQueJaFalhouOuNaoTemExtratorNuncaEstaSendoFeito() = runTest {
+        val failing = posters(FakeExtractor { null })
+        assertNull(failing.capa())
+        failing.playerOpened() // se fosse pedir de novo, ficaria esperando o visualizador, e sendo feito
+
+        val again = async { failing.capa() }
+        runCurrent()
+
+        assertTrue(again.isCompleted) // a memória de falhas responde na hora
+        assertFalse(failing.estaSendoFeita())
+        val without = posters(null)
+        assertNull(without.capa())
+        assertFalse(without.estaSendoFeita())
     }
 
     // Visualizador de vídeo aberto
