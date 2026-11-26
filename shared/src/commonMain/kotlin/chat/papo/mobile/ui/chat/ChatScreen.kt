@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -510,7 +511,13 @@ fun ChatScreen(
                         modifier = Modifier.align(Alignment.BottomStart).padding(20.dp),
                     )
                 }
-                LazyColumn(Modifier.fillMaxSize(), state = listState, reverseLayout = true) {
+                // Um respiro entre a última mensagem e o campo de texto (a lista é invertida: o "embaixo" é o começo).
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    state = listState,
+                    reverseLayout = true,
+                    contentPadding = PaddingValues(bottom = MessageListBottomGap),
+                ) {
                     if (pending.isNotEmpty()) {
                         item(key = "outbox") {
                             PendingMessages(
@@ -759,6 +766,9 @@ fun ChatScreen(
 
 /** Quem reagiu a uma mensagem, pedido pela bolinha em que se tocou ou pela folha de ações (a primeira). */
 private data class ReactorsRequest(val messageId: String, val first: ReactionSummaryDto)
+
+/** Espaço entre a última mensagem e o campo de texto. */
+private val MessageListBottomGap = 12.dp
 
 /** Quantos itens acima do fim a lista precisa estar para oferecer o atalho sem contagem. */
 private const val FAR_FROM_BOTTOM_ITEMS = 10
