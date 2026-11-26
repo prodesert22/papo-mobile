@@ -2,6 +2,7 @@ package chat.papo.mobile.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,21 +39,31 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.Channel
+import chat.papo.mobile.chat.ChannelNotificationSettings
 import chat.papo.mobile.chat.ChannelType
+import chat.papo.mobile.chat.DmNotificationSettings
 import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.RowStyle
 import chat.papo.mobile.chat.conversationAccess
+import chat.papo.mobile.chat.effective
+import chat.papo.mobile.chat.effectiveDm
 import chat.papo.mobile.chat.groupChannels
 import chat.papo.mobile.chat.renderMentions
+import chat.papo.mobile.chat.rowStyle
 import chat.papo.mobile.chat.searchByName
+import chat.papo.mobile.chat.showsUnreadDot
 import chat.papo.mobile.data.ws.WsState
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_cancel
@@ -70,12 +81,16 @@ import chat.papo.mobile.resources.channels_uncategorized
 import chat.papo.mobile.resources.dm_pick_search
 import chat.papo.mobile.resources.dm_pick_title
 import chat.papo.mobile.resources.search_clear_filter
+import chat.papo.mobile.ui.components.MentionBadge
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.components.toUiError
+import chat.papo.mobile.ui.notifications.ChannelNotificationSheet
+import chat.papo.mobile.ui.notifications.DmNotificationSheet
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import kotlinx.coroutines.launch
+import kotlin.time.Clock
 import org.jetbrains.compose.resources.stringResource
 
 /** Lista de conversas diretas e canais (por categoria) da conta ativa. */
@@ -98,6 +113,14 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
     var pickingUser by remember { mutableStateOf(false) }
     var dmError by remember { mutableStateOf<UiError?>(null) }
     val groups = remember(channels) { groupChannels(channels) }
+    // As configurações e o número de menções: mudar uma delas (ou um silêncio acabar) refaz as linhas.
+    val prefs = session.notificationPrefs
+    val serverSettings by prefs.server.collectAsStateWithLifecycle()
+    val channelSettings by prefs.channels.collectAsStateWithLifecycle()
+    val dmSettings by prefs.dms.collectAsStateWithLifecycle()
+    val mentions by session.mentions.mentions.collectAsStateWithLifecycle()
+    var sheetChannel by remember { mutableStateOf<Channel?>(null) }
+    var sheetDm by remember { mutableStateOf<Dm?>(null) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         if (connection != WsState.Connected && !syncing && allChannels.isNotEmpty()) {
@@ -125,7 +148,9 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
             }
         }
         items(dms, key = { "dm-" + it.id }) { dm ->
-            DmRow(session, dm, users[dm.userId], presence[dm.userId], users) { onOpen(dm.id) }
+            val muted = !showsUnreadDot(effectiveDm(serverSettings, dmSettings[dm.id] ?: DmNotificationSettings(), Clock.System.now()))
+            val style = rowStyle(dm.unreadCount > 0, mentions.perDm[dm.id] ?: 0, capped = false, muted = muted)
+            DmRow(session, dm, users[dm.userId], presence[dm.userId], users, style, onLongClick = { sheetDm = dm }) { onOpen(dm.id) }
         }
 
         if (channels.isEmpty() && !syncing && syncError == null) {
@@ -146,7 +171,15 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
                 // no fim da linha, que só existe quando o toque entra na chamada e a conta lê o canal.
                 val joinsCall = access?.joinVoice == true
                 val chatButton = joinsCall && access?.read == true
-                ChannelRow(channel, voice[channel.id].orEmpty().size, onOpenChat = if (chatButton) ({ onOpen(channel.id) }) else null) {
+                val muted = !showsUnreadDot(effective(serverSettings, channelSettings[channel.id] ?: ChannelNotificationSettings(), Clock.System.now()))
+                val style = rowStyle(channel.unread, mentions.perChannel[channel.id] ?: 0, mentions.capped, muted)
+                ChannelRow(
+                    channel,
+                    voice[channel.id].orEmpty().size,
+                    style,
+                    onOpenChat = if (chatButton) ({ onOpen(channel.id) }) else null,
+                    onLongClick = { sheetChannel = channel },
+                ) {
                     if (joinsCall) onJoinVoice(channel.id) else onOpen(channel.id)
                 }
             }
@@ -173,6 +206,10 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
                 }
             },
         )
+    }
+    sheetChannel?.let { channel -> ChannelNotificationSheet(prefs, channel, onDismiss = { sheetChannel = null }) }
+    sheetDm?.let { dm ->
+        DmNotificationSheet(prefs, dm.id, users[dm.userId]?.displayName ?: "?", onDismiss = { sheetDm = null })
     }
     dmError?.let { error ->
         AlertDialog(
@@ -211,45 +248,73 @@ private fun SectionHeader(title: String, action: @Composable () -> Unit = {}) {
     }
 }
 
+/** A cor do nome e do ícone de uma linha: destaque, comum ou esmaecida, como diz [RowStyle]. */
 @Composable
-private fun ChannelRow(channel: Channel, inVoice: Int, onOpenChat: (() -> Unit)?, onClick: () -> Unit) {
+private fun rowColor(style: RowStyle) = when {
+    style.emphasized -> LocalPapoColors.current.unreadName
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/** A opacidade do que esmaece numa conversa silenciada. */
+private const val DIMMED_ALPHA = 0.45f
+
+@Composable
+private fun ChannelRow(
+    channel: Channel,
+    inVoice: Int,
+    style: RowStyle,
+    onOpenChat: (() -> Unit)?,
+    onLongClick: () -> Unit,
+    onClick: () -> Unit,
+) {
     val accent = LocalPapoColors.current.accent
-    val emphasis = if (channel.unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    val haptics = LocalHapticFeedback.current
+    val emphasis = rowColor(style)
     // Com o botão de chat no fim a linha ganha a altura dele, então o recuo de cima e de baixo sai.
     val hasChatButton = onOpenChat != null
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            )
             .padding(start = 16.dp, end = if (hasChatButton) 4.dp else 16.dp)
             .padding(vertical = if (hasChatButton) 0.dp else 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            if (channel.type == ChannelType.Voice) Icons.AutoMirrored.Filled.VolumeUp else Icons.Filled.Tag,
-            contentDescription = null,
-            tint = emphasis,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                channel.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (channel.unread) FontWeight.SemiBold else FontWeight.Normal,
-                color = emphasis,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        Row(Modifier.weight(1f).alpha(if (style.dimmed) DIMMED_ALPHA else 1f), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (channel.type == ChannelType.Voice) Icons.AutoMirrored.Filled.VolumeUp else Icons.Filled.Tag,
+                contentDescription = null,
+                tint = emphasis,
+                modifier = Modifier.size(20.dp),
             )
-            if (channel.type == ChannelType.Voice && inVoice > 0) {
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    stringResource(Res.string.channels_in_voice, inVoice),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = LocalPapoColors.current.online,
+                    channel.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (style.emphasized) FontWeight.SemiBold else FontWeight.Normal,
+                    color = emphasis,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                if (channel.type == ChannelType.Voice && inVoice > 0) {
+                    Text(
+                        stringResource(Res.string.channels_in_voice, inVoice),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = LocalPapoColors.current.online,
+                    )
+                }
             }
         }
-        if (channel.unread) Box(Modifier.size(9.dp).background(accent, CircleShape))
+        Spacer(Modifier.width(8.dp))
+        style.badge?.let { MentionBadge(it) }
+        if (style.showDot) Box(Modifier.size(9.dp).background(accent, CircleShape))
         if (onOpenChat != null) {
             IconButton(onClick = onOpenChat) {
                 Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = stringResource(Res.string.channels_open_chat))
@@ -265,49 +330,53 @@ private fun DmRow(
     user: User?,
     presence: Presence?,
     users: Map<String, User>,
+    style: RowStyle,
+    onLongClick: () -> Unit,
     onClick: () -> Unit,
 ) {
-    val colors = LocalPapoColors.current
+    val haptics = LocalHapticFeedback.current
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            )
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box {
-            UserAvatar(session, user, size = 40.dp)
-            PresenceDot(presence, Modifier.align(Alignment.BottomEnd))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                user?.displayName ?: "?",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (dm.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            dm.lastMessageText?.takeIf { it.isNotBlank() }?.let { text ->
+        Row(Modifier.weight(1f).alpha(if (style.dimmed) DIMMED_ALPHA else 1f), verticalAlignment = Alignment.CenterVertically) {
+            Box {
+                UserAvatar(session, user, size = 40.dp)
+                PresenceDot(presence, Modifier.align(Alignment.BottomEnd))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    renderMentions(text) { users[it]?.displayName },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    user?.displayName ?: "?",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (style.emphasized) FontWeight.SemiBold else FontWeight.Normal,
+                    color = rowColor(style),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                dm.lastMessageText?.takeIf { it.isNotBlank() }?.let { text ->
+                    Text(
+                        renderMentions(text) { users[it]?.displayName },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
-        if (dm.unreadCount > 0) {
-            Box(
-                Modifier.heightIn(min = 22.dp).background(colors.accent, RoundedCornerShape(11.dp)).padding(horizontal = 7.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (dm.unreadCount > 99) "99+" else dm.unreadCount.toString(),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.onAccent,
-                )
-            }
-        }
+        Spacer(Modifier.width(8.dp))
+        // Na conversa direta o número é o das mensagens não lidas, e o círculo de mensagem nova não tem vez: ele já é o número.
+        style.badge?.let { MentionBadge(it) }
     }
 }
 

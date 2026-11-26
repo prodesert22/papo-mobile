@@ -1,5 +1,7 @@
 package chat.papo.mobile.account
 
+import chat.papo.mobile.chat.MentionTotal
+import chat.papo.mobile.chat.totalOf
 import chat.papo.mobile.core.AppDispatchers
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AuthApi
@@ -11,6 +13,7 @@ import chat.papo.mobile.media.VideoPosterExtractor
 import chat.papo.mobile.security.AppPrefs
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
@@ -18,6 +21,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -85,6 +91,17 @@ class AccountManager(
     fun session(accountId: String): AccountSession? = sessions.value[accountId]
 
     val sessionMap: StateFlow<Map<String, AccountSession>> = sessions.asStateFlow()
+
+    /**
+     * As menções não lidas de todas as contas com sessão, para o selo do ícone do app. Cada conta entra com o próprio
+     * número, calculado só com a caixa, as conversas e as configurações dela (regra 4): nada de uma conta passa a outra.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val mentionTotal: StateFlow<MentionTotal> = sessions
+        .flatMapLatest { map ->
+            if (map.isEmpty()) flowOf(MentionTotal()) else combine(map.values.map { it.mentions.mentions }) { totalOf(it.asList()) }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, MentionTotal())
 
     suspend fun load() = mutex.withLock {
         val stored = store.all()

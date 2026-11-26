@@ -2,7 +2,9 @@ package chat.papo.mobile.ui.home
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,12 +38,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -50,9 +56,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.papo.mobile.AppSession
 import chat.papo.mobile.account.Account
+import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.badgeText
+import chat.papo.mobile.chat.hasUnreadDot
 import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.rail_add
+import chat.papo.mobile.resources.rail_mentions
 import chat.papo.mobile.resources.rail_settings
 import chat.papo.mobile.resources.rail_unread
 import chat.papo.mobile.resources.security_alert_body
@@ -62,8 +72,10 @@ import chat.papo.mobile.resources.session_expired_action
 import chat.papo.mobile.resources.session_expired_body
 import chat.papo.mobile.resources.session_expired_title
 import chat.papo.mobile.ui.components.AccountAvatar
+import chat.papo.mobile.ui.notifications.ServerMuteMenu
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import org.jetbrains.compose.resources.stringResource
+import kotlin.time.Clock
 
 /** Tela principal: trilho de contas à esquerda e o conteúdo da conta ativa à direita. */
 @Composable
@@ -73,6 +85,8 @@ fun HomeScreen(
     onReauthenticate: (Account) -> Unit,
     onAccountSettings: (Account) -> Unit,
     onSearch: (Account) -> Unit,
+    /** Abre a caixa de notificações da conta. */
+    onInbox: (Account) -> Unit,
     /** Abre a edição do perfil da conta. */
     onEditProfile: (Account) -> Unit,
     /** Troca rápida de conversa; vale para todas as contas, não só a ativa. */
@@ -108,6 +122,7 @@ fun HomeScreen(
                     accountSession = if (active.sessionExpired) null else sessions[active.id],
                     // Sem sessão não há o que buscar: a conta precisa entrar de novo antes.
                     onSearch = if (active.sessionExpired) null else ({ onSearch(active) }),
+                    onInbox = { onInbox(active) },
                     onSwitch = onSwitch,
                     onSettings = { onAccountSettings(active) },
                     onEditProfile = { onEditProfile(active) },
@@ -148,6 +163,7 @@ private fun AccountRail(
     onSettings: () -> Unit,
 ) {
     val colors = LocalPapoColors.current
+    val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
     Column(
         Modifier
             .fillMaxHeight()
@@ -163,7 +179,9 @@ private fun AccountRail(
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
             items(accounts, key = { it.id }) { account ->
-                RailItem(account, selected = account.id == activeId, unread = hasUnread(session, account.id), onClick = { onSelect(account) })
+                val accountSession = sessions[account.id]
+                val badge = railBadge(accountSession)
+                RailItem(account, accountSession, selected = account.id == activeId, badge = badge, onClick = { onSelect(account) })
             }
             item {
                 RailAction(Icons.Filled.Add, stringResource(Res.string.rail_add), onAdd)
@@ -173,32 +191,52 @@ private fun AccountRail(
     }
 }
 
-/** Há canal que a conta pode ler, ou conversa direta, com mensagem não lida nesta conta. */
+/** O que o ícone de uma conta no trilho mostra: o ponto de mensagem nova e o número de menções (nulo sem menções). */
+private class RailBadge(val unread: Boolean, val mentions: String?)
+
+/**
+ * O que a conta mostra no trilho. O ponto some com o canal, a conversa ou o servidor silenciado ([hasUnreadDot]); o número
+ * de menções fica mesmo silenciado, e só some quando a menção é suprimida (ver `MentionBadges`).
+ */
 @Composable
-private fun hasUnread(session: AppSession, accountId: String): Boolean {
-    val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
-    val account = sessions[accountId] ?: return false
+private fun railBadge(account: AccountSession?): RailBadge {
+    if (account == null) return RailBadge(false, null)
     val channels by account.chat.channels.collectAsStateWithLifecycle()
     val permissions by account.chat.access.collectAsStateWithLifecycle()
     val dms by account.chat.dms.collectAsStateWithLifecycle()
-    return readableChannels(channels, permissions, account.userId).any { it.unread } || dms.any { it.unreadCount > 0 }
+    val server by account.notificationPrefs.server.collectAsStateWithLifecycle()
+    val channelSettings by account.notificationPrefs.channels.collectAsStateWithLifecycle()
+    val dmSettings by account.notificationPrefs.dms.collectAsStateWithLifecycle()
+    val counts by account.mentions.mentions.collectAsStateWithLifecycle()
+    val unread = hasUnreadDot(readableChannels(channels, permissions, account.userId), dms, server, channelSettings, dmSettings, Clock.System.now())
+    return RailBadge(unread, badgeText(counts.total, counts.capped))
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RailItem(account: Account, selected: Boolean, unread: Boolean, onClick: () -> Unit) {
+private fun RailItem(account: Account, accountSession: AccountSession?, selected: Boolean, badge: RailBadge, onClick: () -> Unit) {
     val colors = LocalPapoColors.current
+    val haptics = LocalHapticFeedback.current
     val indicator by animateDpAsState(if (selected) 32.dp else 0.dp)
+    var muteMenu by remember { mutableStateOf(false) }
     val label = account.handle + (account.label?.let { " ($it)" } ?: "") +
-        if (unread) stringResource(Res.string.rail_unread) else ""
+        (badge.mentions?.let { stringResource(Res.string.rail_mentions, it) } ?: if (badge.unread) stringResource(Res.string.rail_unread) else "")
     Box(
         Modifier
             .fillMaxWidth()
             .height(66.dp)
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 role = Role.Tab,
                 onClick = onClick,
+                // Sem sessão aberta (conta expirada) não há configuração a mudar.
+                onLongClick = accountSession?.let {
+                    {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        muteMenu = true
+                    }
+                },
             )
             .semantics {
                 contentDescription = label
@@ -213,7 +251,15 @@ private fun RailItem(account: Account, selected: Boolean, unread: Boolean, onCli
                 .height(indicator)
                 .background(colors.accent, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp)),
         )
-        AccountAvatar(account, selected = selected, ringBackground = colors.rail, unread = unread, unreadColor = colors.accent)
+        AccountAvatar(
+            account,
+            selected = selected,
+            ringBackground = colors.rail,
+            unread = badge.unread,
+            unreadColor = colors.accent,
+            mentions = badge.mentions,
+        )
+        if (accountSession != null) ServerMuteMenu(accountSession.notificationPrefs, expanded = muteMenu, onDismiss = { muteMenu = false })
     }
 }
 

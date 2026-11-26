@@ -100,6 +100,11 @@ data class PapoColors(
     val online: Color,
     val highlight: Color,
     val highlightBar: Color,
+    /** Nome e ícone de uma conversa com mensagem nova: branco no tema escuro, a cor de texto mais forte no claro. */
+    val unreadName: Color,
+    /** O número vermelho de menções e o texto sobre ele. */
+    val mention: Color,
+    val onMention: Color,
 )
 
 private val DarkPapoColors = PapoColors(
@@ -111,6 +116,9 @@ private val DarkPapoColors = PapoColors(
     online = Agua,
     highlight = Ouro.copy(alpha = 0.18f),
     highlightBar = Ouro,
+    unreadName = Color.White,
+    mention = Color(0xFFE5484D),
+    onMention = Color.White,
 )
 
 private val LightPapoColors = DarkPapoColors.copy(
@@ -118,6 +126,7 @@ private val LightPapoColors = DarkPapoColors.copy(
     onRailMuted = Color(0xFF9DBFC6),
     highlight = Ouro.copy(alpha = 0.16f),
     highlightBar = Ouro,
+    unreadName = Color(0xFF05161B),
 )
 
 val LocalPapoColors = staticCompositionLocalOf { DarkPapoColors }

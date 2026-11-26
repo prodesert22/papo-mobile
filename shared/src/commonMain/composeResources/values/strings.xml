@@ -576,4 +576,27 @@
     <string name="notif_suppress_mentions_note">Vale para @usuário e para respostas às suas mensagens. Suprimir tira a notificação e também o número de menções.</string>
     <string name="notif_sync_title">Sincronizar com o servidor</string>
     <string name="notif_sync_note">O servidor ainda não guarda estas opções. Por enquanto elas ficam só neste aparelho.</string>
+
+    <!-- Notificações: caixa e contagens -->
+    <string name="inbox_title">Caixa de notificações</string>
+    <string name="inbox_bell">Caixa de notificações</string>
+    <string name="inbox_bell_unread">Caixa de notificações, %1$s não lidas</string>
+    <string name="inbox_settings">Configurações de notificação</string>
+    <string name="inbox_mark_all">Marcar todas como lidas</string>
+    <string name="inbox_mark_all_limit">Marcar todas como lidas vale só para as notificações já carregadas.</string>
+    <string name="inbox_mark_uncertain">Não foi possível confirmar. Abra a caixa de novo antes de tentar outra vez.</string>
+    <string name="inbox_empty">Nenhuma notificação por aqui.</string>
+    <string name="inbox_load_failed">Não foi possível carregar as notificações.</string>
+    <string name="inbox_load_more">Carregar mais</string>
+    <string name="inbox_capped">Há muitas notificações não lidas: o número pode ser maior que o mostrado.</string>
+    <string name="inbox_reason_mention">Menção</string>
+    <string name="inbox_reason_reply">Resposta</string>
+    <string name="inbox_reason_everyone">@everyone</string>
+    <string name="inbox_reason_dm">Mensagem direta</string>
+    <string name="inbox_conversation_unknown">Conversa</string>
+    <string name="inbox_row_unread">, não lida</string>
+    <string name="inbox_unavailable_title">Conversa indisponível</string>
+    <string name="inbox_unavailable_body">Esta conversa não existe mais ou você não tem acesso a ela.</string>
+    <string name="mentions_count">%1$s menções não lidas</string>
+    <string name="rail_mentions">, %1$s menções não lidas</string>
 </resources>

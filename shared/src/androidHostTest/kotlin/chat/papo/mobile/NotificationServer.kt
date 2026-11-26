@@ -44,6 +44,18 @@ class NotificationServer(val userId: String = "u1", @Volatile var pageSize: Int 
     /** Enquanto for true o `PUT read_notification` falha como uma conexão que caiu, sem resposta HTTP. */
     @Volatile var readDropped = false
 
+    /** `GET /dms/{id}`: o corpo de cada conversa que o servidor conhece, por id; sem entrada, 404. */
+    val dmBodies = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Status de erro de `GET /dms/{id}` enquanto não for nulo (ex.: 403 com `type` terminando em `/dm-blocked`). */
+    @Volatile var dmStatus: Int? = null
+
+    /** Quando não nulo, cada `GET /dms/{id}` espera por ele antes de responder. */
+    @Volatile var holdDm: CompletableDeferred<Unit>? = null
+
+    fun dmJson(id: String, userId: String = "u2", name: String = "bia") =
+        """{"id":"$id","user":{"id":"$userId","username":"$name"},"created_at":"2026-01-01T00:00:00Z","unread_count":0}"""
+
     fun ts(n: Int) = "2026-01-01T%02d:%02d:%02dZ".format(n / 3600, n / 60 % 60, n % 60)
 
     /** Uma linha da caixa, criada [n] segundos depois da meia-noite. */
@@ -98,6 +110,15 @@ class NotificationServer(val userId: String = "u1", @Volatile var pageSize: Int 
                         json("""{"updated":${ids.size}}""")
                     }
                     else -> problem(readStatus)
+                }
+            }
+            request.method == HttpMethod.Get && path.startsWith("/dms/") -> {
+                holdDm?.await()
+                val status = dmStatus
+                when {
+                    status == 403 -> json("""{"type":"https://papo.test/errors/dm-blocked","title":"Acesso negado","status":403}""", HttpStatusCode.Forbidden)
+                    status != null -> problem(status)
+                    else -> dmBodies[path.removePrefix("/dms/")]?.let { json(it) } ?: problem(404)
                 }
             }
             else -> respond("", HttpStatusCode.NoContent)

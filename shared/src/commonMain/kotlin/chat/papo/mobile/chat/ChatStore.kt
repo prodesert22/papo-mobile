@@ -675,6 +675,15 @@ class ChatStore(
         return dm.id
     }
 
+    /**
+     * Uma conversa direta que o aparelho não tem (uma que foi fechada, de onde uma notificação veio): lê por id e a
+     * guarda, para a conversa abrir. Lança o que o servidor responder: 403 `dm-blocked` com bloqueio, 404 sem ela.
+     */
+    suspend fun adoptDm(dmId: String) {
+        val dm = api.dm(dmId)
+        withContext(io) { q.transaction { upsert(dm) } }
+    }
+
     suspend fun closeDm(dmId: String) {
         api.closeDm(dmId)
         withContext(io) { q.deleteDm(dmId) }

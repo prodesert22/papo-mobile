@@ -6,6 +6,8 @@ import chat.papo.mobile.chat.BlockList
 import chat.papo.mobile.chat.ChatStore
 import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
+import chat.papo.mobile.chat.MentionBadges
+import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.chat.NotificationInbox
 import chat.papo.mobile.chat.NotificationPrefs
 import chat.papo.mobile.chat.ProfileCache
@@ -26,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /** Banco e cache de mídia de uma conta, já abertos com as chaves dela. */
@@ -62,6 +65,11 @@ class AccountSession(
     val chat = ChatStore(userId, db, api, ws, scope, io, permissions)
     /** Caixa de notificações desta conta, só em memória; as contagens de menção saem dela. */
     val inbox = NotificationInbox(userId, api, ws.events, ws.state, chat.readMarks, chat::storedPositions, scope)
+    /** O número de menções por canal, por conversa direta e no total, já com a supressão aplicada. */
+    val mentions = MentionBadges(
+        userId, inbox.state, chat.dms, combine(chat.channels, chat.access) { list, access -> readableChannels(list, access, userId) },
+        notificationPrefs, scope,
+    )
     /** Avatares dos webhooks: um pedido ao servidor por sessão, depois o cache de mídia cifrado da conta. */
     val webhookAvatars = WebhookAvatars(api, media, scope)
     /** Quem esta conta bloqueou; a lista é desta sessão e não vale para outra conta. */

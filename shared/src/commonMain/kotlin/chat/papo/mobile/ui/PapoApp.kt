@@ -84,6 +84,8 @@ import chat.papo.mobile.ui.profile.ProfileViewModel
 import chat.papo.mobile.ui.search.SearchScreen
 import chat.papo.mobile.ui.search.SearchViewModel
 import chat.papo.mobile.ui.notifications.AccountNotificationsScreen
+import chat.papo.mobile.ui.notifications.InboxScreen
+import chat.papo.mobile.ui.notifications.InboxViewModel
 import chat.papo.mobile.ui.settings.AccountSettingsScreen
 import chat.papo.mobile.ui.settings.AppSettingsScreen
 import chat.papo.mobile.ui.settings.BlockedUsersScreen
@@ -135,6 +137,10 @@ private data class BlockedRoute(val accountId: String)
 /** As notificações da conta [accountId]: nível, supressão, silêncio e sincronização. */
 @Serializable
 private data class NotificationsRoute(val accountId: String)
+
+/** A caixa de notificações (menções, respostas, mensagens diretas) da conta [accountId]. */
+@Serializable
+private data class InboxRoute(val accountId: String)
 
 /** A troca da senha da conta [accountId]. */
 @Serializable
@@ -262,6 +268,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                             onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
                             onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
                             onSearch = { navController.navigate(SearchRoute(it.id)) },
+                            onInbox = { navController.navigate(InboxRoute(it.id)) },
                             onEditProfile = { navController.navigate(EditProfileRoute(it.id)) },
                             onSwitch = { navController.navigate(SwitcherRoute()) },
                             onAppSettings = { navController.navigate(AppSettingsRoute) },
@@ -384,6 +391,24 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                 LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
             } else {
                 AccountNotificationsScreen(accountSession.notificationPrefs, onBack = { navController.popBackStack() })
+            }
+        }
+        composable<InboxRoute> { entry ->
+            val route = entry.toRoute<InboxRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                // A sessão entra na chave: o que uma caixa mostra nunca aparece em outra conta.
+                val vm = viewModel(key = "inbox/${route.accountId}/${accountSession.hashCode()}") { InboxViewModel(accountSession) }
+                InboxScreen(
+                    session = accountSession,
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onOpenSettings = { navController.navigate(NotificationsRoute(route.accountId)) },
+                    onOpen = { channelId, target -> openChat(route.accountId, ParkedChat(channelId, target)) },
+                )
             }
         }
         composable<PasswordRoute> { entry ->
