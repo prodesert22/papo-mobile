@@ -46,7 +46,7 @@ class MediaCacheTest {
     /** `get` que entrega a exceção como valor, para o teste falhar com mensagem em vez de abortar no meio. */
     private suspend fun MediaCache.getOrCancelled(name: String, fetch: suspend () -> ByteArray?): ByteArray? =
         try {
-            get(name, fetch)
+            get(name, holdFailures = true, fetch)
         } catch (e: CancellationException) {
             fail("get(\"$name\") lançou $e: restou uma entrada em voo de uma busca já cancelada")
         }
@@ -56,8 +56,8 @@ class MediaCacheTest {
         val cache = cache()
         var fetches = 0
 
-        assertContentEquals(secret, cache.get("att/1") { fetches++; secret })
-        assertContentEquals(secret, cache.get("att/1") { fetches++; secret })
+        assertContentEquals(secret, cache.get("att/1", holdFailures = true) { fetches++; secret })
+        assertContentEquals(secret, cache.get("att/1", holdFailures = true) { fetches++; secret })
 
         assertEquals(1, fetches)
     }
@@ -67,7 +67,7 @@ class MediaCacheTest {
         val cache = cache()
         var fetches = 0
 
-        repeat(5) { assertNull(cache.get("avatar/u1/0") { fetches++; null }) }
+        repeat(5) { assertNull(cache.get("avatar/u1/0", holdFailures = true) { fetches++; null }) }
 
         assertEquals(1, fetches)
     }
@@ -77,16 +77,16 @@ class MediaCacheTest {
         val cache = cache()
         val gate = CompletableDeferred<Unit>()
         var fetches = 0
-        val owner = async { cache.get("avatar/u1/0") { fetches++; gate.await(); null } }
+        val owner = async { cache.get("avatar/u1/0", holdFailures = true) { fetches++; gate.await(); null } }
         runCurrent()
-        val waiter = async { cache.get("avatar/u1/0") { fetches++; secret } }
+        val waiter = async { cache.get("avatar/u1/0", holdFailures = true) { fetches++; secret } }
         runCurrent()
 
         gate.complete(Unit)
 
         assertNull(owner.await())
         assertNull(waiter.await())
-        assertNull(cache.get("avatar/u1/0") { fetches++; secret })
+        assertNull(cache.get("avatar/u1/0", holdFailures = true) { fetches++; secret })
         assertEquals(1, fetches)
     }
 
@@ -94,11 +94,11 @@ class MediaCacheTest {
     fun outroNomeDoMesmoUsuarioNaoHerdaAAusencia() = runTest(timeout = 5.seconds) {
         val cache = cache()
         var fetches = 0
-        assertNull(cache.get("avatar/u1/0") { fetches++; null })
+        assertNull(cache.get("avatar/u1/0", holdFailures = true) { fetches++; null })
 
         // O servidor trocou o avatar: a versão sobe e o nome é outro.
-        assertContentEquals(secret, cache.get("avatar/u1/1") { fetches++; secret })
-        assertNull(cache.get("avatar/u1/0") { fetches++; secret })
+        assertContentEquals(secret, cache.get("avatar/u1/1", holdFailures = true) { fetches++; secret })
+        assertNull(cache.get("avatar/u1/0", holdFailures = true) { fetches++; secret })
 
         assertEquals(2, fetches)
     }
@@ -107,14 +107,14 @@ class MediaCacheTest {
     fun evictEsqueceAAusenciaEAFalhaDoNome() = runTest(timeout = 5.seconds) {
         val cache = cache(TestTimeSource())
         var fetches = 0
-        assertNull(cache.get("a") { fetches++; null })
-        assertFailsWith<IOException> { cache.get("b") { fetches++; throw IOException("rede caiu") } }
+        assertNull(cache.get("a", holdFailures = true) { fetches++; null })
+        assertFailsWith<IOException> { cache.get("b", holdFailures = true) { fetches++; throw IOException("rede caiu") } }
 
         cache.evict("a")
         cache.evict("b")
 
-        assertContentEquals(secret, cache.get("a") { fetches++; secret })
-        assertContentEquals(secret, cache.get("b") { fetches++; secret })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
+        assertContentEquals(secret, cache.get("b", holdFailures = true) { fetches++; secret })
         assertEquals(4, fetches)
     }
 
@@ -122,13 +122,13 @@ class MediaCacheTest {
     fun clearMemoryEsqueceAAusenciaEAFalhaDosNomes() = runTest(timeout = 5.seconds) {
         val cache = cache(TestTimeSource())
         var fetches = 0
-        assertNull(cache.get("a") { fetches++; null })
-        assertFailsWith<IOException> { cache.get("b") { fetches++; throw IOException("rede caiu") } }
+        assertNull(cache.get("a", holdFailures = true) { fetches++; null })
+        assertFailsWith<IOException> { cache.get("b", holdFailures = true) { fetches++; throw IOException("rede caiu") } }
 
         cache.clearMemory()
 
-        assertContentEquals(secret, cache.get("a") { fetches++; secret })
-        assertContentEquals(secret, cache.get("b") { fetches++; secret })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
+        assertContentEquals(secret, cache.get("b", holdFailures = true) { fetches++; secret })
         assertEquals(4, fetches)
     }
 
@@ -136,14 +136,14 @@ class MediaCacheTest {
     fun putDepoisDeAusenciaOuFalhaServeOQueFoiGuardado() = runTest(timeout = 5.seconds) {
         val cache = cache(TestTimeSource())
         var fetches = 0
-        assertNull(cache.get("a") { fetches++; null })
-        assertFailsWith<IOException> { cache.get("b") { fetches++; throw IOException("rede caiu") } }
+        assertNull(cache.get("a", holdFailures = true) { fetches++; null })
+        assertFailsWith<IOException> { cache.get("b", holdFailures = true) { fetches++; throw IOException("rede caiu") } }
 
         cache.put("a", secret)
         cache.put("b", secret, keepInMemory = false)
 
-        assertContentEquals(secret, cache.get("a") { fetches++; null })
-        assertContentEquals(secret, cache.get("b") { fetches++; null })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; null })
+        assertContentEquals(secret, cache.get("b", holdFailures = true) { fetches++; null })
         assertEquals(2, fetches)
     }
 
@@ -152,14 +152,14 @@ class MediaCacheTest {
         val cache = cache()
         val gate = CompletableDeferred<Unit>()
         var fetches = 0
-        val owner = async { cache.get("a") { fetches++; gate.await(); null } }
+        val owner = async { cache.get("a", holdFailures = true) { fetches++; gate.await(); null } }
         runCurrent()
 
         cache.put("a", secret, keepInMemory = false)
         gate.complete(Unit)
         owner.await()
 
-        assertContentEquals(secret, cache.get("a") { fetches++; null })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; null })
         assertEquals(1, fetches)
     }
 
@@ -169,14 +169,14 @@ class MediaCacheTest {
         val first = cacheOn(directory)
         val second = cacheOn(directory)
         var fetches = 0
-        assertNull(first.get("a") { fetches++; null })
-        assertFailsWith<IOException> { first.get("b") { fetches++; throw IOException("rede caiu") } }
+        assertNull(first.get("a", holdFailures = true) { fetches++; null })
+        assertFailsWith<IOException> { first.get("b", holdFailures = true) { fetches++; throw IOException("rede caiu") } }
 
-        assertContentEquals(secret, second.get("a") { fetches++; secret })
-        assertContentEquals(secret, second.get("b") { fetches++; secret })
+        assertContentEquals(secret, second.get("a", holdFailures = true) { fetches++; secret })
+        assertContentEquals(secret, second.get("b", holdFailures = true) { fetches++; secret })
 
-        assertNull(first.get("a") { fetches++; secret })
-        assertFailsWith<MediaUnavailableException> { first.get("b") { fetches++; secret } }
+        assertNull(first.get("a", holdFailures = true) { fetches++; secret })
+        assertFailsWith<MediaUnavailableException> { first.get("b", holdFailures = true) { fetches++; secret } }
         assertEquals(4, fetches)
     }
 
@@ -187,19 +187,49 @@ class MediaCacheTest {
         var fetches = 0
         val failure = IOException("rede caiu")
 
-        assertSame(failure, assertFailsWith<IOException> { cache.get("a") { fetches++; throw failure } })
-        val blocked = assertFailsWith<MediaUnavailableException> { cache.get("a") { fetches++; secret } }
+        assertSame(failure, assertFailsWith<IOException> { cache.get("a", holdFailures = true) { fetches++; throw failure } })
+        val blocked = assertFailsWith<MediaUnavailableException> { cache.get("a", holdFailures = true) { fetches++; secret } }
         time += MediaCache.FAILURE_WINDOW - 1.milliseconds
-        assertFailsWith<MediaUnavailableException> { cache.get("a") { fetches++; secret } }
+        assertFailsWith<MediaUnavailableException> { cache.get("a", holdFailures = true) { fetches++; secret } }
 
         assertSame(failure, blocked.cause)
         assertEquals(1, fetches)
         // Outro nome não é afetado pela falha deste.
-        assertContentEquals(secret, cache.get("b") { fetches++; secret })
+        assertContentEquals(secret, cache.get("b", holdFailures = true) { fetches++; secret })
 
         time += 1.milliseconds
-        assertContentEquals(secret, cache.get("a") { fetches++; secret })
-        assertContentEquals(secret, cache.get("a") { fetches++; null })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; null })
+        assertEquals(3, fetches)
+    }
+
+    @Test
+    fun semSegurarFalhasTodaChamadaBuscaDeNovoMasAAusenciaContinuaLembrada() = runTest(timeout = 5.seconds) {
+        val cache = cache(TestTimeSource())
+        var fetches = 0
+
+        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("rede caiu") } }
+        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("rede caiu") } }
+        // Quem segura falhas não fica preso pela falha de quem não segura.
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
+        assertEquals(3, fetches)
+
+        assertNull(cache.get("b") { fetches++; null })
+        assertNull(cache.get("b") { fetches++; secret })
+        assertEquals(4, fetches)
+    }
+
+    @Test
+    fun pedidoQueNaoSeguraFalhasBuscaDentroDaJanelaEEsqueceAFalhaLembrada() = runTest(timeout = 5.seconds) {
+        val cache = cache(TestTimeSource())
+        var fetches = 0
+
+        assertFailsWith<IOException> { cache.get("a", holdFailures = true) { fetches++; throw IOException("rede caiu") } }
+        assertFailsWith<MediaUnavailableException> { cache.get("a", holdFailures = true) { fetches++; secret } }
+        // Um pedido do usuário ("Tentar de novo") busca na hora, mesmo dentro da janela.
+        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("rede caiu") } }
+        // A falha lembrada foi esquecida, e a do pedido direto não abre janela.
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
         assertEquals(3, fetches)
     }
 
@@ -208,15 +238,15 @@ class MediaCacheTest {
         val time = TestTimeSource()
         val cache = cache(time)
         var fetches = 0
-        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("rede caiu") } }
+        assertFailsWith<IOException> { cache.get("a", holdFailures = true) { fetches++; throw IOException("rede caiu") } }
 
         time += MediaCache.FAILURE_WINDOW
-        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("ainda fora") } }
-        assertFailsWith<MediaUnavailableException> { cache.get("a") { fetches++; secret } }
+        assertFailsWith<IOException> { cache.get("a", holdFailures = true) { fetches++; throw IOException("ainda fora") } }
+        assertFailsWith<MediaUnavailableException> { cache.get("a", holdFailures = true) { fetches++; secret } }
 
         assertEquals(2, fetches)
         time += MediaCache.FAILURE_WINDOW
-        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
     }
 
     @Test
@@ -225,12 +255,12 @@ class MediaCacheTest {
         val cache = cache(time)
         val gate = CompletableDeferred<Unit>()
         var fetches = 0
-        assertFailsWith<IOException> { cache.get("a") { fetches++; throw IOException("rede caiu") } }
+        assertFailsWith<IOException> { cache.get("a", holdFailures = true) { fetches++; throw IOException("rede caiu") } }
         time += MediaCache.FAILURE_WINDOW
 
-        val owner = async { cache.get("a") { fetches++; gate.await(); secret } }
+        val owner = async { cache.get("a", holdFailures = true) { fetches++; gate.await(); secret } }
         runCurrent()
-        val waiter = async { cache.get("a") { fetches++; secret } }
+        val waiter = async { cache.get("a", holdFailures = true) { fetches++; secret } }
         runCurrent()
         gate.complete(Unit)
 
@@ -244,12 +274,12 @@ class MediaCacheTest {
         val cache = cache(TestTimeSource())
         val gate = CompletableDeferred<Unit>()
         var fetches = 0
-        val owner = launch { cache.get("a") { fetches++; gate.await(); null } }
+        val owner = launch { cache.get("a", holdFailures = true) { fetches++; gate.await(); null } }
         runCurrent()
         owner.cancel()
         runCurrent()
 
-        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
         assertEquals(2, fetches)
     }
 
@@ -258,9 +288,9 @@ class MediaCacheTest {
         val cache = cache(TestTimeSource())
         var fetches = 0
 
-        assertFailsWith<CancellationException> { cache.get("a") { fetches++; throw CancellationException("tempo esgotado") } }
+        assertFailsWith<CancellationException> { cache.get("a", holdFailures = true) { fetches++; throw CancellationException("tempo esgotado") } }
 
-        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
         assertEquals(2, fetches)
     }
 
@@ -272,7 +302,7 @@ class MediaCacheTest {
         // O motor HTTP aborta o pedido cancelado com IOException, não com CancellationException.
         val owner = launch {
             runCatching {
-                cache.get("a") {
+                cache.get("a", holdFailures = true) {
                     fetches++
                     try {
                         gate.await()
@@ -287,7 +317,7 @@ class MediaCacheTest {
         owner.cancel()
         runCurrent()
 
-        assertContentEquals(secret, cache.get("a") { fetches++; secret })
+        assertContentEquals(secret, cache.get("a", holdFailures = true) { fetches++; secret })
         assertEquals(2, fetches)
     }
 
@@ -295,12 +325,12 @@ class MediaCacheTest {
     fun passandoDoLimiteEsqueceOsNomesMaisAntigos() = runTest(timeout = 20.seconds) {
         val cache = cache()
         var fetches = 0
-        for (n in 0..MediaCache.MAX_MISSES) assertNull(cache.get("avatar/u$n/0") { fetches++; null })
+        for (n in 0..MediaCache.MAX_MISSES) assertNull(cache.get("avatar/u$n/0", holdFailures = true) { fetches++; null })
         val total = fetches
 
-        assertNull(cache.get("avatar/u${MediaCache.MAX_MISSES}/0") { fetches++; null })
+        assertNull(cache.get("avatar/u${MediaCache.MAX_MISSES}/0", holdFailures = true) { fetches++; null })
         assertEquals(total, fetches, "o mais recente continua lembrado")
-        assertNull(cache.get("avatar/u0/0") { fetches++; null })
+        assertNull(cache.get("avatar/u0/0", holdFailures = true) { fetches++; null })
         assertEquals(total + 1, fetches, "o mais antigo foi esquecido e busca de novo")
     }
 
@@ -309,9 +339,9 @@ class MediaCacheTest {
         val cache = cache()
         val gate = CompletableDeferred<Unit>()
         var fetches = 0
-        val owner = async { cache.get("att/1") { fetches++; gate.await(); secret } }
+        val owner = async { cache.get("att/1", holdFailures = true) { fetches++; gate.await(); secret } }
         runCurrent()
-        val waiter = async { cache.get("att/1") { fetches++; secret } }
+        val waiter = async { cache.get("att/1", holdFailures = true) { fetches++; secret } }
         runCurrent()
 
         gate.complete(Unit)
@@ -326,9 +356,9 @@ class MediaCacheTest {
         val time = TestTimeSource()
         val cache = cache(time)
         val gate = CompletableDeferred<Unit>()
-        val owner = async { runCatching { cache.get("att/1") { gate.await(); throw IOException("rede caiu") } } }
+        val owner = async { runCatching { cache.get("att/1", holdFailures = true) { gate.await(); throw IOException("rede caiu") } } }
         runCurrent()
-        val waiter = async { runCatching { cache.get("att/1") { secret } } }
+        val waiter = async { runCatching { cache.get("att/1", holdFailures = true) { secret } } }
         runCurrent()
 
         gate.complete(Unit)
@@ -336,7 +366,7 @@ class MediaCacheTest {
         assertEquals("rede caiu", assertFailsWith<IOException> { owner.await().getOrThrow() }.message)
         assertEquals("rede caiu", assertFailsWith<IOException> { waiter.await().getOrThrow() }.message)
         time += MediaCache.FAILURE_WINDOW
-        assertContentEquals(secret, cache.get("att/1") { secret })
+        assertContentEquals(secret, cache.get("att/1", holdFailures = true) { secret })
     }
 
     @Test
@@ -346,7 +376,7 @@ class MediaCacheTest {
         var caught: CancellationException? = null
         val owner = launch {
             try {
-                cache.get("att/1") { gate.await(); secret }
+                cache.get("att/1", holdFailures = true) { gate.await(); secret }
             } catch (e: CancellationException) {
                 caught = e
                 throw e
@@ -367,10 +397,10 @@ class MediaCacheTest {
         val cache = cache()
         val gate = CompletableDeferred<Unit>()
         var fetches = 0
-        val owner = async { cache.get("att/1") { fetches++; gate.await(); secret } }
+        val owner = async { cache.get("att/1", holdFailures = true) { fetches++; gate.await(); secret } }
         runCurrent()
-        val cancelled = launch { cache.get("att/1") { fetches++; secret } }
-        val other = async { cache.get("att/1") { fetches++; secret } }
+        val cancelled = launch { cache.get("att/1", holdFailures = true) { fetches++; secret } }
+        val other = async { cache.get("att/1", holdFailures = true) { fetches++; secret } }
         runCurrent()
 
         cancelled.cancel()
@@ -388,9 +418,9 @@ class MediaCacheTest {
         val cache = cache()
         val gate = CompletableDeferred<Unit>()
         var fetches = 0
-        val owner = launch { cache.get("att/1") { fetches++; gate.await(); secret } }
+        val owner = launch { cache.get("att/1", holdFailures = true) { fetches++; gate.await(); secret } }
         runCurrent()
-        val waiter = launch { cache.get("att/1") { fetches++; secret } }
+        val waiter = launch { cache.get("att/1", holdFailures = true) { fetches++; secret } }
         runCurrent()
 
         // O `finally` do dono, já cancelado, precisa do mutex e o encontra ocupado.
@@ -411,7 +441,7 @@ class MediaCacheTest {
         val cache = cache()
         val gate = CompletableDeferred<Unit>()
         var fetches = 0
-        val owner = launch { cache.get("att/1") { fetches++; gate.await(); secret } }
+        val owner = launch { cache.get("att/1", holdFailures = true) { fetches++; gate.await(); secret } }
         runCurrent()
 
         // A busca termina e grava em disco, mas guardar na memória fica esperando o mutex.

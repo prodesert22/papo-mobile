@@ -45,7 +45,7 @@ class MediaCache(
         /** O servidor respondeu que o recurso não existe. Vale até [put], [evict] ou [clearMemory]. */
         data object Absent : Miss
 
-        /** A busca falhou em [at]; vale por [FAILURE_WINDOW]. */
+        /** A busca falhou em [at]; vale por [FAILURE_WINDOW], para quem pede com `holdFailures`. */
         class Failed(val at: TimeMark, val cause: Throwable) : Miss
     }
 
@@ -59,19 +59,27 @@ class MediaCache(
     // Nomes que receberam [put] durante a busca: o que a busca disser sobre eles já está desatualizado.
     private val putWhileFetching = HashSet<String>()
 
+    /** [get] sem segurar falhas: toda chamada busca de novo o que falhou. */
+    suspend fun get(name: String, fetch: suspend () -> ByteArray?): ByteArray? = get(name, holdFailures = false, fetch)
+
     /**
      * Devolve o recurso [name], buscando com [fetch] na primeira vez. Null se não existe, e então
-     * [fetch] não roda de novo para este nome. Se a busca falhou há menos de [FAILURE_WINDOW], lança
-     * [MediaUnavailableException] sem buscar; passada a janela, uma nova busca é permitida.
+     * [fetch] não roda de novo para este nome.
+     *
+     * Com [holdFailures], uma busca que falhou há menos de [FAILURE_WINDOW] não é repetida: a chamada lança
+     * [MediaUnavailableException] sem buscar, e passada a janela uma nova busca é permitida. É para o que a
+     * interface pede sozinha e em quantidade, como os avatares de uma lista, onde repetir a cada exibição
+     * esbarra no limite de taxa do servidor. Sem ele toda chamada busca de novo, que é o que serve a um
+     * pedido feito pelo usuário, como "Tentar de novo".
      */
-    suspend fun get(name: String, fetch: suspend () -> ByteArray?): ByteArray? {
+    suspend fun get(name: String, holdFailures: Boolean, fetch: suspend () -> ByteArray?): ByteArray? {
         val (pending, owner) = mutex.withLock {
             memory[name]?.let { hit ->
                 memory.remove(name)
                 memory[name] = hit // move para o fim (mais recente)
                 return hit
             }
-            if (knownMissing(name)) return null
+            if (knownMissing(name, holdFailures)) return null
             claim(name)
         }
         if (!owner) return pending.await()
@@ -88,7 +96,7 @@ class MediaCache(
         } catch (e: Throwable) {
             // Quem já foi cancelado pode receber a falha como outra exceção (o motor HTTP aborta o pedido com
             // IOException, por exemplo); isso é cancelamento, não falha do recurso.
-            if (currentCoroutineContext().isActive) {
+            if (holdFailures && currentCoroutineContext().isActive) {
                 withContext(NonCancellable) { mutex.withLock { noteMiss(name, Miss.Failed(timeSource.markNow(), e)) } }
             }
             pending.completeExceptionally(e)
@@ -153,10 +161,13 @@ class MediaCache(
         }
     }
 
-    /** Sob o mutex: true se [name] é conhecido como ausente; lança se a busca falhou há pouco; false se pode buscar. */
-    private fun knownMissing(name: String): Boolean = when (val miss = misses[name]) {
+    /**
+     * Sob o mutex: true se [name] é conhecido como ausente; com [holdFailures], lança se a busca falhou há
+     * pouco; false se pode buscar. Quem não segura falhas esquece a que estava lembrada e busca.
+     */
+    private fun knownMissing(name: String, holdFailures: Boolean): Boolean = when (val miss = misses[name]) {
         Miss.Absent -> true
-        is Miss.Failed -> if (miss.at.elapsedNow() < FAILURE_WINDOW) {
+        is Miss.Failed -> if (holdFailures && miss.at.elapsedNow() < FAILURE_WINDOW) {
             throw MediaUnavailableException(miss.cause)
         } else {
             misses.remove(name)
