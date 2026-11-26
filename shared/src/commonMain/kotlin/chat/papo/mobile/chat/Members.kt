@@ -35,11 +35,18 @@ data class MemberSection(val status: MemberStatus, val members: List<Member>) {
 sealed interface MemberListing {
     val total: Int
 
+    /** Não há o que mostrar: nenhum membro, ou nenhum que case com a busca. */
+    val isEmpty: Boolean
+
     /** Sem busca: uma seção por estado, as vazias omitidas. */
-    data class Grouped(override val total: Int, val sections: List<MemberSection>) : MemberListing
+    data class Grouped(override val total: Int, val sections: List<MemberSection>) : MemberListing {
+        override val isEmpty: Boolean get() = sections.isEmpty()
+    }
 
     /** Com busca: sem seções, os que casam com ela na ordem de [searchByName]. */
-    data class Found(override val total: Int, val members: List<Member>) : MemberListing
+    data class Found(override val total: Int, val members: List<Member>) : MemberListing {
+        override val isEmpty: Boolean get() = members.isEmpty()
+    }
 }
 
 /**

@@ -289,6 +289,22 @@
     <string name="search_truncated">Mostrando os primeiros %1$d resultados. Refine a busca para ver os outros.</string>
     <string name="search_no_text">Mensagem sem texto</string>
 
+    <!-- Membros -->
+    <string name="members_open">Membros</string>
+    <string name="members_title">Membros</string>
+    <plurals name="members_count">
+        <item quantity="one">%1$d membro</item>
+        <item quantity="other">%1$d membros</item>
+    </plurals>
+    <string name="members_search">Buscar membro</string>
+    <string name="members_none">Ninguém encontrado.</string>
+    <string name="members_section_online">Disponível — %1$d</string>
+    <string name="members_section_away">Ausente — %1$d</string>
+    <string name="members_section_busy">Ocupado — %1$d</string>
+    <string name="members_section_offline">Offline — %1$d</string>
+    <string name="members_you">você</string>
+    <string name="members_view_profile">Ver perfil</string>
+
     <!-- Troca rápida de conversa -->
     <string name="switcher_title">Trocar de conversa</string>
     <string name="switcher_hint">Ir para uma conversa</string>

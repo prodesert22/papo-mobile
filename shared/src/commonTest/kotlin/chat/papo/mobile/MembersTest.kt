@@ -7,6 +7,7 @@ import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.groupMembers
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -73,6 +74,13 @@ class MembersTest {
 
         assertTrue(listing.sections.isEmpty())
         assertEquals(0, listing.total)
+        assertTrue(listing.isEmpty)
+    }
+
+    @Test
+    fun listaComMembrosNaoEstaVazia() {
+        assertFalse(grouped(listOf(user("1", "ana"))).isEmpty)
+        assertFalse(found(listOf(user("1", "ana")), "ana").isEmpty)
     }
 
     @Test
@@ -240,6 +248,7 @@ class MembersTest {
         val result = found(listOf(user("1", "ana")), "zzz")
 
         assertTrue(result.members.isEmpty())
+        assertTrue(result.isEmpty)
         assertEquals(1, result.total)
     }
 
