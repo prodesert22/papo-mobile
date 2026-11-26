@@ -11,10 +11,16 @@ data class DraftField(val text: String, val selectionStart: Int, val selectionEn
 /**
  * Os emojis do servidor no rascunho. O texto continua `:nome:`, o que se guarda, se envia, se copia e o web e a TUI entendem:
  * o compositor só os desenha como imagem. Cada um conta como um caractere para o cursor, o apagar e a seleção.
- * O texto mostrado tem um caractere no lugar de cada `:nome:`, e as funções daqui convertem as posições de um texto no outro.
+ *
+ * O texto mostrado tem [SLOT_LENGTH] caracteres no lugar de cada `:nome:` (a imagem é desenhada sobre o primeiro), e as
+ * funções daqui convertem as posições de um texto no outro. A posição logo depois do emoji fica entre os dois caracteres
+ * (o segundo não tem largura), e a depois do segundo também vale o fim dele.
  * Sem tela: só regras sobre o texto.
  */
 object EmojiDraft {
+    /** Caracteres do texto mostrado no lugar de cada emoji: o espaço que a imagem cobre e o que impede o espaço de ficar no fim da linha. */
+    const val SLOT_LENGTH = 2
+
     /**
      * Os `:nome:` de [text] que a mensagem vai mostrar como imagem: os mesmos da regra de [EmojiText.matches], menos os
      * que ficam dentro de código ou de link, onde o parser da mensagem deixa o texto como foi escrito.
@@ -22,30 +28,35 @@ object EmojiDraft {
     fun find(text: String, idByName: Map<String, String>): List<EmojiMatch> =
         if (idByName.isEmpty() || ':' !in text) emptyList() else EmojiText.matches(text, idByName, Markdown.literalRanges(text))
 
-    /** A posição [offset] do rascunho no texto mostrado. Dentro de um emoji vale o começo dele. */
+    /** A posição [offset] do rascunho no texto mostrado: antes do emoji é a dele, depois é a do meio dele, e dentro dele vale o começo. */
     fun toShown(emojis: List<EmojiMatch>, offset: Int): Int {
         var hidden = 0
         for (emoji in emojis) {
-            if (emoji.end <= offset) {
-                hidden += emoji.length - 1
-            } else {
-                return (if (emoji.start < offset) emoji.start else offset) - hidden
+            when {
+                emoji.end < offset -> hidden += emoji.length - SLOT_LENGTH
+                emoji.end == offset -> return emoji.start - hidden + 1
+                emoji.start < offset -> return emoji.start - hidden
+                else -> break
             }
         }
         return offset - hidden
     }
 
-    /** A posição [shown] do texto mostrado no rascunho: o começo do emoji antes do caractere dele e o fim dele depois. */
+    /** A posição [shown] do texto mostrado no rascunho: o começo do emoji antes do caractere dele e o fim dele de dentro ou depois. */
     fun toDraft(emojis: List<EmojiMatch>, shown: Int): Int {
         var hidden = 0
         for (emoji in emojis) {
             val at = emoji.start - hidden
             if (shown <= at) break
-            if (shown == at + 1) return emoji.end
-            hidden += emoji.length - 1
+            if (shown <= at + SLOT_LENGTH) return emoji.end
+            hidden += emoji.length - SLOT_LENGTH
         }
         return shown + hidden
     }
+
+    /** Onde, no texto mostrado, fica o espaço do emoji de número [index] de [emojis]. */
+    fun slotOf(emojis: List<EmojiMatch>, index: Int): Int =
+        emojis[index].start - (0 until index).sumOf { emojis[it].length - SLOT_LENGTH }
 
     /**
      * O que o campo entrega depois de uma tecla, de um colar ou de um toque ([current]) acertado para o emoji ser um

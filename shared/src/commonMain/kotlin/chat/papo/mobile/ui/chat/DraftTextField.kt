@@ -36,7 +36,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.editableText
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -45,9 +44,7 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.takeOrElse
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.DraftField
@@ -55,18 +52,19 @@ import chat.papo.mobile.chat.EmojiDraft
 import chat.papo.mobile.chat.EmojiMatch
 import kotlin.math.roundToInt
 
-// Cada emoji aparece no campo como um espaço do tamanho de um `em` (o caractere abaixo) com o espaçamento entre letras que
-// completa 1,25 em, a largura do emoji no texto da mensagem; a imagem é desenhada em cima dele.
-private const val EMOJI_SLOT = ' '
-private const val EMOJI_WIDTH_EM = 1.25f
-private val SlotStyle = SpanStyle(letterSpacing = (EMOJI_WIDTH_EM - 1f).em)
+// Cada emoji aparece no campo como um espaço da largura de um `em` (U+2003), que a imagem cobre, seguido de um junta-palavras sem
+// largura (U+2060). O junta-palavras é o que impede o espaço de ficar no fim da linha: o Android deixa um espaço desses pendurado
+// para fora do campo, e com ele o emoji sairia do texto. Esta largura vem do próprio espaço, e não de espaçamento entre letras, que
+// o Android reparte de um jeito que depende da posição na linha.
+private const val EMOJI_SLOT = '\u2003'
+private const val EMOJI_JOINER = '\u2060'
 
 /** Linhas que o campo mostra antes de rolar. */
 private const val MAX_LINES = 6
 
 /**
  * Os emojis do servidor de uma conta no texto do compositor. O texto continua `:nome:` (o que se guarda, se envia e se copia):
- * esta [VisualTransformation] só troca, na tela, cada `:nome:` por um espaço da largura do emoji, e [settle] faz o emoji se
+ * esta [VisualTransformation] só troca, na tela, cada `:nome:` por um espaço da largura de um em, e [settle] faz o emoji se
  * comportar como um caractere só. Os `:nome:` que a conta não tem, e os de dentro de código ou de link, ficam como texto,
  * como na mensagem. Use uma instância por [idByName]: ela guarda a última busca, que o campo, a imagem e a edição pedem juntos.
  */
@@ -91,7 +89,8 @@ class DraftEmojis(private val idByName: Map<String, String>) : VisualTransformat
             var last = 0
             for (emoji in found) {
                 append(text.subSequence(last, emoji.start))
-                withStyle(SlotStyle) { append(EMOJI_SLOT) }
+                append(EMOJI_SLOT)
+                append(EMOJI_JOINER)
                 last = emoji.end
             }
             append(text.subSequence(last, text.length))
@@ -199,11 +198,11 @@ private fun EmojiImages(session: AccountSession, found: List<EmojiMatch>, textLa
     // A mesma imagem pode aparecer mais de uma vez: a chave tem o id e a ordem dele, para inserir outro emoji antes
     // não trocar a imagem de quem já estava (e decodificá-la de novo).
     val seen = HashMap<String, Int>()
-    for (emoji in found) {
+    found.forEachIndexed { index, emoji ->
         val occurrence = seen.getOrElse(emoji.id) { 0 }
         seen[emoji.id] = occurrence + 1
         key(emoji.id, occurrence) {
-            EmojiImage(session, emoji.id, Modifier.inSlot(textLayout, EmojiDraft.toShown(found, emoji.start)))
+            EmojiImage(session, emoji.id, Modifier.inSlot(textLayout, EmojiDraft.slotOf(found, index)))
         }
     }
 }

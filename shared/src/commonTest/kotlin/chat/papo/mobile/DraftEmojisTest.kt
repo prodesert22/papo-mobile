@@ -4,7 +4,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.em
+import chat.papo.mobile.chat.EmojiDraft
 import chat.papo.mobile.ui.chat.DraftEmojis
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,14 +16,14 @@ import kotlin.test.assertTrue
 /** O que o compositor mostra no lugar de cada `:nome:` e como entrega a edição ao rascunho. */
 class DraftEmojisTest {
     private val emojis = DraftEmojis(mapOf("ok" to "id-ok", "party" to "id-party"))
-    private val slot = " "
+    private val slot = "\u2003\u2060"
 
     @Test
-    fun cadaEmojiViraUmEspacoDoTamanhoDeUmEmEAlargadoAte125Em() {
+    fun cadaEmojiViraUmEspacoDeUmEmSeguidoDeUmJuntaPalavras() {
         val shown = emojis.filter(AnnotatedString("oi :ok: e :party:!")).text
         assertEquals("oi $slot e $slot!", shown.text)
-        assertEquals(listOf(3 to 4, 7 to 8), shown.spanStyles.map { it.start to it.end })
-        assertTrue(shown.spanStyles.all { it.item.letterSpacing == 0.25f.em })
+        assertEquals(EmojiDraft.SLOT_LENGTH, slot.length)
+        assertTrue(shown.spanStyles.isEmpty())
     }
 
     @Test
@@ -38,8 +38,8 @@ class DraftEmojisTest {
     fun oMapeamentoLevaAsPosicoesDeUmTextoParaOOutro() {
         val shown = emojis.filter(AnnotatedString("a:ok:b:party:"))
         val mapping = shown.offsetMapping
-        assertEquals(listOf(0, 1, 2, 3, 4), listOf(0, 1, 5, 6, 13).map { mapping.originalToTransformed(it) })
-        assertEquals(listOf(0, 1, 5, 6, 13), (0..4).map { mapping.transformedToOriginal(it) })
+        assertEquals(listOf(0, 1, 2, 4, 5), listOf(0, 1, 5, 6, 13).map { mapping.originalToTransformed(it) })
+        assertEquals(listOf(0, 1, 5, 5, 6, 13, 13), (0..6).map { mapping.transformedToOriginal(it) })
         // Dentro do emoji só há as bordas: o começo dele.
         assertEquals(1, mapping.originalToTransformed(3))
     }

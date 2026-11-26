@@ -146,22 +146,29 @@ class EmojiDraftTest {
 
     @Test
     fun posicoesDoRascunhoNoTextoMostrado() {
-        // "a:ok:b:party:" aparece como "a#b#": cada emoji vira um caractere.
+        // "a:ok:b:party:" aparece como "a##b##" (dois caracteres por emoji): antes do emoji é a posição dele, depois é a do meio dele.
         val emojis = find("a:ok:b:party:")
-        assertEquals(listOf(0, 1, 1, 1, 1, 2, 3, 3, 3, 3, 3, 3, 3, 4), (0..13).map { EmojiDraft.toShown(emojis, it) })
+        assertEquals(listOf(0, 1, 1, 1, 1, 2, 4, 4, 4, 4, 4, 4, 4, 5), (0..13).map { EmojiDraft.toShown(emojis, it) })
     }
 
     @Test
     fun posicoesDoTextoMostradoNoRascunho() {
         val emojis = find("a:ok:b:party:")
-        assertEquals(listOf(0, 1, 5, 6, 13), (0..4).map { EmojiDraft.toDraft(emojis, it) })
+        // O meio e o fim do emoji valem o fim dele: o cursor chega à borda de fora com um passo só para a direita.
+        assertEquals(listOf(0, 1, 5, 5, 6, 13, 13), (0..6).map { EmojiDraft.toDraft(emojis, it) })
     }
 
     @Test
     fun doisEmojisColadosTemUmaBordaSoEntreEles() {
         val emojis = find(":ok::party:")
-        assertEquals(listOf(0, 4, 11), (0..2).map { EmojiDraft.toDraft(emojis, it) })
-        assertEquals(listOf(0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2), (0..11).map { EmojiDraft.toShown(emojis, it) })
+        assertEquals(listOf(0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 3), (0..11).map { EmojiDraft.toShown(emojis, it) })
+        assertEquals(listOf(0, 4, 4, 11, 11), (0..4).map { EmojiDraft.toDraft(emojis, it) })
+    }
+
+    @Test
+    fun cadaEmojiTemOSeuEspacoNoTextoMostrado() {
+        val emojis = find("a:ok::party:b:x1:")
+        assertEquals(listOf(1, 3, 6), emojis.indices.map { EmojiDraft.slotOf(emojis, it) })
     }
 
     @Test
@@ -171,11 +178,14 @@ class EmojiDraftTest {
     }
 
     @Test
-    fun idaEVoltaDasPosicoesComAcentoEEmojiUnicode() {
-        val emojis = find("ação 😀 :ok: fim")
-        for (shown in 0.."ação 😀 # fim".length) {
-            assertEquals(shown, EmojiDraft.toShown(emojis, EmojiDraft.toDraft(emojis, shown)), "posição mostrada $shown")
+    fun asBordasVoltamAoMesmoLugarComAcentoEEmojiUnicode() {
+        val text = "ação 😀 :ok: fim"
+        val emojis = find(text)
+        for (offset in listOf(0, 5, 7, 8, 12, text.length)) {
+            assertEquals(offset, EmojiDraft.toDraft(emojis, EmojiDraft.toShown(emojis, offset)), "posição $offset")
         }
+        // O emoji fica depois de "ação 😀 " (8 unidades) e o espaço dele no texto mostrado é a 8ª.
+        assertEquals(8, EmojiDraft.slotOf(emojis, 0))
     }
 
     // a edição trata o emoji como um caractere só
