@@ -534,4 +534,46 @@
     <string name="msg_link_open">Abrir link</string>
     <!-- Painel da conversa sobre a lista de canais (0.6.1): a faixa da conversa estacionada -->
     <string name="conversation_panel_resume">Voltar à conversa</string>
+    <!-- Notificações: configurações -->
+    <string name="notif_open">Notificações</string>
+    <string name="notif_more_options">Mais opções</string>
+    <string name="notif_channel_title">Notificações de #%1$s</string>
+    <string name="notif_dm_title">Notificações de %1$s</string>
+    <string name="notif_account_section">Notificações</string>
+    <string name="notif_account_open">Nível, silêncio e menções</string>
+    <string name="notif_account_title">Notificações da conta</string>
+    <string name="notif_section_expanded">Aberto</string>
+    <string name="notif_section_collapsed">Fechado</string>
+    <string name="notif_mute_channel">Silenciar canal</string>
+    <string name="notif_mute_conversation">Silenciar conversa</string>
+    <string name="notif_mute_server">Silenciar servidor</string>
+    <string name="notif_mute_15m">15 minutos</string>
+    <string name="notif_mute_1h">1 hora</string>
+    <string name="notif_mute_3h">3 horas</string>
+    <string name="notif_mute_8h">8 horas</string>
+    <string name="notif_mute_24h">24 horas</string>
+    <string name="notif_mute_forever">Até eu reativar</string>
+    <string name="notif_unmute">Reativar</string>
+    <string name="notif_muted_until">Silenciado até %1$s</string>
+    <string name="notif_muted_forever">Silenciado até reativar</string>
+    <string name="notif_muted_by_server">Silenciado pelo servidor</string>
+    <string name="notif_mute_note_channel">Silenciado, o canal perde o círculo de mensagem nova e as mensagens comuns não notificam. Menções e @everyone continuam notificando.</string>
+    <string name="notif_mute_note_dm">Silenciada, a conversa não notifica.</string>
+    <string name="notif_mute_note_server">Silenciar o servidor não silencia as mensagens diretas. Menções e @everyone continuam notificando.</string>
+    <string name="notif_level_title">Notificações</string>
+    <string name="notif_level_all">Todas as mensagens</string>
+    <string name="notif_level_mentions">Só menções</string>
+    <string name="notif_level_nothing">Nada</string>
+    <string name="notif_level_note">Isto controla só as notificações do sistema. O número de menções não muda.</string>
+    <string name="notif_use_server_default">Usar padrão do servidor (%1$s)</string>
+    <string name="notif_value_on">Ligado</string>
+    <string name="notif_value_off">Desligado</string>
+    <string name="notif_suppress_everyone">Suprimir @everyone</string>
+    <string name="notif_suppress_mentions">Suprimir menções</string>
+    <string name="notif_suppress">Suprimir</string>
+    <string name="notif_allow">Permitir</string>
+    <string name="notif_suppress_everyone_note">Suprimir tira a notificação e também o número de menções de @everyone.</string>
+    <string name="notif_suppress_mentions_note">Vale para @usuário e para respostas às suas mensagens. Suprimir tira a notificação e também o número de menções.</string>
+    <string name="notif_sync_title">Sincronizar com o servidor</string>
+    <string name="notif_sync_note">O servidor ainda não guarda estas opções. Por enquanto elas ficam só neste aparelho.</string>
 </resources>

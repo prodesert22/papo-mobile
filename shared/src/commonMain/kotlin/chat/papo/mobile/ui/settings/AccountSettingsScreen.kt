@@ -79,6 +79,8 @@ import chat.papo.mobile.resources.account_security
 import chat.papo.mobile.resources.account_settings
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
+import chat.papo.mobile.resources.notif_account_open
+import chat.papo.mobile.resources.notif_account_section
 import chat.papo.mobile.ui.components.AccountAvatar
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.readableOn
@@ -97,6 +99,7 @@ fun AccountSettingsScreen(
     onOpenBlocked: () -> Unit,
     onOpenPassword: () -> Unit,
     onEditProfile: () -> Unit,
+    onOpenNotifications: () -> Unit,
 ) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val account = accounts.firstOrNull { it.id == accountId }
@@ -164,6 +167,13 @@ fun AccountSettingsScreen(
 
             Spacer(Modifier.height(28.dp))
             ServerSection(session.accounts, account)
+
+            // As configurações de notificação ficam no banco da sessão: sem sessão aberta não há o que mostrar.
+            if (accountSession != null) {
+                Spacer(Modifier.height(28.dp))
+                Text(stringResource(Res.string.notif_account_section), style = MaterialTheme.typography.titleMedium)
+                SettingsLink(stringResource(Res.string.notif_account_open), onOpenNotifications)
+            }
 
             if (!account.sessionExpired) {
                 Spacer(Modifier.height(28.dp))

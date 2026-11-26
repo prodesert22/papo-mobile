@@ -113,6 +113,9 @@ class NotificationPrefs(
     fun effectiveForDm(dmId: String): EffectiveDm =
         effectiveDm(_server.value, _dms.value[dmId] ?: DmNotificationSettings(), now())
 
+    /** O backend guarda estas configurações? Falso hoje: a tela avisa que elas ficam só neste aparelho. */
+    val syncAvailable: Boolean get() = remote.available
+
     /** Os valores do canal vão e vêm do backend? Só se a opção vale e o backend guarda estas configurações. */
     fun isSyncing(channelId: String): Boolean = remote.available && effectiveFor(channelId).sync
 
