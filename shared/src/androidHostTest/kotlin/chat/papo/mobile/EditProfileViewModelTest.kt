@@ -4,6 +4,7 @@ import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.avatarMediaName
 import chat.papo.mobile.core.MutationResult
 import chat.papo.mobile.data.api.OutgoingFile
+import chat.papo.mobile.media.CropRequest
 import chat.papo.mobile.media.ImageReducer
 import chat.papo.mobile.media.ImageReduction
 import chat.papo.mobile.media.ImageRefusal
@@ -11,6 +12,7 @@ import chat.papo.mobile.media.ProfileDraft
 import chat.papo.mobile.media.ProfileField
 import chat.papo.mobile.media.ProfileImageKind
 import chat.papo.mobile.media.ReducedImage
+import chat.papo.mobile.media.SourceImageInfo
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.profile.BannerChange
 import chat.papo.mobile.ui.profile.EditLoad
@@ -18,6 +20,7 @@ import chat.papo.mobile.ui.profile.EditProfileState
 import chat.papo.mobile.ui.profile.EditProfileViewModel
 import chat.papo.mobile.ui.profile.SaveStep
 import chat.papo.mobile.ui.profile.StepOutcome
+import androidx.lifecycle.ViewModelStore
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -47,6 +50,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -109,15 +113,29 @@ class EditProfileViewModelTest {
         }
     }
 
-    /** Um redutor que devolve o que o teste manda e anota o que recebeu. */
-    private class FakeReducer(var next: ImageReduction) : ImageReducer {
+    /**
+     * Um redutor que devolve o que o teste manda e anota o que recebeu. [info] é o que o cabeçalho da imagem diz: uma imagem
+     * parada de 800 x 600 até o teste mandar outra coisa.
+     */
+    private class FakeReducer(var next: ImageReduction, var info: SourceImageInfo? = SourceImageInfo(800, 600, animated = false)) : ImageReducer {
+        /** Cada [reduce], com o tamanho dos bytes e o tipo. */
         val calls = CopyOnWriteArrayList<Pair<Int, ProfileImageKind>>()
 
-        override suspend fun reduce(source: ByteArray, kind: ProfileImageKind): ImageReduction {
+        /** O recorte de cada [reduce] (null: o corte central). */
+        val crops = CopyOnWriteArrayList<CropRequest?>()
+        @Volatile var failure: Exception? = null
+
+        override suspend fun inspect(source: ByteArray): SourceImageInfo? = info
+
+        override suspend fun reduce(source: ByteArray, kind: ProfileImageKind, crop: CropRequest?): ImageReduction {
             calls += source.size to kind
+            crops += crop
+            failure?.let { throw it }
             return next
         }
     }
+
+    private val region = CropRequest(quarterTurns = 1, left = 0.1f, top = 0.2f, width = 0.5f, height = 0.5f)
 
     private val pngBytes = byteArrayOf(1, 2, 3, 4, 5)
     private val webpBytes = byteArrayOf(9, 8, 7)
@@ -141,9 +159,14 @@ class EditProfileViewModelTest {
 
     private suspend fun EditProfileViewModel.finished(): EditProfileState = state.first { !it.saving && it.outcomes.isNotEmpty() }
 
+    /** Escolhe a imagem e, se ela abriu o recorte, o confirma com [region]: o caminho de quem usa o app. */
     private suspend fun EditProfileViewModel.picked(kind: ProfileImageKind, file: OutgoingFile = bytesFile("f.jpg", "image/jpeg", byteArrayOf(0))) {
         pick(kind, file)
-        state.first { it.reducing == null && (it.avatar != null || it.banner != BannerChange.Keep || it.refusals.isNotEmpty()) }
+        state.first { it.reducing == null }
+        if (state.value.cropping != null) {
+            confirmCrop(region)
+            state.first { it.reducing == null }
+        }
     }
 
     // Abrir
@@ -581,8 +604,11 @@ class EditProfileViewModelTest {
     @Test
     fun enquantoAImagemEPreparadaOSalvarEsperaEEscolherOutraTrocaAAnterior() = runTest {
         val gate = CompletableDeferred<Unit>()
+        // Uma animação: não se recorta, então vai direto para o redutor.
         val slow = object : ImageReducer {
-            override suspend fun reduce(source: ByteArray, kind: ProfileImageKind): ImageReduction {
+            override suspend fun inspect(source: ByteArray) = SourceImageInfo(64, 64, animated = true)
+
+            override suspend fun reduce(source: ByteArray, kind: ProfileImageKind, crop: CropRequest?): ImageReduction {
                 gate.await()
                 return png()
             }
@@ -602,5 +628,265 @@ class EditProfileViewModelTest {
 
         assertTrue(vm.state.value.canSave)
         assertTrue(vm.state.value.avatar != null)
+    }
+
+    // Recorte
+
+    @Test
+    fun imagemParadaAbreORecorteSemReduzirNemMexerNoRascunho() = runTest {
+        val reducer = FakeReducer(png(), SourceImageInfo(4000, 3000, animated = false))
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+        val file = bytesFile("foto.jpg", "image/jpeg", byteArrayOf(7, 8, 9))
+
+        vm.pick(ProfileImageKind.Banner, file)
+        val state = vm.state.first { it.reducing == null }
+
+        val pending = assertNotNull(state.cropping)
+        assertEquals(ProfileImageKind.Banner, pending.kind)
+        assertContentEquals(byteArrayOf(7, 8, 9), pending.bytes)
+        assertEquals(4000 to 3000, pending.width to pending.height)
+        assertTrue(reducer.calls.isEmpty())
+        assertEquals(BannerChange.Keep, state.banner)
+        assertFalse(state.canSave)
+    }
+
+    @Test
+    fun animacaoNaoAbreORecorteESeguePeloCaminhoDeAntes() = runTest {
+        val reducer = FakeReducer(png(), SourceImageInfo(64, 64, animated = true))
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+
+        vm.picked(ProfileImageKind.Avatar, bytesFile("a.gif", "image/gif", ByteArray(5)))
+
+        assertNull(vm.state.value.cropping)
+        assertEquals(listOf(5 to ProfileImageKind.Avatar), reducer.calls.toList())
+        assertEquals(listOf<CropRequest?>(null), reducer.crops.toList())
+        assertTrue(vm.state.value.avatar != null)
+    }
+
+    @Test
+    fun confirmarORecorteReduzARegiaoEColocaAImagemNoRascunho() = runTest {
+        val reducer = FakeReducer(webp())
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+        vm.pick(ProfileImageKind.Banner, bytesFile("foto.jpg", "image/jpeg", ByteArray(12)))
+        vm.state.first { it.cropping != null }
+
+        vm.confirmCrop(region)
+        assertEquals(ProfileImageKind.Banner, vm.state.value.reducing)
+        assertNull(vm.state.value.cropping)
+        val state = vm.state.first { it.reducing == null }
+
+        assertEquals(listOf(12 to ProfileImageKind.Banner), reducer.calls.toList())
+        assertEquals(listOf<CropRequest?>(region), reducer.crops.toList())
+        val replace = assertIs<BannerChange.Replace>(state.banner)
+        assertEquals("WEBP", replace.picked.format)
+        assertNull(state.avatar)
+        assertTrue(state.canSave)
+    }
+
+    @Test
+    fun confirmarORecorteDoAvatarGuardaOAvatar() = runTest {
+        val vm = viewModel(Server())
+        vm.ready()
+
+        vm.picked(ProfileImageKind.Avatar)
+
+        assertEquals("PNG", vm.state.value.avatar?.format)
+        assertEquals(BannerChange.Keep, vm.state.value.banner)
+    }
+
+    @Test
+    fun cancelarORecorteSoltaAImagemENadaMuda() = runTest {
+        val reducer = FakeReducer(png())
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+        vm.pick(ProfileImageKind.Avatar, bytesFile("foto.jpg", "image/jpeg", byteArrayOf(1)))
+        vm.state.first { it.cropping != null }
+
+        vm.cancelCrop()
+
+        val state = vm.state.value
+        assertNull(state.cropping)
+        assertNull(state.reducing)
+        assertNull(state.avatar)
+        assertTrue(state.refusals.isEmpty())
+        assertFalse(state.canSave)
+        assertTrue(reducer.calls.isEmpty())
+    }
+
+    @Test
+    fun confirmarSemRecorteAbertoNaoFazNada() = runTest {
+        val reducer = FakeReducer(png())
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+
+        vm.confirmCrop(region)
+        runCurrent()
+
+        assertNull(vm.state.value.reducing)
+        assertNull(vm.state.value.avatar)
+        assertTrue(reducer.calls.isEmpty())
+    }
+
+    @Test
+    fun confirmarEnquantoSalvaNaoReduzEMantemORecorte() = runTest {
+        val server = Server().also { it.gates["/users/u1"] = CompletableDeferred() }
+        val reducer = FakeReducer(png())
+        val vm = viewModel(server, reducer)
+        vm.ready()
+        vm.pick(ProfileImageKind.Avatar, bytesFile("foto.jpg", "image/jpeg", byteArrayOf(1)))
+        vm.state.first { it.cropping != null }
+        vm.edit(ProfileField.Nickname, "Novo")
+        vm.save()
+        TestResources.waitUntil { server.puts("/users/u1").isNotEmpty() }
+        runCurrent()
+
+        vm.confirmCrop(region)
+        runCurrent()
+
+        assertNotNull(vm.state.value.cropping)
+        assertTrue(reducer.calls.isEmpty())
+        server.gates.getValue("/users/u1").complete(Unit)
+        vm.finished()
+    }
+
+    @Test
+    fun recusaDepoisDoRecorteGuardaOMotivoESoltaOsBytes() = runTest {
+        val reducer = FakeReducer(ImageReduction.Refused(ImageRefusal.StillTooHeavy))
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+
+        vm.picked(ProfileImageKind.Banner)
+
+        val state = vm.state.value
+        assertEquals(ImageRefusal.StillTooHeavy, state.refusals[ProfileImageKind.Banner])
+        assertNull(state.cropping)
+        assertEquals(BannerChange.Keep, state.banner)
+        assertFalse(state.canSave)
+    }
+
+    @Test
+    fun falhaDoRedutorDepoisDoRecorteViraIlegivel() = runTest {
+        val reducer = FakeReducer(png()).also { it.failure = IOException("sem memória") }
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+
+        vm.picked(ProfileImageKind.Avatar)
+
+        assertEquals(ImageRefusal.Unreadable, vm.state.value.refusals[ProfileImageKind.Avatar])
+        assertNull(vm.state.value.avatar)
+        assertNull(vm.state.value.reducing)
+    }
+
+    @Test
+    fun arquivoQueNaoEImagemNemAbreORecorte() = runTest {
+        val reducer = FakeReducer(png(), info = null)
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+
+        vm.pick(ProfileImageKind.Avatar, bytesFile("x.bin", "application/octet-stream", ByteArray(20)))
+        val state = vm.state.first { it.reducing == null }
+
+        assertEquals(ImageRefusal.NotAnImage, state.refusals[ProfileImageKind.Avatar])
+        assertNull(state.cropping)
+        assertTrue(reducer.calls.isEmpty())
+    }
+
+    @Test
+    fun imagemPequenaDemaisParaAProporcaoNemAbreORecorte() = runTest {
+        // Dois pixels de largura não dão um banner 3:1.
+        val reducer = FakeReducer(png(), SourceImageInfo(2, 100, animated = false))
+        val vm = viewModel(Server(), reducer)
+        vm.ready()
+
+        vm.pick(ProfileImageKind.Banner, bytesFile("fina.png", "image/png", ByteArray(20)))
+        val state = vm.state.first { it.reducing == null }
+
+        assertEquals(ImageRefusal.NotAnImage, state.refusals[ProfileImageKind.Banner])
+        assertNull(state.cropping)
+    }
+
+    @Test
+    fun escolherOutraImagemTrocaAQueEsperavaORecorte() = runTest {
+        val vm = viewModel(Server())
+        vm.ready()
+        vm.pick(ProfileImageKind.Avatar, bytesFile("a.jpg", "image/jpeg", byteArrayOf(1)))
+        vm.state.first { it.cropping != null }
+
+        vm.pick(ProfileImageKind.Banner, bytesFile("b.jpg", "image/jpeg", byteArrayOf(2, 2)))
+        val pending = assertNotNull(vm.state.first { it.reducing == null && it.cropping?.kind == ProfileImageKind.Banner }.cropping)
+
+        assertContentEquals(byteArrayOf(2, 2), pending.bytes)
+    }
+
+    @Test
+    fun descartarSoltaOsBytesQueEsperavamORecorte() = runTest {
+        val vm = viewModel(Server())
+        vm.ready()
+
+        suspend fun openCrop(kind: ProfileImageKind) {
+            vm.pick(kind, bytesFile("f.jpg", "image/jpeg", byteArrayOf(1)))
+            vm.state.first { it.reducing == null && it.cropping?.kind == kind }
+        }
+
+        openCrop(ProfileImageKind.Avatar)
+        vm.discardBanner()
+        assertNotNull(vm.state.value.cropping)
+        vm.discardAvatar()
+        assertNull(vm.state.value.cropping)
+
+        openCrop(ProfileImageKind.Banner)
+        vm.discardAvatar()
+        assertNotNull(vm.state.value.cropping)
+        vm.discardBanner()
+        assertNull(vm.state.value.cropping)
+
+        openCrop(ProfileImageKind.Avatar)
+        vm.discardAll()
+        assertNull(vm.state.value.cropping)
+    }
+
+    @Test
+    fun descartarTudoDuranteAReducaoDoRecorteCancelaAImagem() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val slow = object : ImageReducer {
+            override suspend fun inspect(source: ByteArray) = SourceImageInfo(800, 600, animated = false)
+
+            override suspend fun reduce(source: ByteArray, kind: ProfileImageKind, crop: CropRequest?): ImageReduction {
+                gate.await()
+                return png()
+            }
+        }
+        val vm = viewModel(Server(), slow)
+        vm.ready()
+        vm.pick(ProfileImageKind.Avatar, bytesFile("a.jpg", "image/jpeg", byteArrayOf(1)))
+        vm.state.first { it.cropping != null }
+        vm.confirmCrop(region)
+        runCurrent()
+        assertEquals(ProfileImageKind.Avatar, vm.state.value.reducing)
+
+        vm.discardAll()
+        gate.complete(Unit)
+        runCurrent()
+
+        assertNull(vm.state.value.reducing)
+        assertNull(vm.state.value.avatar)
+    }
+
+    @Test
+    fun sairDaTelaSoltaOsBytesDoRecorte() = runTest {
+        val vm = viewModel(Server())
+        vm.ready()
+        vm.pick(ProfileImageKind.Avatar, bytesFile("a.jpg", "image/jpeg", byteArrayOf(1)))
+        vm.state.first { it.cropping != null }
+        val owner = ViewModelStore()
+        // O dono das telas limpa o ViewModel ao sair; é ele que chama o onCleared.
+        owner.put("edit-profile", vm)
+
+        owner.clear()
+
+        assertNull(vm.state.value.cropping)
     }
 }

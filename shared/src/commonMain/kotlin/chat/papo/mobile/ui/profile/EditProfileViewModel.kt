@@ -11,6 +11,7 @@ import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.UpdateAvatarRequest
 import chat.papo.mobile.data.api.UpdateBannerRequest
 import chat.papo.mobile.data.api.UpdateProfileRequest
+import chat.papo.mobile.media.CropRequest
 import chat.papo.mobile.media.ImageReducer
 import chat.papo.mobile.media.ImageReduction
 import chat.papo.mobile.media.ImageRefusal
@@ -20,6 +21,7 @@ import chat.papo.mobile.media.ProfileField
 import chat.papo.mobile.media.ProfileImageKind
 import chat.papo.mobile.media.ReducedImage
 import chat.papo.mobile.media.formatFor
+import chat.papo.mobile.media.planCrop
 import chat.papo.mobile.media.profileDraftErrors
 import chat.papo.mobile.media.readAtMost
 import chat.papo.mobile.ui.components.UiError
@@ -56,6 +58,12 @@ sealed interface StepOutcome {
 /** Uma imagem pronta para enviar: [format] é o valor de `avatar_format` ou `banner_format` que o servidor espera. */
 class PickedImage(val image: ReducedImage, val format: String)
 
+/**
+ * Uma imagem estática escolhida que espera o recorte: os bytes lidos (só em memória; nada vai para o disco) e o tamanho
+ * dela na orientação do EXIF. É o que a tela de recorte mostra. Sem igualdade por conteúdo: cada escolha é uma só.
+ */
+class PendingCrop(val kind: ProfileImageKind, val bytes: ByteArray, val width: Int, val height: Int)
+
 /** O que fazer com o banner ao salvar. */
 sealed interface BannerChange {
     data object Keep : BannerChange
@@ -83,6 +91,8 @@ data class EditProfileState(
     val banner: BannerChange = BannerChange.Keep,
     /** O avatar ou o banner escolhido está sendo preparado. */
     val reducing: ProfileImageKind? = null,
+    /** A imagem escolhida que espera o usuário recortá-la; a tela de recorte está aberta enquanto houver uma. */
+    val cropping: PendingCrop? = null,
     /** Por que a última imagem escolhida de cada tipo não serviu. */
     val refusals: Map<ProfileImageKind, ImageRefusal> = emptyMap(),
     val saving: Boolean = false,
@@ -92,6 +102,9 @@ data class EditProfileState(
     val overLimit: List<ProfileField> get() = profileDraftErrors(draft)
     val textChanged: Boolean get() = draft.trimmed() != saved
     val hasBanner: Boolean get() = (load as? EditLoad.Ready)?.profile?.bannerSha != null
+
+    /** O usuário mudou algo que ainda não foi salvo: um texto, um avatar escolhido ou o banner. */
+    val hasUnsavedChanges: Boolean get() = ready && (textChanged || avatar != null || banner != BannerChange.Keep)
 
     /** Há o que salvar, tudo cabe nos limites e nada está em andamento. */
     val canSave: Boolean
@@ -158,57 +171,134 @@ class EditProfileViewModel(
     }
 
     /**
-     * Prepara a imagem [file] como avatar ou banner (lê, recorta, reduz) e a deixa à espera do "Salvar". Se não serve, o
-     * motivo fica em [EditProfileState.refusals]. Escolher outra enquanto uma é preparada troca a anterior.
+     * Começa a preparar a imagem [file] como avatar ou banner: lê o arquivo e, se é uma imagem parada, deixa-a em
+     * [EditProfileState.cropping] para o usuário recortar (ver [confirmCrop]). Uma animação não se recorta e segue direto para
+     * a redução. Se não serve, o motivo fica em [EditProfileState.refusals]. Escolher outra enquanto uma é preparada troca a anterior.
      */
     fun pick(kind: ProfileImageKind, file: OutgoingFile) {
         if (_state.value.saving) return
         pickJob?.cancel()
-        _state.update { it.copy(reducing = kind, refusals = it.refusals - kind) }
+        _state.update { it.copy(reducing = kind, cropping = null, refusals = it.refusals - kind) }
         pickJob = viewModelScope.launch {
+            var pending: PendingCrop? = null
             val reduction = try {
                 val bytes = withContext(io) { file.readAtMost(PREVIEW_MAX_BYTES) }
-                if (bytes == null) ImageReduction.Refused(ImageRefusal.SourceTooLarge) else reducer.reduce(bytes, kind)
+                val info = bytes?.let { reducer.inspect(it) }
+                when {
+                    bytes == null -> ImageReduction.Refused(ImageRefusal.SourceTooLarge)
+                    info == null -> ImageReduction.Refused(ImageRefusal.NotAnImage)
+                    info.animated -> reducer.reduce(bytes, kind)
+                    // Pequena demais para a proporção: não há o que recortar.
+                    planCrop(info.width, info.height, kind) == null -> ImageReduction.Refused(ImageRefusal.NotAnImage)
+                    else -> {
+                        pending = PendingCrop(kind, bytes, info.width, info.height)
+                        null
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 ImageReduction.Refused(ImageRefusal.Unreadable)
             }
-            _state.update { state ->
-                val done = state.copy(reducing = null)
-                when (reduction) {
-                    is ImageReduction.Refused -> done.copy(refusals = state.refusals + (kind to reduction.reason))
-                    is ImageReduction.Ready -> {
-                        // O redutor só devolve formatos que o servidor aceita; se algum dia não for, a imagem é recusada aqui.
-                        val format = formatFor(reduction.image.mimeType)
-                        val picked = format?.let { PickedImage(reduction.image, it) }
-                        when {
-                            picked == null -> done.copy(refusals = state.refusals + (kind to ImageRefusal.NotAnImage))
-                            kind == ProfileImageKind.Avatar -> done.copy(avatar = picked, outcomes = state.outcomes - SaveStep.Avatar)
-                            else -> done.copy(banner = BannerChange.Replace(picked), outcomes = state.outcomes - SaveStep.Banner)
-                        }
-                    }
+            if (reduction == null) {
+                _state.update { it.copy(reducing = null, cropping = pending) }
+            } else {
+                finishPick(kind, reduction)
+            }
+        }
+    }
+
+    /** O usuário confirmou o recorte [request] da imagem de [EditProfileState.cropping]: reduz a região e a deixa à espera do "Salvar". */
+    fun confirmCrop(request: CropRequest) {
+        val pending = _state.value.cropping ?: return
+        if (_state.value.saving) return
+        _state.update { it.copy(cropping = null, reducing = pending.kind) }
+        pickJob = viewModelScope.launch {
+            val reduction = try {
+                reducer.reduce(pending.bytes, pending.kind, request)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ImageReduction.Refused(ImageRefusal.Unreadable)
+            }
+            finishPick(pending.kind, reduction)
+        }
+    }
+
+    /** O usuário desistiu do recorte: solta a imagem lida e nada muda no rascunho. */
+    fun cancelCrop() {
+        _state.update { it.copy(cropping = null) }
+    }
+
+    private fun finishPick(kind: ProfileImageKind, reduction: ImageReduction) = _state.update { state ->
+        val done = state.copy(reducing = null)
+        when (reduction) {
+            is ImageReduction.Refused -> done.copy(refusals = state.refusals + (kind to reduction.reason))
+            is ImageReduction.Ready -> {
+                // O redutor só devolve formatos que o servidor aceita; se algum dia não for, a imagem é recusada aqui.
+                val format = formatFor(reduction.image.mimeType)
+                val picked = format?.let { PickedImage(reduction.image, it) }
+                when {
+                    picked == null -> done.copy(refusals = state.refusals + (kind to ImageRefusal.NotAnImage))
+                    kind == ProfileImageKind.Avatar -> done.copy(avatar = picked, outcomes = state.outcomes - SaveStep.Avatar)
+                    else -> done.copy(banner = BannerChange.Replace(picked), outcomes = state.outcomes - SaveStep.Banner)
                 }
             }
+        }
+    }
+
+    /** Desiste de tudo o que não foi salvo: volta os textos ao que o servidor tem e solta o avatar e o banner escolhidos. */
+    fun discardAll() {
+        if (_state.value.saving) return
+        pickJob?.cancel()
+        _state.update {
+            it.copy(
+                draft = it.saved,
+                avatar = null,
+                banner = BannerChange.Keep,
+                reducing = null,
+                cropping = null,
+                refusals = emptyMap(),
+                outcomes = emptyMap(),
+            )
         }
     }
 
     /** Desiste do avatar escolhido. */
     fun discardAvatar() {
         if (_state.value.saving) return
-        _state.update { it.copy(avatar = null, refusals = it.refusals - ProfileImageKind.Avatar, outcomes = it.outcomes - SaveStep.Avatar) }
+        _state.update {
+            it.copy(
+                avatar = null,
+                cropping = it.cropping?.takeIf { pending -> pending.kind != ProfileImageKind.Avatar },
+                refusals = it.refusals - ProfileImageKind.Avatar,
+                outcomes = it.outcomes - SaveStep.Avatar,
+            )
+        }
     }
 
     /** Desiste do banner escolhido ou da remoção dele. */
     fun discardBanner() {
         if (_state.value.saving) return
-        _state.update { it.copy(banner = BannerChange.Keep, refusals = it.refusals - ProfileImageKind.Banner, outcomes = it.outcomes - SaveStep.Banner) }
+        _state.update {
+            it.copy(
+                banner = BannerChange.Keep,
+                cropping = it.cropping?.takeIf { pending -> pending.kind != ProfileImageKind.Banner },
+                refusals = it.refusals - ProfileImageKind.Banner,
+                outcomes = it.outcomes - SaveStep.Banner,
+            )
+        }
     }
 
     /** Marca o banner para sair no "Salvar". */
     fun removeBanner() {
         if (_state.value.saving) return
         _state.update { it.copy(banner = BannerChange.Remove, outcomes = it.outcomes - SaveStep.Banner) }
+    }
+
+    override fun onCleared() {
+        // Os bytes da imagem à espera do recorte não sobrevivem à tela.
+        _state.update { it.copy(cropping = null) }
     }
 
     /** Um pedido de "Salvar": o passo, o que ele manda e o que fazer depois que o servidor o aceita. */

@@ -42,6 +42,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import chat.papo.mobile.resources.profile_edit_discard_all
+import chat.papo.mobile.resources.profile_edit_unsaved
+import androidx.compose.material3.Surface
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
 import chat.papo.mobile.chat.UserProfile
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
@@ -105,7 +113,7 @@ private val PencilSize = 36.dp
 
 /**
  * Edita o próprio perfil: apelido, frase de status, descrição, frase de digitação, avatar e banner. A imagem escolhida é
- * recortada e reduzida aqui, antes de qualquer envio; "Salvar" manda só o que mudou e mostra o resultado de cada pedido.
+ * recortada pelo usuário ([ImageCropper]) e reduzida aqui, antes de qualquer envio; "Salvar" manda só o que mudou e mostra o resultado de cada pedido.
  * Enquanto salva, nada muda e o voltar espera. Tudo o que o servidor devolve é texto simples.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -145,7 +153,8 @@ fun EditProfileScreen(session: AccountSession, viewModel: EditProfileViewModel, 
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState())) {
+      Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             when (val load = state.load) {
                 EditLoad.Loading -> Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(32.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
@@ -170,7 +179,41 @@ fun EditProfileScreen(session: AccountSession, viewModel: EditProfileViewModel, 
                     }
                 }
             }
-            Spacer(Modifier.height(24.dp))
+            // Espaço para a barra flutuante não cobrir o último campo.
+            Spacer(Modifier.height(96.dp))
+        }
+        state.cropping?.let { pending ->
+            ImageCropper(pending, onConfirm = viewModel::confirmCrop, onCancel = viewModel::cancelCrop)
+        }
+        UnsavedBar(
+            visible = state.hasUnsavedChanges && !state.saving,
+            canSave = state.canSave,
+            onDiscard = viewModel::discardAll,
+            onSave = viewModel::save,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+      }
+    }
+}
+
+/** O aviso que flutua sobre a tela enquanto há alterações não salvas, com "Descartar" e "Salvar". */
+@Composable
+private fun UnsavedBar(visible: Boolean, canSave: Boolean, onDiscard: () -> Unit, onSave: () -> Unit, modifier: Modifier = Modifier) {
+    AnimatedVisibility(visible = visible, modifier = modifier, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+        Surface(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.inverseSurface,
+            contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+            shadowElevation = 6.dp,
+        ) {
+            Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(Res.string.profile_edit_unsaved), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = onDiscard) {
+                    Text(stringResource(Res.string.profile_edit_discard_all), color = MaterialTheme.colorScheme.inversePrimary)
+                }
+                Button(onClick = onSave, enabled = canSave) { Text(stringResource(Res.string.profile_edit_save)) }
+            }
         }
     }
 }
