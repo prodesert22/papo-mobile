@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -36,6 +37,9 @@ import kotlin.test.assertTrue
 internal class FakeBackend(private val serverPassword: String? = null) {
     val users = mutableMapOf("ana" to "Senha@123", "bia" to "Senha@456")
     val loggedOut = mutableListOf<String>()
+    var serverName: String? = null
+    var serverIcon: String? = null
+    var serverDown = false
 
     val engine = MockEngine { request ->
         val host = request.url.host
@@ -54,7 +58,12 @@ internal class FakeBackend(private val serverPassword: String? = null) {
         fun denied(detail: String) = json("""{"type":"t","title":"Não autorizado","status":401,"detail":"$detail"}""", HttpStatusCode.Unauthorized)
 
         when (request.url.encodedPath) {
-            "/server" -> json("""{"id":"s","name":"Servidor $host","public":${serverPassword == null},"member_count":2}""")
+            "/server" ->
+                if (serverDown) json("""{"type":"t","title":"Erro","status":503,"detail":"fora do ar"}""", HttpStatusCode.ServiceUnavailable)
+                else {
+                    val icon = serverIcon?.let { ""","icon_blob":"$it"""" }.orEmpty()
+                    json("""{"id":"s","name":"${serverName ?: "Servidor $host"}","public":${serverPassword == null},"member_count":2,"role_count":3$icon}""")
+                }
             "/roles" -> json("""{"roles":[]}""")
             "/auth/login_server" ->
                 if (field("server_password") == serverPassword) respond("", HttpStatusCode.NoContent, headersOf(HttpHeaders.SetCookie, "Auth=temp; Max-Age=1800"))
@@ -347,5 +356,63 @@ class AccountManagerTest {
         runCurrent()
 
         assertNull(f.store.get(ana.account.id))
+    }
+
+    @Test
+    fun atualizarOServidorGravaNomeEIconeSemChamarWhoami() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        runCurrent()
+        f.backend.serverName = "Renomeado"
+        f.backend.serverIcon = Base64.encode(byteArrayOf(1, 2, 3))
+        val before = f.backend.engine.requestHistory.size
+
+        val info = manager.refreshServer(ana.account.id)
+        runCurrent()
+
+        assertEquals("Renomeado", info!!.name)
+        assertEquals(3, info.roleCount)
+        val saved = manager.accounts.value.single()
+        assertEquals("Renomeado", saved.serverName)
+        assertEquals(listOf<Byte>(1, 2, 3), saved.serverIcon!!.toList())
+        val paths = f.backend.engine.requestHistory.drop(before).map { it.url.encodedPath }
+        assertEquals(listOf("/server"), paths)
+    }
+
+    @Test
+    fun atualizarOServidorSemRedeLevantaOErroEMantemOQueEstavaGravado() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        runCurrent()
+        f.backend.serverDown = true
+
+        assertFailsWith<ApiException> { manager.refreshServer(ana.account.id) }
+        runCurrent()
+
+        assertEquals("Servidor papo.test", manager.accounts.value.single().serverName)
+    }
+
+    @Test
+    fun atualizarOServidorDeContaDesconhecidaNaoFazPedido() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+
+        assertNull(manager.refreshServer("nao-existe"))
+        assertEquals(0, f.backend.engine.requestHistory.size)
+    }
+
+    @Test
+    fun atualizarOServidorSemNomeUsaOEndereco() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        f.backend.serverName = ""
+
+        manager.refreshServer(ana.account.id)
+        runCurrent()
+
+        assertEquals("papo.test", manager.accounts.value.single().serverName)
     }
 }

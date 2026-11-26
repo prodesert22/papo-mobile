@@ -144,13 +144,15 @@ class AccountManager(
         }
     }
 
-    /** Atualiza nome/ícone do servidor e o nome do usuário a partir do backend. */
-    suspend fun refreshInfo(accountId: String) {
-        val session = session(accountId) ?: return
+    /**
+     * Lê `GET /server` (público, fora das rotas de autenticação), grava nome e ícone no registro e devolve o que o servidor
+     * contou. Sem sessão da conta, devolve null.
+     */
+    suspend fun refreshServer(accountId: String): ServerDto? {
+        val session = session(accountId) ?: return null
         val server = session.auth.server()
-        store.setServer(accountId, server.name, server.iconBytes())
-        val me = session.auth.whoami()
-        store.setIdentity(accountId, me.username, me.nickname)
+        store.setServer(accountId, server.name.ifBlank { session.client.server.host }, server.iconBytes())
+        return server
     }
 
     /** Sai da conta no servidor (melhor esforço) e apaga tudo o que é dela no aparelho. */

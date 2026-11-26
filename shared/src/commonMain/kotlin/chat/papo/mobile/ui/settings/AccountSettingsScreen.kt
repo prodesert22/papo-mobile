@@ -145,6 +145,9 @@ fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> 
                 }
             }
 
+            Spacer(Modifier.height(28.dp))
+            ServerSection(session.accounts, account)
+
             if (!account.sessionExpired) {
                 Spacer(Modifier.height(28.dp))
                 Text(stringResource(Res.string.account_devices), style = MaterialTheme.typography.titleMedium)

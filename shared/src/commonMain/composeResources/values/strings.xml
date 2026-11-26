@@ -93,6 +93,22 @@
     <string name="account_remove_body">A conta sai deste aparelho e as mensagens guardadas aqui são apagadas. Nada é apagado no servidor.</string>
     <string name="account_remove_confirm">Sair</string>
 
+    <!-- Membros, bloqueios e senha -->
+    <string name="server_title">Servidor</string>
+    <string name="server_public">Público</string>
+    <string name="server_closed">Fechado: pede a senha do servidor</string>
+    <string name="server_owner">Dono: %1$s</string>
+    <plurals name="server_channels">
+        <item quantity="one">%1$d canal</item>
+        <item quantity="other">%1$d canais</item>
+    </plurals>
+    <plurals name="server_roles">
+        <item quantity="one">%1$d cargo</item>
+        <item quantity="other">%1$d cargos</item>
+    </plurals>
+    <string name="server_created">Criado em %1$s</string>
+    <string name="server_stale">Mostrando o que está gravado neste aparelho.</string>
+
     <!-- Configurações do app -->
     <string name="settings_title">Configurações</string>
     <string name="settings_security">Segurança</string>
