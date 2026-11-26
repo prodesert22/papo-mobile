@@ -60,6 +60,18 @@ release notes in [releases/](../releases/) describe each version's changes.
   `:name:`: that is what is sent, saved and copied, and each emoji counts as one
   character when you move the cursor, delete or select.
 
+## People
+
+- Tap a person's avatar or name in a conversation, or the title of a direct
+  conversation, to open their profile: banner, avatar, presence, status, roles,
+  description and the date they joined. From the profile you can open a direct
+  conversation with them or copy their `@username`.
+- A member list for the server: the button at the top of a channel opens a panel
+  from the right edge with everyone grouped by presence and a search by name.
+  Tap a person to open their profile.
+- Messages sent by a webhook carry an **APP** badge next to the name and show
+  the webhook's avatar.
+
 ## Voice, camera and screen sharing
 
 - Join a voice channel, mute, switch cameras and choose between the speaker and
@@ -74,6 +86,11 @@ release notes in [releases/](../releases/) describe each version's changes.
 - No push notifications: messages arrive only while the app is open.
 - No notification inbox, profile editing, user preferences, blocking or server
   administration.
+- The member list shows everyone on the server, not only the people who can read
+  the channel you are in.
+- A webhook's avatar is shown only when it is stored on the server. A message
+  whose author picture is an address on another site shows initials instead, so
+  that reading a conversation never contacts a third party.
 - In calls: no sound from a shared screen, no per-person volume and no Bluetooth
   headset selection.
 - Attached GIFs, link preview images and APNG emoji show only their first frame.

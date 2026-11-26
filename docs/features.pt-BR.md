@@ -61,6 +61,18 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   `:nome:`: é o que se envia, se guarda e se copia, e cada emoji conta como um
   caractere ao mover o cursor, apagar ou selecionar.
 
+## Pessoas
+
+- Toque no avatar ou no nome de alguém numa conversa, ou no título de uma
+  conversa direta, para abrir o perfil: banner, avatar, presença, recado, cargos,
+  descrição e a data em que a pessoa entrou. Do perfil dá para abrir uma conversa
+  direta com ela ou copiar o `@usuário`.
+- Lista de membros do servidor: o botão no topo de um canal abre um painel que
+  entra pela borda direita, com todos agrupados por presença e busca por nome.
+  Toque em alguém para abrir o perfil.
+- Mensagens enviadas por webhook levam o selo **APP** ao lado do nome e mostram o
+  avatar do webhook.
+
 ## Voz, câmera e transmissão de tela
 
 - Entre num canal de voz, silencie o microfone, troque de câmera e escolha entre
@@ -75,6 +87,11 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Sem notificações push: as mensagens só chegam com o app aberto.
 - Sem caixa de notificações, edição de perfil, preferências do usuário, bloqueio
   de usuários e administração do servidor.
+- A lista de membros mostra todos do servidor, não só quem pode ler o canal em
+  que você está.
+- O avatar de um webhook só aparece quando está guardado no servidor. A mensagem
+  cuja imagem de autor é um endereço em outro site mostra as iniciais, para que
+  ler uma conversa nunca contate um terceiro.
 - Nas chamadas: sem o som da tela transmitida, sem volume por pessoa e sem
   escolha de fone Bluetooth.
 - GIFs anexados, imagens de prévia de links e emojis em APNG mostram só o primeiro

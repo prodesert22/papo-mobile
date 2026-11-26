@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -197,6 +198,7 @@ import chat.papo.mobile.resources.msg_reply
 import chat.papo.mobile.resources.msg_select
 import chat.papo.mobile.resources.msg_unpin
 import chat.papo.mobile.resources.msg_view_reactions
+import chat.papo.mobile.resources.members_open
 import chat.papo.mobile.resources.presence_away
 import chat.papo.mobile.resources.presence_busy
 import chat.papo.mobile.resources.presence_offline
@@ -240,6 +242,8 @@ fun ChatScreen(
     onJoinCall: (() -> Unit)?,
     /** Abre o perfil do usuário de id dado: o autor de uma mensagem ou, numa conversa direta, a outra pessoa. */
     onOpenProfile: (String) -> Unit,
+    /** Abre a lista de membros do servidor. Só é oferecida em canal: numa conversa direta o título já leva ao perfil. */
+    onOpenMembers: () -> Unit,
 ) {
     val chat = session.chat
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -452,6 +456,11 @@ fun ChatScreen(
                     if (pinnedListOffered(access, isDm, channel?.type)) {
                         IconButton(onClick = viewModel::showPinned) {
                             Icon(Icons.Filled.PushPin, contentDescription = stringResource(Res.string.chat_pinned))
+                        }
+                    }
+                    if (!isDm) {
+                        IconButton(onClick = onOpenMembers) {
+                            Icon(Icons.Filled.Group, contentDescription = stringResource(Res.string.members_open))
                         }
                     }
                 },

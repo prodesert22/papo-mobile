@@ -3,10 +3,12 @@ package chat.papo.mobile.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -45,6 +47,7 @@ import chat.papo.mobile.ui.components.LocalPlatformUi
 import chat.papo.mobile.ui.components.PlatformUi
 import chat.papo.mobile.ui.home.HomeScreen
 import chat.papo.mobile.ui.lock.LockScreen
+import chat.papo.mobile.ui.members.MembersDrawer
 import chat.papo.mobile.ui.profile.ProfileScreen
 import chat.papo.mobile.ui.profile.ProfileViewModel
 import chat.papo.mobile.ui.search.SearchScreen
@@ -199,23 +202,32 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String) {
                     val target = if (route.messageId != null && route.messageAt != null) MessageTarget(route.messageId, route.messageAt) else null
                     ChatViewModel(accountSession, route.channelId, target)
                 }
-                ChatScreen(
-                    session = accountSession,
-                    viewModel = vm,
-                    onBack = { navController.popBackStack() },
-                    onSearch = { navController.navigate(SearchRoute(route.accountId, route.channelId)) },
-                    onSwitch = { navController.navigate(SwitcherRoute(route.accountId, route.channelId)) },
-                    onJoinCall = if (session.calls.supported) {
-                        {
-                            session.calls.join(accountSession, route.channelId)
-                            // Se a chamada já está aberta por baixo desta conversa, a conversa sai da frente dela.
-                            navController.navigate(CallRoute) { popUpTo<CallRoute> { inclusive = true } }
-                        }
-                    } else {
-                        null
-                    },
-                    onOpenProfile = { userId -> navController.navigate(ProfileRoute(route.accountId, userId)) { launchSingleTop = true } },
-                )
+                val openProfile = { userId: String ->
+                    navController.navigate(ProfileRoute(route.accountId, userId)) { launchSingleTop = true }
+                }
+                // A gaveta fica dentro do destino: o voltar do sistema a fecha antes de sair da conversa.
+                val members = rememberDrawerState(DrawerValue.Closed)
+                val membersScope = rememberCoroutineScope()
+                MembersDrawer(session = accountSession, state = members, onOpenProfile = openProfile) {
+                    ChatScreen(
+                        session = accountSession,
+                        viewModel = vm,
+                        onBack = { navController.popBackStack() },
+                        onSearch = { navController.navigate(SearchRoute(route.accountId, route.channelId)) },
+                        onSwitch = { navController.navigate(SwitcherRoute(route.accountId, route.channelId)) },
+                        onJoinCall = if (session.calls.supported) {
+                            {
+                                session.calls.join(accountSession, route.channelId)
+                                // Se a chamada já está aberta por baixo desta conversa, a conversa sai da frente dela.
+                                navController.navigate(CallRoute) { popUpTo<CallRoute> { inclusive = true } }
+                            }
+                        } else {
+                            null
+                        },
+                        onOpenProfile = openProfile,
+                        onOpenMembers = { membersScope.launch { members.open() } },
+                    )
+                }
             }
         }
         composable<ProfileRoute> { entry ->
