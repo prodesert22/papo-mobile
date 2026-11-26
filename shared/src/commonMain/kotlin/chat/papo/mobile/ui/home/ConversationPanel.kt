@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -173,8 +174,16 @@ fun ConversationPanelHost(
     val scope = rememberCoroutineScope()
     val stripPx = with(density) { ParkedStrip.toPx() }
     var widthPx by remember { mutableIntStateOf(0) }
-    val settled = state.settledValue
-    val open = settled == PanelValue.Open
+    // A posição decide se a conversa está estacionada, não o `settledValue`: o arraste que vem pela rolagem aninhada (sobre
+    // as mensagens) anda por `dispatchRawDelta`, fora de um `anchoredDrag`, e o assentado ficaria "aberto" com o painel
+    // já parado à direita — sem a faixa, e com o toque nela caindo na conversa de baixo.
+    val open by remember(state) {
+        derivedStateOf {
+            val offset = state.offset
+            val closed = state.anchors.positionOf(PanelValue.Closed)
+            if (offset.isNaN() || closed.isNaN()) state.settledValue == PanelValue.Open else offset < closed - 1f
+        }
+    }
 
     // Passa do meio, ou da velocidade mínima de arremesso do Compose, e o painel segue para o lado que o dedo levava.
     val fling = AnchoredDraggableDefaults.flingBehavior(state = state, positionalThreshold = PanelThreshold, animationSpec = PanelFling)
