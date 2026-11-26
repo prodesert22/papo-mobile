@@ -99,6 +99,17 @@ class ConversationPanelState internal constructor(
         startup = StartupOpening.Done
     }
 
+    /**
+     * O painel está parado fechado, com a lista à vista (ou ainda não foi medido). Pela posição, não pelo `settledValue`,
+     * que não muda quando o arraste vem pela rolagem aninhada (ver [ConversationPanelHost]).
+     */
+    internal val isClosed: Boolean
+        get() {
+            val offset = anchored.offset
+            val closed = anchored.anchors.positionOf(PanelValue.Closed)
+            return if (offset.isNaN() || closed.isNaN()) anchored.settledValue == PanelValue.Closed else offset >= closed - 1f
+        }
+
     /** Fecha o painel, deixando a lista à vista. */
     fun close() {
         request = PanelRequest(PanelValue.Closed)

@@ -51,12 +51,13 @@ release notes in [releases/](../releases/) describe each version's changes.
   the channel list to the left to return to it. The panel
   follows your finger and settles open or closed when you let go, and the back
   button and gesture close it too. Each account keeps its own last conversation,
-  and after the app locks no conversation waits off screen. Opening the app, or
-  unlocking it, opens the first text channel of the selected account in the
-  panel once the channel list has loaded, one time only: if you open another
-  conversation, switch accounts or leave the main screen before then, or the
-  account has no text channel you can read, the channel list stays. It also
-  stays when there is no connection or the session has ended. Messages that
+  and after the app locks no conversation waits off screen. Opening the app,
+  unlocking it or coming back to it with the channel list on screen opens a
+  conversation of the selected account in the panel: the one you had open
+  there, or else the first text channel of the list, as soon as the channels
+  arrive from the server. Coming back to a conversation or another screen leaves
+  you there; without a text channel you can read, without a connection or with
+  the session ended, the channel list stays. Messages that
   arrive in a conversation waiting off screen stay unread.
   A message swiped to the left still replies, and areas that scroll sideways,
   such as the attachment previews, take the swipe first.

@@ -7,6 +7,8 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -22,15 +24,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
-import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -85,6 +87,7 @@ import chat.papo.mobile.ui.switcher.QuickSwitcherViewModel
 import chat.papo.mobile.ui.theme.PapoTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.stringResource
 
@@ -194,6 +197,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
         panel.open(accountId, chat)
     }
     OpenTopChatOnStart(session, panel, navController, openChat)
+    ReopenChatOnReturn(session, panel, navController, openChat)
 
     // Uma tela nova entra deslizando da borda direita por cima da anterior, que fica parada embaixo, e sai pelo mesmo
     // caminho. No gesto de voltar ela acompanha o dedo; o padrão da biblioteca era encolher a tela para o centro.
@@ -388,6 +392,36 @@ private fun OpenTopChatOnStart(
         panel.startup = step.next
         val channelId = step.open ?: return@LaunchedEffect
         shownId?.let { openChat(it, ParkedChat(channelId)) }
+    }
+}
+
+/**
+ * Voltar ao app (do segundo plano, de outro app, da tela apagada) com a lista de canais à vista é abrir o app de novo: a
+ * conversa da conta volta ao painel — a que estava estacionada nele, ou, sem ela, o canal de texto do topo (pela mesma
+ * abertura de [OpenTopChatOnStart]). Quem volta numa conversa, ou noutra tela (busca, configurações, chamada), fica onde
+ * estava. Girar o aparelho recria a composição sem passar por aqui: só conta a volta depois de uma parada vista por ela.
+ */
+@Composable
+private fun ReopenChatOnReturn(
+    session: AppSession,
+    panel: ConversationPanelState,
+    navController: NavHostController,
+    openChat: (accountId: String, chat: ParkedChat) -> Unit,
+) {
+    val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
+    val activeId by session.accounts.activeId.collectAsStateWithLifecycle()
+    val shownId = (accounts.firstOrNull { it.id == activeId } ?: accounts.firstOrNull())?.id
+    var stopped by remember { mutableStateOf(false) }
+    LifecycleStartEffect(Unit) {
+        if (stopped) {
+            stopped = false
+            val onHome = navController.previousBackStackEntry == null
+            if (onHome && panel.isClosed && shownId != null) {
+                val parked = panel.chats[shownId]
+                if (parked != null) openChat(shownId, parked) else panel.startup = StartupOpening.Fresh
+            }
+        }
+        onStopOrDispose { stopped = true }
     }
 }
 
