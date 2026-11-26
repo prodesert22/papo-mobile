@@ -37,6 +37,7 @@ fun createAndroidGraph(context: Context, activities: ActivityHolder): AppGraph {
             dispatchers = AppDispatchers(Dispatchers.Main.immediate, Dispatchers.IO, Dispatchers.Default, backgroundDispatcher),
             mediaDirectory = java.io.File(app.cacheDir, "media").absolutePath,
             voice = WebRtcVoiceEngineFactory(app, ActivityRequests(app, activities)),
+            videoPosters = AndroidVideoPosterExtractor(),
             appVersion = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty(),
         ),
     )

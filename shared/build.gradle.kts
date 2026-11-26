@@ -72,6 +72,15 @@ kotlin {
             implementation(libs.androidx.fragment)
             implementation(libs.androidx.sqlite)
             implementation(libs.accompanist.drawablepainter)
+            implementation(libs.media3.exoplayer)
+            implementation(libs.media3.ui)
+            // O módulo declara o motor Ktor Android como `api`, mas o código dele só usa o
+            // `HttpClient` que recebe: o motor é o OkHttp do PapoClient. Sem a exclusão o Gradle
+            // traria o ktor-client-android 3.5.1 ao lado do ktor-client-core 3.6.1. Uma dependência
+            // do catálogo é imutável, por isso a notação em texto para poder excluir.
+            implementation(libs.media3.datasource.ktor.get().let { "${it.group}:${it.name}:${it.version}" }) {
+                exclude(group = "io.ktor", module = "ktor-client-android")
+            }
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

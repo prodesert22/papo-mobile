@@ -5,6 +5,7 @@ import chat.papo.mobile.core.crypto.CryptoException
 import chat.papo.mobile.core.crypto.toHex
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -26,7 +27,8 @@ class MediaCache(
     private val memoryBudget: Int = 24 * 1024 * 1024,
     private val maxDiskEntry: Int = 16 * 1024 * 1024,
 ) {
-    private val mutex = Mutex()
+    // internal só para os testes: a contenção do mutex exige threads reais, então eles o seguram à mão.
+    internal val mutex = Mutex()
     private val memory = LinkedHashMap<String, ByteArray>()
     private var memoryUsed = 0
     private val inFlight = HashMap<String, CompletableDeferred<ByteArray?>>()
@@ -52,7 +54,9 @@ class MediaCache(
             pending.completeExceptionally(e)
             throw e
         } finally {
-            mutex.withLock { inFlight.remove(name) }
+            // Roda mesmo com quem busca cancelado: sem NonCancellable, o withLock lança
+            // CancellationException sob contenção e a entrada fica em inFlight para sempre.
+            withContext(NonCancellable) { mutex.withLock { inFlight.remove(name) } }
         }
     }
 

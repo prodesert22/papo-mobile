@@ -117,4 +117,9 @@ dependencies {
     androidTestImplementation(libs.coroutines.test)
     androidTestImplementation(libs.sqldelight.android.driver)
     androidTestImplementation(libs.accompanist.drawablepainter)
+    // A fonte de dados do player (PapoDataSourceTest): Media3 de compilação, um motor HTTP simulado
+    // e o OkHttp de produção para os testes com socket de verdade.
+    androidTestImplementation(libs.media3.exoplayer)
+    androidTestImplementation(libs.ktor.client.mock)
+    androidTestImplementation(libs.ktor.client.okhttp)
 }

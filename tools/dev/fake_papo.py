@@ -36,6 +36,36 @@ Para mudar ao vivo, entre como o dono e use as rotas da OpenAPI (com cookie), qu
 `POST /users/{id}/roles` e `DELETE /users/{id}/roles/{role_id}` (`role_add`/`role_remove`),
 `PUT /channels/{id}/permissions/{role_id}` e `DELETE /channels/{id}/role/{role_id}` (`channel_update`).
 Os ids dos cargos são fixos (derivados do nome) e saem na linha de partida, junto com os dos usuários.
+
+Vídeos anexados (tudo desligado por padrão; sem estas variáveis o fake responde como sempre). `GET /attachments/{id}`
+atende `Range` como o `http.ServeContent` do servidor: 206 com `Content-Range` para um trecho (`N-M`, `N-`, `-N`), 200 sem
+`Range` (ou com vários trechos, que o fake não monta em multipart), 416 com `Content-Range: bytes */tamanho` para um
+trecho fora do arquivo e 416 para um `Range` ilegível; sempre com `Accept-Ranges: bytes`. O log da linha de comando mostra
+o `Range` e o status de cada pedido, para conferir que buscar no vídeo pede só o trecho novo.
+
+    FAKE_VIDEO_DIR=<pasta>    semeia no `papo` uma mensagem de `bia` para cada .mp4, .webm e .ogv da pasta (com
+                              largura e altura lidas pelo `ffprobe`, se existir) e mais quatro do menor arquivo:
+                              sensível, em retrato (360x640), sem dimensões e sem dimensões com uma miniatura do servidor
+                              (`thumbnail_id`, 96x64, que o servidor real só gera para imagem)
+    FAKE_VIDEO_KBPS=500       entrega os vídeos a 500 KB/s, para o player ter o que bufferizar
+    FAKE_VIDEO_401_ONCE=N     responde 401 uma vez, no N-ésimo pedido de vídeo desde a partida (1 = o primeiro): o
+                              cliente renova a sessão (`POST /auth/refresh`) e repete com o cookie novo
+
+Vídeos de embed (ligados por um link, sem variável). Uma mensagem com `https://videos.example.com/...` recebe, ~1 s
+depois de criada, um `message_embeds_update` com um embed `opengraph`: título (o nome do arquivo do link), imagem
+(`GET /embeds/{id}`, com `image_data`) e `video` com `mime_type` pela extensão (.webm, .ogv; senão `video/mp4`) e a URL
+do link. `GET /embeds/{id}/video` é o relay: serve, com `Range` como o anexo, o vídeo semeado por `FAKE_VIDEO_DIR` de
+mesmo nome que o fim do link, ou o primeiro do mesmo tipo; sem semente, 404 (o que o relay real faz com um vídeo que não
+serve). O relay segue `FAKE_VIDEO_KBPS` e `FAKE_VIDEO_401_ONCE`, que contam os pedidos dele junto com os dos anexos.
+
+    FAKE_RELAY_502=1          o relay responde 502 (falha na origem, ou as vagas globais do servidor cheias) a todo pedido
+
+Renovação da sessão (sempre ligada). `POST /auth/refresh` rotaciona o token como o servidor (`RefreshConnection`): troca o
+`Auth` por outro, com outro id de conexão e o mesmo usuário, no `Set-Cookie`. O token trocado ainda vale por 60 s (a janela de
+graça do servidor); reapresentado depois disso é reuso: o servidor revoga todas as sessões do usuário e responde 401. Um
+`refresh` com o token trocado devolve o token ativo da cadeia, sem rotacionar de novo.
+
+    FAKE_REFRESH_GRACE=0      janela de graça em segundos (60 por padrão); 0 faz o token trocado ser reuso de imediato
 """
 import base64
 import hashlib
@@ -44,6 +74,7 @@ import os
 import random
 import re
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -52,7 +83,8 @@ import uuid
 import zlib
 from datetime import datetime, timedelta, timezone
 from email.parser import BytesParser
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(sys.argv[1])
@@ -60,7 +92,10 @@ SERVER_PASSWORD = sys.argv[2] if len(sys.argv) > 2 else None
 NAME = f"Boteco {PORT}" if SERVER_PASSWORD is None else f"Clube Fechado {PORT}"
 
 USERS = {}      # username -> {id, password}
-SESSIONS = {}   # token -> {user, id, created}
+SESSIONS = {}   # token -> {user, id, created}: as sessões ativas
+REPLACED = {}   # token trocado pelo refresh -> {session, at, tip}: a sessão dele, quando foi trocado e o token que o substituiu
+REFRESH = {"grace": 60.0}   # FAKE_REFRESH_GRACE: segundos em que o token trocado ainda vale (RefreshGracePeriod do servidor)
+SESSION_COOKIE = "Auth=%s; Path=/; HttpOnly; SameSite=Strict"
 
 
 CHANNELS = [
@@ -78,6 +113,7 @@ READS = {}       # (user_id, channel_id) -> message_id
 DMS = {}         # dm_id -> (user_a, user_b)
 PINS = {}        # channel_id -> [message_id]
 FILES = {}       # attachment_id -> (mime, bytes)
+THUMBS = {}      # attachment_id -> (mime, bytes): miniatura de um anexo que não é imagem (o servidor real só gera para imagem)
 EMOJIS = []      # emojis do servidor, na ordem de criação: {id, name, format, image_blob, created_at}
 EMOJI_BUCKETS = {}  # cookie -> [fichas, instante]: limite de taxa como o padrão do backend (10/s, rajada 20)
 SOCKETS = []     # [(user_id, wfile, lock)]
@@ -130,6 +166,220 @@ ANIMATED_EMOJIS = {
         "YbU7YACD1Gx6ZrPDM93KO+Jv9Ldtdnim2fSMbJB0ByTpCqsdYbGAah2KNZhMd5RGzb6TfPg+"
     )),
 }
+
+
+# Tipos de vídeo que o servidor aceita como arquivo; o MIME do anexo é farejado no upload, aqui pela extensão.
+VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".ogv": "video/ogg"}
+GENERIC_TYPES = {"", "application/octet-stream"}
+VIDEO = {"kbps": 0.0, "expire_at": 0, "requests": 0}   # FAKE_VIDEO_KBPS, FAKE_VIDEO_401_ONCE e os pedidos de vídeo vistos
+CHUNK = 16384
+SEEDED = []     # vídeos semeados por FAKE_VIDEO_DIR: (nome, bytes, mime, largura, altura)
+
+# Embeds de vídeo: um link do `videos.example.com` vira um embed depois de um atraso, como o crawl em segundo plano do servidor.
+EMBED_LINK = re.compile(r"https://videos\.example\.com/[^\s<>\"]*", re.IGNORECASE)
+EMBED_DELAY = 1.0
+EMBEDS = {}     # embed_id -> {"view": o embed como o servidor o descreve, "channel_id", "image": bytes, "seed": vídeo semeado ou None}
+RELAY = {"fail": False}   # FAKE_RELAY_502
+
+
+def sniffed_mime(declared, file_name):
+    """O MIME de um anexo: o declarado, ou, se ele é genérico, o do vídeo que a extensão do nome indica."""
+    if declared in GENERIC_TYPES:
+        return VIDEO_TYPES.get(os.path.splitext(file_name or "")[1].lower(), "application/octet-stream")
+    return declared
+
+
+def range_spec(spec, size):
+    """Um item de `Range: bytes=`: (primeiro, último) inclusivos; "beyond" se cai fora do arquivo; None se não é legível."""
+    found = re.fullmatch(r"(\d*)-(\d*)", spec, re.ASCII)
+    if found is None or not any(found.groups()):
+        return None
+    first, last = found.groups()
+    if not first:   # "-N": os N últimos bytes
+        count = min(int(last), size)
+        return (size - count, size - 1) if count else "beyond"
+    if int(first) >= size:
+        return "beyond"
+    if last and int(last) < int(first):
+        return None
+    return int(first), min(int(last), size - 1) if last else size - 1
+
+
+def byte_range(header, size):
+    """Lê o `Range` de um pedido como o `http.ServeContent` do servidor (só a unidade `bytes`).
+
+    Devolve (tipo, trecho): ("partial", (primeiro, último)) com os dois inclusivos; ("full", None) sem `Range` ou com
+    vários trechos (o fake serve o arquivo inteiro, que o HTTP permite, em vez de montar multipart); ("unsatisfiable",
+    None) se nenhum trecho cai dentro do arquivo; ("invalid", None) se o cabeçalho não é legível.
+    """
+    if not header:
+        return "full", None
+    if not header.startswith("bytes="):
+        return "invalid", None
+    spans, beyond = [], False
+    for spec in (item.strip() for item in header[len("bytes="):].split(",") if item.strip()):
+        found = range_spec(spec, size)
+        if found is None:
+            return "invalid", None
+        if found == "beyond":
+            beyond = True
+        else:
+            spans.append(found)
+    if not spans:
+        return ("unsatisfiable", None) if beyond else ("full", None)
+    return ("partial", spans[0]) if len(spans) == 1 else ("full", None)
+
+
+def video_dimensions(path):
+    """Largura e altura do vídeo, lidas do contêiner pelo `ffprobe` (o servidor também as lê do contêiner); (None, None) sem ele."""
+    try:
+        done = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                               "-of", "csv=p=0", str(path)], capture_output=True, text=True, timeout=20)
+        width, height = done.stdout.strip().split(",")
+        return int(width), int(height)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None, None
+
+
+def video_attachment(name, data, mime, width, height, moderation="clean", thumbnail=False):
+    """Registra o arquivo de um vídeo e devolve o anexo como o servidor o descreve: sem miniatura (o servidor só a gera
+    para imagem), com as dimensões. Com `thumbnail` o anexo ganha uma miniatura PNG de 96x64, só para o app mostrá-la."""
+    aid = str(uuid.uuid4())
+    FILES[aid] = (mime, data)
+    if thumbnail:
+        THUMBS[aid] = ("image/png", png(255, 178, 56))
+    return {"id": aid, "mime_type": mime, "original_file_name": name, "size_bytes": len(data), "width": width, "height": height,
+            "thumbnail_id": aid if thumbnail else None, "thumbnail_width": 96 if thumbnail else None,
+            "thumbnail_height": 64 if thumbnail else None, "moderation_status": moderation}
+
+
+def seed_videos(folder):
+    """FAKE_VIDEO_DIR: uma mensagem de `bia` no `papo` para cada vídeo da pasta, e quatro variações dos metadados do menor."""
+    root = Path(folder)
+    files = sorted(p for p in root.iterdir() if p.suffix.lower() in VIDEO_TYPES) if root.is_dir() else []
+    if not files:
+        raise SystemExit("FAKE_VIDEO_DIR: nenhum .mp4, .webm ou .ogv em %s" % folder)
+    loaded = []
+    for path in files:
+        width, height = video_dimensions(path)
+        loaded.append((path.name, path.read_bytes(), VIDEO_TYPES[path.suffix.lower()], width, height))
+        new_message(PAPO, uid("bia"), "vídeo %s" % path.name, attachments=[video_attachment(*loaded[-1])])
+    SEEDED[:] = loaded
+    # Do menor arquivo (e, empatando, do de nome mais curto): as variações não pesam quando alguém as toca.
+    name, data, mime, width, height = min(loaded, key=lambda f: (len(f[1]), len(f[0])))
+    for label, change in (("sensível", {"moderation": "sensitive"}), ("em retrato (360x640)", {"width": 360, "height": 640}),
+                          ("sem dimensões", {"width": None, "height": None}),
+                          ("com miniatura do servidor", {"width": None, "height": None, "thumbnail": True})):
+        fields = {"width": width, "height": height, "moderation": "clean", **change}
+        new_message(PAPO, uid("bia"), "vídeo %s %s" % (name, label), attachments=[video_attachment(name, data, mime, **fields)])
+
+
+def video_settings():
+    """Lê FAKE_VIDEO_KBPS e FAKE_VIDEO_401_ONCE; valor ilegível derruba o fake na partida, não no primeiro pedido."""
+    try:
+        VIDEO["kbps"] = float(os.environ.get("FAKE_VIDEO_KBPS") or 0)
+        VIDEO["expire_at"] = int(os.environ.get("FAKE_VIDEO_401_ONCE") or 0)
+    except ValueError as error:
+        raise SystemExit("FAKE_VIDEO_KBPS e FAKE_VIDEO_401_ONCE: valor ilegível (%s)" % error)
+
+
+def video_session_expires():
+    """Conta um pedido de vídeo; é o que FAKE_VIDEO_401_ONCE manda responder 401."""
+    with LOCK:
+        VIDEO["requests"] += 1
+        return VIDEO["requests"] == VIDEO["expire_at"]
+
+
+def refresh_settings():
+    """Lê FAKE_REFRESH_GRACE; valor ilegível derruba o fake na partida, não no primeiro refresh."""
+    try:
+        REFRESH["grace"] = float(os.environ.get("FAKE_REFRESH_GRACE") or REFRESH["grace"])
+    except ValueError as error:
+        raise SystemExit("FAKE_REFRESH_GRACE: valor ilegível (%s)" % error)
+
+
+def open_session(username):
+    """Registra uma conexão de sessão nova do usuário e devolve o token dela."""
+    token = "jwt-" + uuid.uuid4().hex
+    SESSIONS[token] = {"user": username, "id": str(uuid.uuid4()), "created": now()}
+    return token
+
+
+def session_of(token):
+    """A sessão que o cookie `Auth` autentica, como o `CheckUserConnection` do servidor: o token ativo vale; o trocado pelo
+    refresh vale só na janela de graça. Depois dela é reuso: o servidor revoga todas as sessões do usuário e recusa."""
+    with LOCK:
+        if token in SESSIONS:
+            return SESSIONS[token]
+        replaced = REPLACED.get(token)
+        if replaced is None:
+            return None
+        if time.monotonic() - replaced["at"] < REFRESH["grace"]:
+            return replaced["session"]
+        user = replaced["session"]["user"]
+        for revoked in [t for t, v in SESSIONS.items() if v["user"] == user]:
+            del SESSIONS[revoked]
+        sys.stderr.write("token trocado reapresentado fora da janela de graça: sessões de %s revogadas\n" % user)
+        return None
+
+
+def refresh_session(token):
+    """O `RefreshConnection` do servidor: troca o token ativo por um novo (outro id de conexão, mesmo usuário) e devolve
+    (token novo, sessão nova). Um token já trocado (refresh concorrente) devolve o ativo da cadeia, sem trocar de novo.
+    Token desconhecido, ou de uma cadeia revogada, devolve None."""
+    with LOCK:
+        if token in SESSIONS:
+            old = SESSIONS.pop(token)
+            fresh = open_session(old["user"])
+            REPLACED[token] = {"session": old, "at": time.monotonic(), "tip": fresh}
+            return fresh, SESSIONS[fresh]
+        while token in REPLACED:
+            token = REPLACED[token]["tip"]
+        return (token, SESSIONS[token]) if token in SESSIONS else None
+
+
+def embed_seed(link):
+    """O vídeo semeado que o relay serve para o link e o MIME que o embed anuncia: o de mesmo nome que o fim do link, senão o
+    primeiro do tipo da extensão (mp4 se a extensão não é de vídeo). Sem semente, (None, mime)."""
+    name = unquote(urlparse(link).path.rsplit("/", 1)[-1])
+    mime = VIDEO_TYPES.get(os.path.splitext(name)[1].lower(), "video/mp4")
+    seed = next((v for v in SEEDED if v[0] == name), None) or next((v for v in SEEDED if v[2] == mime), None)
+    return seed, mime
+
+
+def new_embed(channel_id, link):
+    """Registra o embed de um link e devolve a forma que o servidor manda nas mensagens e no evento (sem `image_data`)."""
+    seed, mime = embed_seed(link)
+    name = unquote(urlparse(link).path.rsplit("/", 1)[-1])
+    embed = {"id": str(uuid.uuid4()), "source_type": "link", "fetch_method": "opengraph", "provider": None,
+             "site_name": "videos.example.com", "url": link, "title": name or "Vídeo de teste",
+             "description": "Vídeo de teste, servido pelo relay do fake.",
+             "thumbnail": {"mime_type": "image/png", "width": 320, "height": 180}, "image": None,
+             "video": {"url": link, "mime_type": mime, "width": seed[3] if seed else None, "height": seed[4] if seed else None},
+             "created_at": now(), "fetched_at": now()}
+    EMBEDS[embed["id"]] = {"view": embed, "channel_id": channel_id, "image": png(35, 120, 200, 320, 180), "seed": seed}
+    return embed
+
+
+def publish_embeds(channel_id, message_id, links):
+    """O fim do crawl: guarda os embeds na mensagem e avisa quem lê o canal, a menos que ela já tenha sido apagada."""
+    with LOCK:
+        message = next((m for m in MESSAGES.get(channel_id, []) if m["id"] == message_id), None)
+        if message is None:
+            return
+        message["embeds"] = [new_embed(channel_id, link) for link in links]
+        embeds = list(message["embeds"])
+    emit({"type": "message_embeds_update", "channel_id": channel_id, "message_id": message_id, "embeds": embeds},
+         only=audience(channel_id))
+
+
+def crawl_links(message):
+    """Agenda o embed dos links de vídeo da mensagem (os distintos, na ordem do texto); sem link, nada acontece."""
+    links = list(dict.fromkeys(EMBED_LINK.findall(message["content"] or "")))
+    if links:
+        timer = threading.Timer(EMBED_DELAY, publish_embeds, (message["channel_id"], message["id"], links))
+        timer.daemon = True
+        timer.start()
 
 
 def stamp():
@@ -535,7 +785,10 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("%s %s\n" % (self.command, self.path))
+        wanted = self.headers.get("Range") if getattr(self, "headers", None) else None
+        # Com `Range` o pedido é de vídeo: o trecho e o status mostram que buscar não baixa o começo de novo.
+        status = " -> %s" % args[1] if wanted and len(args) > 1 else ""
+        sys.stderr.write("%s %s%s%s\n" % (self.command, self.path, " Range: " + wanted if wanted else "", status))
 
     def cookie(self):
         for part in self.headers.get("Cookie", "").split(";"):
@@ -572,20 +825,79 @@ class Handler(BaseHTTPRequestHandler):
         self.problem(403, "Acesso negado", detail)
 
     def session(self):
-        s = SESSIONS.get(self.cookie())
+        s = session_of(self.cookie())
         if s is None:
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
         return s
 
-    def raw(self, status, mime, data):
-        self.send_response(status)
+    def attachment(self, file_id, thumbnail=False):
+        """`GET /attachments/{id}` como o `http.ServeContent` do servidor: 200, 206, 416 e `Accept-Ranges`. Vídeo pode ser
+        entregue devagar (FAKE_VIDEO_KBPS) e ter um 401 simulado (FAKE_VIDEO_401_ONCE). Com `thumbnail` (`/thumbnail`) serve a
+        miniatura própria do anexo, se ele tem uma; senão o próprio arquivo, como o fake sempre fez para imagens."""
+        mime, data = THUMBS[file_id] if thumbnail and file_id in THUMBS else FILES[file_id]
+        video = mime.startswith("video/")
+        if video and video_session_expires():
+            sys.stderr.write("401 simulado por FAKE_VIDEO_401_ONCE\n")
+            return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+        self.serve(mime, data, VIDEO["kbps"] if video else 0)
+
+    def embed(self, embed_id, relay, me):
+        """`GET /embeds/{id}` (o embed com `image_data`) e `GET /embeds/{id}/video` (o relay, que serve o vídeo semeado com
+        `Range`). Embed de canal que o usuário não lê, sem vídeo semeado ou desconhecido é 404; FAKE_RELAY_502 faz o relay responder 502."""
+        if relay and video_session_expires():
+            sys.stderr.write("401 simulado por FAKE_VIDEO_401_ONCE\n")
+            return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+        found = EMBEDS.get(embed_id)
+        if found is None or not has_channel_flag(found["channel_id"], me, "read_channel") or (relay and found["seed"] is None):
+            return self.problem(404, "Recurso não encontrado", "vídeo de embed não encontrado" if relay else "embed não encontrado")
+        if not relay:
+            return self.send(200, dict(found["view"], image_data=base64.b64encode(found["image"]).decode(), author_image_data=None))
+        if RELAY["fail"]:
+            return self.problem(502, "Mídia indisponível", "falha ao carregar vídeo do embed")
+        _, data, mime, _, _ = found["seed"]
+        self.serve(mime, data, VIDEO["kbps"])
+
+    def serve(self, mime, data, kbps):
+        """Responde com `data` como o `http.ServeContent`: 200, 206 ou 416, e `Accept-Ranges`; a `kbps` KB/s se for maior que 0."""
+        size = len(data)
+        kind, span = byte_range(self.headers.get("Range", ""), size)
+        if kind in ("invalid", "unsatisfiable"):
+            text = b"invalid range" if kind == "invalid" else b"invalid range: failed to overlap"
+            self.send_response(416)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            if kind == "unsatisfiable":
+                self.send_header("Content-Range", "bytes */%d" % size)
+            self.send_header("Content-Length", str(len(text)))
+            self.end_headers()
+            self.wfile.write(text)
+            return
+        first, last = span if kind == "partial" else (0, size - 1)
+        self.send_response(206 if kind == "partial" else 200)
         self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Accept-Ranges", "bytes")
+        if kind == "partial":
+            self.send_header("Content-Range", "bytes %d-%d/%d" % (first, last, size))
+        self.send_header("Content-Length", str(last - first + 1))
         self.end_headers()
-        self.wfile.write(data)
+        self.stream(data, first, last + 1, kbps)
+
+    def stream(self, data, start, stop, kbps):
+        """Escreve data[start:stop], no ritmo de `kbps` KB/s se for maior que 0. Quem desiste no meio (buscar em outro ponto
+        fecha a conexão) só encerra esta resposta."""
+        chunk = min(CHUNK, max(1024, int(kbps * 1024 / 20))) if kbps > 0 else CHUNK
+        begin, sent = time.monotonic(), 0
+        try:
+            for offset in range(start, stop, chunk):
+                piece = data[offset:min(offset + chunk, stop)]
+                self.wfile.write(piece)
+                sent += len(piece)
+                if kbps > 0:
+                    time.sleep(max(0.0, begin + sent / (kbps * 1024) - time.monotonic()))
+        except OSError:
+            self.close_connection = True
 
     def websocket(self):
-        s = SESSIONS.get(self.cookie())
+        s = session_of(self.cookie())
         if s is None:
             return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
         me = uid(s["user"])
@@ -656,13 +968,23 @@ class Handler(BaseHTTPRequestHandler):
             self.problem(404, "Não encontrado", "Sem avatar")
             return True
         m = re.fullmatch(r"/attachments/([^/]+)(/thumbnail)?", path)
-        if m and self.cookie() in SESSIONS and m.group(1) in FILES:
-            self.raw(200, *FILES[m.group(1)])
+        if m and session_of(self.cookie()) is None:
+            self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
             return True
-        s = SESSIONS.get(self.cookie())
+        if m and m.group(1) in FILES:
+            self.attachment(m.group(1), thumbnail=m.group(2) is not None)
+            return True
+        s = session_of(self.cookie())
+        embed = re.fullmatch(r"/embeds/([^/]+)(/video)?", path)
+        if embed and s is None:
+            self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+            return True
         if s is None:
             return False
         me = uid(s["user"])
+        if embed:
+            self.embed(embed.group(1), bool(embed.group(2)), me)
+            return True
         if path == "/channels":
             out = []
             for c in CHANNELS:
@@ -781,7 +1103,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = part.get_payload(decode=True)
                 if name == "attachments":
                     aid = str(uuid.uuid4())
-                    mime = part.get_content_type()
+                    mime = sniffed_mime(part.get_content_type(), part.get_filename())
                     FILES[aid] = (mime, data)
                     image = mime.startswith("image/")
                     attachments.append({"id": aid, "mime_type": mime, "original_file_name": part.get_filename() or "arquivo", "size_bytes": len(data),
@@ -801,6 +1123,7 @@ class Handler(BaseHTTPRequestHandler):
             READS[(me, m["channel_id"])] = m["id"]
             event = {k: m[k] for k in ("id", "channel_id", "author_id", "content", "reply_to", "attachments", "created_at")}
             emit(dict(event, type="message"), only=audience(m["channel_id"]))
+            crawl_links(m)
             if m["channel_id"] in DMS:
                 for u in set(DMS[m["channel_id"]]):
                     emit({"type": "dm_update", "dm": dm_view(m["channel_id"], u)}, only={u})
@@ -1053,7 +1376,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.problem(401, "Não autorizado", "Senha do servidor incorreta")
         elif self.path in ("/auth/login", "/auth/register"):
-            if SERVER_PASSWORD is not None and self.cookie() != "temp-token" and self.cookie() not in SESSIONS:
+            if SERVER_PASSWORD is not None and self.cookie() != "temp-token" and session_of(self.cookie()) is None:
                 return self.problem(401, "Não autorizado", "Servidor não público: valide a senha do servidor antes")
             username, password = data.get("username", ""), data.get("password", "")
             if self.path == "/auth/register":
@@ -1066,17 +1389,18 @@ class Handler(BaseHTTPRequestHandler):
             user = USERS.get(username)
             if user is None or user["password"] != password:
                 return self.problem(401, "Não autorizado", "Usuário ou senha incorretos")
-            token = "jwt-" + uuid.uuid4().hex
-            SESSIONS[token] = {"user": username, "id": str(uuid.uuid4()), "created": now()}
+            token = open_session(username)
             self.send(200, {"user": {"id": user["id"], "username": username}, "connection_violation": False},
-                      cookie=f"Auth={token}; Path=/; HttpOnly; SameSite=Strict")
+                      cookie=SESSION_COOKIE % token)
         elif self.path == "/auth/logout":
             SESSIONS.pop(self.cookie(), None)
             self.send(204, cookie="Auth=; Path=/; Max-Age=0")
         elif self.path == "/auth/refresh":
-            s = self.session()
-            if s:
-                self.send(200, {"connection": {"id": s["id"], "created_at": s["created"]}})
+            renewed = refresh_session(self.cookie())
+            if renewed is None:
+                return self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
+            token, s = renewed
+            self.send(200, {"connection": {"id": s["id"], "created_at": s["created"]}}, cookie=SESSION_COOKIE % token)
         elif self.path == "/auth/drop_connection":
             s = self.session()
             if s:
@@ -1156,6 +1480,11 @@ if __name__ == "__main__":
             # Frações de 0, .25, .5 e .75 s: o Go corta os zeros à direita, então os textos têm tamanhos diferentes.
             moment = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=i // 2, microseconds=(i % 4) * 250000)
             react(crowd, keys[i % 3], uid(name), nano(moment))
+    video_settings()
+    refresh_settings()
+    RELAY["fail"] = os.environ.get("FAKE_RELAY_502", "") not in ("", "0")
+    if os.environ.get("FAKE_VIDEO_DIR"):
+        seed_videos(os.environ["FAKE_VIDEO_DIR"])
     if os.environ.get("FAKE_PERMISSIONS"):
         setup_access(permission_spec(os.environ["FAKE_PERMISSIONS"]))
         announce_access()

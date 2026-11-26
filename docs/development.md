@@ -40,7 +40,12 @@ starts a fake one that covers sign-in, text chat and message search, with the
 users `ana` (`Senha@123`) and `bia` (`Senha@456`). It does not replace a real
 server and has no voice calls. With `FAKE_PERMISSIONS=demo` it also has roles, channel
 permissions and an owner (`dona`, `Senha@000`); the docstring of `fake_papo.py`
-describes the scenario and how to load your own from a JSON file.
+describes the scenario and how to load your own from a JSON file. `FAKE_VIDEO_DIR`
+points it at a folder of videos to seed (served with `Range`), `FAKE_VIDEO_KBPS`
+throttles them and `FAKE_VIDEO_401_ONCE=N` answers 401 to the N-th video request.
+A message with a `https://videos.example.com/...` link gets a video embed about a second
+later (`GET /embeds/{id}` and the `/embeds/{id}/video` relay, which serves a seeded video
+with `Range`), and `FAKE_RELAY_502=1` makes the relay answer 502.
 
 ## Release builds
 

@@ -207,6 +207,9 @@ import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.components.formatBytes
 import chat.papo.mobile.ui.components.rememberMediaImage
 import chat.papo.mobile.ui.components.text
+import chat.papo.mobile.ui.media.PlayingVideo
+import chat.papo.mobile.ui.media.VideoViewer
+import chat.papo.mobile.ui.media.findOpenVideo
 import chat.papo.mobile.ui.settings.ConfirmDialog
 import kotlinx.coroutines.delay
 import kotlin.math.max
@@ -280,6 +283,8 @@ fun ChatScreen(
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
     var viewing by remember { mutableStateOf<AttachmentDto?>(null) }
     var reactorsOf by remember { mutableStateOf<ReactorsRequest?>(null) }
+    // Um vídeo por vez. Gira o aparelho e a atividade se recria: a chave e o ponto sobrevivem, e a mídia sai das mensagens de novo.
+    var playing by rememberSaveable(stateSaver = PlayingVideo.Saver) { mutableStateOf<PlayingVideo?>(null) }
     // Perder a leitura com uma folha ou diálogo aberto: eles agiriam sobre uma conversa que a pessoa já não vê.
     LaunchedEffect(access.readDenied) {
         if (access.readDenied) {
@@ -289,6 +294,7 @@ fun ChatScreen(
             confirmDelete = null
             viewing = null
             reactorsOf = null
+            playing = null
         }
     }
     val listState = rememberLazyListState()
@@ -510,6 +516,7 @@ fun ChatScreen(
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
                                 onOpenImage = { viewing = it },
                                 onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
+                                onPlay = { playing = PlayingVideo(it.key) },
                             )
                         }
                     }
@@ -676,6 +683,19 @@ fun ChatScreen(
         }
     }
     viewing?.let { ImageViewer(session, it) { viewing = null } }
+    playing?.let { current ->
+        val video = remember(current, messages) { findOpenVideo(session.client.server, messages, current.key) }
+        // Sem o vídeo nas mensagens (apagado, ou ainda carregando depois de girar) o visualizador não aparece.
+        if (video != null) {
+            VideoViewer(
+                session = session,
+                video = video,
+                startAtMs = current.positionMs,
+                onPosition = { current.positionMs = it },
+                onDismiss = { playing = null },
+            )
+        }
+    }
     state.pinnedList?.takeUnless { access.readDenied }?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
 }
 

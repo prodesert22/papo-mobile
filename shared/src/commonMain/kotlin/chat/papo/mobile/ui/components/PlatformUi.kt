@@ -4,6 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import chat.papo.mobile.data.api.OutgoingFile
+import chat.papo.mobile.data.api.PapoClient
+import chat.papo.mobile.media.PlayableMedia
+import chat.papo.mobile.media.PlaybackFailure
 import chat.papo.mobile.voice.VideoTrackHandle
 
 /** O que a interface precisa da plataforma e não existe no Compose comum. */
@@ -15,6 +18,38 @@ interface PlatformUi {
     /** Desenha uma faixa de vídeo de chamada. [fill] recorta para preencher; senão mostra inteira. */
     @Composable
     fun VideoView(track: VideoTrackHandle, modifier: Modifier, fill: Boolean)
+
+    /**
+     * Toca [media] com os controles do sistema, a partir de [startAtMs]. Os pedidos saem pelo
+     * `http` de [client], que deve ser o da conta dona da mensagem: dele vêm o cookie `Auth` e a
+     * renovação única da sessão. Nada vai para o disco. O player nasce com esta composição e é
+     * liberado quando ela sai (travar o app também a tira). Fora da tela ele pausa e não retoma
+     * sozinho.
+     *
+     * [onPosition] recebe a posição atual em milissegundos, para a tela guardá-la e voltar ao
+     * mesmo ponto depois de girar o aparelho. [onFailure] recebe o motivo uma vez, depois de a
+     * política de repetição (`retryDelay`) se esgotar; o texto e as ações do erro são da tela comum.
+     * [onControlsVisible] diz quando os controles do player aparecem e somem, para a tela esconder
+     * junto o que ela desenha por cima do vídeo.
+     */
+    @Composable
+    fun VideoPlayer(
+        client: PapoClient,
+        media: PlayableMedia,
+        startAtMs: Long,
+        modifier: Modifier,
+        onPosition: (Long) -> Unit,
+        onFailure: (PlaybackFailure) -> Unit,
+        onControlsVisible: (Boolean) -> Unit = {},
+    )
+
+    /**
+     * Esconde as barras do sistema (de estado e de navegação) enquanto esta composição estiver na tela, com o gesto
+     * de deslizar da borda para vê-las de passagem; elas voltam quando a composição sai. Vale para a janela do
+     * diálogo que contém a chamada: fora de um diálogo não faz nada, porque a janela do app não é de quem chama.
+     */
+    @Composable
+    fun HideSystemBars()
 
     /**
      * A fonte de emojis do aparelho sabe desenhar [emoji]? Versões antigas do Android
