@@ -355,4 +355,10 @@
     <!-- 02 · trilha A · onda 3 (áudio) -->
     <!-- 02 · trilha B · onda 3 (links, teclado) -->
     <string name="embed_youtube_unavailable">O player do YouTube não funciona neste aparelho. Use Abrir no YouTube.</string>
+    <string name="link_confirm_title">Abrir este link?</string>
+    <string name="link_confirm_body">O texto do link não mostra para onde ele leva. Ele abre:</string>
+    <string name="link_confirm_open">Abrir</string>
+    <string name="msg_links">Links</string>
+    <string name="msg_link_copy">Copiar link</string>
+    <string name="msg_link_open">Abrir link</string>
 </resources>

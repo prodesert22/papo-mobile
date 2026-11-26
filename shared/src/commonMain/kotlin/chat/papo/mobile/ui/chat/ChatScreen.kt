@@ -116,6 +116,7 @@ import chat.papo.mobile.chat.EmojiCompletion
 import chat.papo.mobile.chat.EmojiPickerModel
 import chat.papo.mobile.chat.EmojiRef
 import chat.papo.mobile.chat.MAX_ATTACHMENTS
+import chat.papo.mobile.chat.Markdown
 import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.ServerEmoji
@@ -1340,6 +1341,7 @@ private fun MessageActionsSheet(
     val serverEmojis by session.emojis.state.collectAsStateWithLifecycle()
     val recents by session.recentEmojis.items.collectAsStateWithLifecycle()
     val quick = remember(recents, serverEmojis) { EmojiPickerModel.quickReactions(recents, serverEmojis) }
+    val links = remember(message.content) { Markdown.linksIn(message.content) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 16.dp)) {
@@ -1386,6 +1388,16 @@ private fun MessageActionsSheet(
                     onSelectText()
                     onDismiss()
                 }
+            }
+            if (links.isNotEmpty()) {
+                MessageLinksSection(
+                    links,
+                    onCopy = {
+                        clipboard.setText(AnnotatedString(it))
+                        onDismiss()
+                    },
+                    onOpened = onDismiss,
+                )
             }
             if (offer.pin) {
                 SheetAction(Icons.Filled.PushPin, stringResource(if (pinned) Res.string.msg_unpin else Res.string.msg_pin)) {

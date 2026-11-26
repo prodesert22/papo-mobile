@@ -31,7 +31,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,6 +86,7 @@ import chat.papo.mobile.chat.Message
 import chat.papo.mobile.chat.TextSpan
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.hidesDestination
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.core.formatTime
 import chat.papo.mobile.data.api.AttachmentDto
@@ -138,6 +141,10 @@ private const val MARKER_GAP = "\u00A0"
  *
  * O `@everyone` só sai em destaque, como uma menção, com [highlightEveryone]: ele vale quando o autor pode
  * usá-lo (`authorCanEveryone`). Sem isso é texto comum, como qualquer outro.
+ *
+ * Um link cujo texto esconde o destino (`[banco](https://outro.example)`, ver [hidesDestination]) não abre sozinho com
+ * [onConfirmLink]: o toque chama a função com o destino, para quem mostra pedir a confirmação. Sem ela, e para os links
+ * que mostram o próprio destino, o toque abre o link direto.
  */
 fun messageText(
     content: String,
@@ -148,6 +155,7 @@ fun messageText(
     emojiIds: Map<String, String> = emptyMap(),
     lists: ListMetrics = DefaultListMetrics,
     highlightEveryone: Boolean = false,
+    onConfirmLink: ((String) -> Unit)? = null,
 ): MessageText {
     val used = LinkedHashSet<String>()
 
@@ -169,7 +177,15 @@ fun messageText(
             val style = spanStyle(span, accent, codeBackground, muted)
             val plain = spanText(span, nameOf)
             when {
-                span.link != null -> withLink(LinkAnnotation.Url(span.link, TextLinkStyles(style))) { append(plain) }
+                span.link != null -> {
+                    val styles = TextLinkStyles(style)
+                    val annotation = if (onConfirmLink != null && span.hidesDestination()) {
+                        LinkAnnotation.Clickable(span.link, styles) { onConfirmLink(span.link) }
+                    } else {
+                        LinkAnnotation.Url(span.link, styles)
+                    }
+                    withLink(annotation) { append(plain) }
+                }
                 span.code || span.mentionUserId != null || span.everyone -> withStyle(style) { append(plain) }
                 else -> withStyle(style) { appendEmojis(plain) }
             }
@@ -457,9 +473,12 @@ fun MessageBodyText(
     // Só mensagem com `:` depende da lista de emojis do servidor: as outras não refazem
     // o Markdown cada vez que a lista muda (ela chega aos poucos na primeira leitura).
     val relevantIds = if (':' in content) emojiIds else emptyMap()
+    // O link que o texto esconde só abre depois de o usuário ver o destino.
+    var pendingLink by remember { mutableStateOf<String?>(null) }
     val text = remember(content, users, accent, codeBackground, muted, relevantIds, lists, highlightEveryone) {
-        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds, lists, highlightEveryone)
+        messageText(content, { users[it]?.displayName }, accent, codeBackground, muted, relevantIds, lists, highlightEveryone) { pendingLink = it }
     }
+    pendingLink?.let { LinkConfirmDialog(it, onDismiss = { pendingLink = null }) }
     // Mensagem só de emoji aparece maior; as imagens acompanham o corpo do texto (em `em`).
     val jumbo = remember(content, relevantIds, unicodeEmojis) {
         EmojiText.isEmojiOnly(content, relevantIds, unicodeEmojis)
