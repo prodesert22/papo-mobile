@@ -126,6 +126,11 @@ os bytes mágicos, no máximo 2 MiB e 512 px (avatar) ou 2048 px (banner); banne
 documenta remover o avatar); `PUT /users/{id}/status` aceita `away`, `busy` ou nulo. Corpo acima de 4 MiB: 413. Eventos: `presence_update`
 (apelido, frase, digitação e status) depois do perfil e do status, `avatar_update` depois do avatar. O status escolhido pelo PUT vale na
 próxima conexão (`presence_sync`); o `status` semeado de `ana` e `caio` só aparece no perfil.
+
+Caixa de notificações (sempre ligada; regras lidas no código do servidor real, não observadas em execução): `GET
+/users/{eu}/notifications`, `PUT /users/{eu}/read_notification`, `new_notification` por mensagem, `PUT /channels/{id}/read`
+marcando as linhas do canal, `GET /dms/{id}` e `POST /channels/{id}/user/{eu}/settings` (`all` manda só o evento, com id efêmero;
+`off` não manda nada). Os detalhes estão na região "Notificações" do código. FAKE_NOTIFICATION_PAGE=N muda as 100 linhas por página.
 """
 import base64
 import hashlib
@@ -1395,7 +1400,7 @@ class Handler(BaseHTTPRequestHandler):
         if embed and s is None:
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
             return True
-        if s is None and path == "/users/blocks":
+        if s is None and (path == "/users/blocks" or NOTIFY_GETS.fullmatch(path)):
             self.problem(401, "Não autorizado", "Token ausente, inválido ou expirado")
             return True
         if s is None:
@@ -1406,13 +1411,15 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if serve_blocks_and_password(self, "GET", path, me, {}):
             return True
+        if serve_notifications(self, "GET", path, query, me, {}):
+            return True
         if path == "/channels":
             out = []
             for c in CHANNELS:
                 item = dict(c)
                 item["last_message"] = last_message(c["id"])
                 item["last_read_message"] = READS.get((me, c["id"]))
-                item["notification_settings"] = "only_mentions"
+                item["notification_settings"] = notify_setting(me, c["id"])
                 if ACCESS["on"]:
                     # Todos os canais que não são DM, sem filtrar leitura e com a última mensagem de canal que o usuário
                     # não lê: como o servidor, que deixa o app esconder. Cópia do defeito, não decisão.
@@ -1539,6 +1546,7 @@ class Handler(BaseHTTPRequestHandler):
             READS[(me, m["channel_id"])] = m["id"]
             event = {k: m[k] for k in ("id", "channel_id", "author_id", "content", "reply_to", "attachments", "created_at")}
             emit(dict(event, type="message"), only=audience(m["channel_id"]))
+            notify_message(m)
             crawl_links(m)
             if m["channel_id"] in DMS:
                 for u in set(DMS[m["channel_id"]]):
@@ -1547,6 +1555,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.problem(control["status"], "Erro simulado", "Mensagem criada, mas a resposta foi simulada como erro")
             return self.send(201, view(m, me))
         data = self.body()
+        if serve_notifications(self, method, path, parse_qs(url.query), me, data):
+            return
         if method == "POST" and path == "/search":
             found = search_messages(data, parse_qs(url.query), me)
             if found is None:
@@ -1579,6 +1589,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/channels/([^/]+)/read", path)
         if m:
             READS[(me, m.group(1))] = data["message_id"]
+            mark_channel_notifications(me, m.group(1), data["message_id"])
             return self.send(204)
         m = re.fullmatch(r"/channels/([^/]+)/messages/([^/]+)/pin", path)
         if m:
@@ -1983,6 +1994,185 @@ def consume_reset(handler, data):
     RESET_FLAG.discard(uid(info["user"]))
     revoke_connections(uid(info["user"]))
     handler.send(200, {"response": "Password updated successfully"})
+
+
+# ── Notificações: início ─────────────────────────────────────────────────────────────────────────
+# A caixa de notificações como o servidor a guarda (regras lidas no código dele, não observadas em execução). Tudo o que
+# é sobre elas fica entre este marco e o de fim; o resto do fake só chama `serve_notifications`, `notify_message`,
+# `mark_channel_notifications`, `notify_setting` e `seed_notifications`.
+#
+# Quem ganha uma linha por mensagem (`notify_message`): menção direta `@mention(<@id>)` (sem diferenciar maiúsculas, o id
+# comparado como está escrito; `<@id>` sozinho não vale), resposta a uma mensagem do usuário, `@everyone` (só se o autor
+# tem `everyone_message`; mensagem de webhook nunca) e toda mensagem de DM. O autor nunca é notificado e só quem lê o
+# canal entra. Com a preferência do canal em `all` e sem gatilho há só o evento, com um id efêmero e sem linha; com `off`,
+# nada. O `new_notification` (`id`, `user_id` do autor, `message_id`, `message_content` até 512) sai depois do `message`.
+# A linha nasce 3 ms depois da mensagem (`created_at` da notificação, não o da mensagem).
+#
+# `GET /users/{eu}/notifications`: 100 por página (FAKE_NOTIFICATION_PAGE muda), `order` desc por padrão, cursor
+# `since` + `last_id` (`since` sozinho: só as criadas depois, em qualquer ordem; `last_id` sozinho é ignorado). A linha de
+# uma mensagem apagada some da lista (o JOIN do servidor), mas continua existindo. `PUT /users/{eu}/read_notification`: de 1 a
+# 1000 ids; 404 só se nenhuma linha do usuário casou (uma já lida casa: 200); 400 fora disso. `PUT /channels/{id}/read` marca
+# as linhas do canal até a mensagem, na ordem `(created_at, id)` da mensagem, sem evento. `GET /dms/{id}` lê uma DM por id.
+# `POST /channels/{id}/user/{eu}/settings` grava `all`, `only_mentions` ou `off` e vale para as próximas mensagens.
+
+NOTIFICATIONS = {}      # user_id -> [{id, message_id, read, created_at}], na ordem em que nasceram
+NOTIFY_SETTINGS = {}    # (user_id, channel_id) -> "all" | "only_mentions" | "off"; sem entrada vale "only_mentions"
+NOTIFY_LAG = timedelta(milliseconds=3)
+NOTIFY_PAGE = int(os.environ.get("FAKE_NOTIFICATION_PAGE", "100"))
+NOTIFY_PREVIEW = 512
+NOTIFY_READ_MAX = 1000
+NOTIFY_VALUES = ("all", "only_mentions", "off")
+MENTION_RE = re.compile(r"@mention\(<@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>\)", re.I | re.A)
+EVERYONE_RE = re.compile(r"@everyone\b", re.I | re.A)   # `\b` ASCII, como o do Go
+NOTIFY_GETS = re.compile(r"/users/[^/]+/notifications|/dms/[^/]+")   # as leituras desta região: sem sessão, 401
+
+
+def notify_setting(user_id, channel_id):
+    return NOTIFY_SETTINGS.get((user_id, channel_id), "only_mentions")
+
+
+def message_index():
+    return {m["id"]: m for ms in MESSAGES.values() for m in ms}
+
+
+def notify_message(message, deliver=True):
+    """Cria as linhas que `message` gera e, com `deliver`, manda um `new_notification` a cada notificado. Chamar depois do
+    evento `message`. Devolve [(user_id, id do evento, a linha ou None)]."""
+    cid, author = message["channel_id"], message["author_id"]
+    content = message["content"] or ""
+    triggered = set(MENTION_RE.findall(content))
+    parent = message_index().get(message["reply_to"]) if message["reply_to"] else None
+    if parent is not None and parent["author_id"]:
+        triggered.add(parent["author_id"])
+    everyone = bool(author) and EVERYONE_RE.search(content) is not None and has_role_flag(author, "everyone_message")
+    readers = audience(cid)
+    created = nano(instant(message["created_at"]) + NOTIFY_LAG)
+    out = []
+    for user in USERS.values():
+        user_id = user["id"]
+        if user_id == author or (readers is not None and user_id not in readers):
+            continue
+        setting = notify_setting(user_id, cid)
+        if setting == "off":
+            continue
+        row = None
+        if cid in DMS or user_id in triggered or everyone:
+            row = {"id": str(uuid.uuid4()), "message_id": message["id"], "read": False, "created_at": created}
+            NOTIFICATIONS.setdefault(user_id, []).append(row)
+        elif setting != "all":
+            continue
+        out.append((user_id, row["id"] if row else str(uuid.uuid4()), row))
+    if deliver:
+        for user_id, event_id, _ in out:
+            emit({"type": "new_notification", "id": event_id, "user_id": author, "message_id": message["id"],
+                  "message_content": content[:NOTIFY_PREVIEW]}, only={user_id})
+    return out
+
+
+def notification_view(row, message):
+    out = {"id": row["id"], "message_id": message["id"], "channel_id": message["channel_id"], "author_id": message["author_id"],
+           "message_content": (message["content"] or "")[:NOTIFY_PREVIEW], "read": row["read"], "created_at": row["created_at"]}
+    if message["webhook_id"]:
+        out.update(webhook_id=message["webhook_id"], external_author=message["external_author"])
+    return out
+
+
+def notification_page(user_id, query):
+    """O corpo de `GET /users/{id}/notifications`, ou None se `order` ou `since` são inválidos."""
+    order, since, last_id = query.get("order", ["desc"])[0], query.get("since", [""])[0], query.get("last_id", [""])[0]
+    if order not in ("asc", "desc"):
+        return None
+    try:
+        after = instant(since) if since else None
+    except ValueError:
+        return None
+    index = message_index()
+    rows = [(instant(r["created_at"]), r["id"], r, index[r["message_id"]]) for r in NOTIFICATIONS.get(user_id, []) if r["message_id"] in index]
+    rows.sort(key=lambda r: (r[0], r[1]), reverse=order == "desc")
+    if after is not None and last_id:
+        rows = [r for r in rows if ((r[0], r[1]) < (after, last_id) if order == "desc" else (r[0], r[1]) > (after, last_id))]
+    elif after is not None:
+        rows = [r for r in rows if r[0] > after]
+    return {"notifications": [notification_view(r[2], r[3]) for r in rows[:NOTIFY_PAGE]], "has_more": len(rows) > NOTIFY_PAGE}
+
+
+def mark_channel_notifications(user_id, channel_id, message_id):
+    """`PUT /channels/{id}/read`: as linhas não lidas do usuário nesse canal, até a mensagem, na ordem `(created_at, id)`."""
+    index = message_index()
+    mark = index.get(message_id)
+    if mark is None or mark["channel_id"] != channel_id:
+        return
+    limit = (instant(mark["created_at"]), mark["id"])
+    for row in NOTIFICATIONS.get(user_id, []):
+        message = index.get(row["message_id"])
+        if row["read"] or message is None or message["channel_id"] != channel_id:
+            continue
+        if (instant(message["created_at"]), message["id"]) <= limit:
+            row["read"] = True
+
+
+def mark_notifications_read(handler, me, data):
+    ids = data.get("notification_ids")
+    if not isinstance(ids, list) or not 1 <= len(ids) <= NOTIFY_READ_MAX or not all(isinstance(i, str) and i for i in ids):
+        return handler.problem(400, "Parâmetro inválido", "notification_ids deve ter de 1 a %d ids" % NOTIFY_READ_MAX)
+    mine = {r["id"]: r for r in NOTIFICATIONS.get(me, [])}
+    hit = [mine[i] for i in set(ids) if i in mine]
+    if not hit:
+        return handler.problem(404, "Recurso não encontrado", "notificação não encontrada")
+    for row in hit:
+        row["read"] = True
+    handler.send(200, {"updated": len(hit)})
+
+
+def serve_notifications(handler, method, path, query, me, data):
+    """As rotas da caixa, `GET /dms/{id}` e a preferência por canal. Devolve False se `path` não é uma destas."""
+    found = re.fullmatch(r"/users/([^/]+)/(notifications|read_notification)", path)
+    if found and (found.group(2), method) in (("notifications", "GET"), ("read_notification", "PUT")):
+        if found.group(1) != me:
+            handler.forbidden("somente o próprio usuário pode acessar as notificações")
+        elif method == "PUT":
+            mark_notifications_read(handler, me, data)
+        else:
+            page = notification_page(me, query)
+            if page is None:
+                handler.problem(400, "Parâmetro inválido", "order deve ser asc ou desc e since deve ser uma data RFC 3339")
+            else:
+                handler.send(200, page)
+        return True
+    found = re.fullmatch(r"/dms/([^/]+)", path)
+    if found and method == "GET":
+        dm = DMS.get(found.group(1))
+        if dm is None or me not in dm:
+            handler.problem(404, "Recurso não encontrado", "conversa não encontrada")
+        elif blocked_between(*dm):
+            dm_blocked(handler)
+        else:
+            handler.send(200, dm_view(found.group(1), me))
+        return True
+    found = re.fullmatch(r"/channels/([^/]+)/user/([^/]+)/settings", path)
+    if found and method == "POST":
+        channel_id, target = found.groups()
+        if target != me:
+            handler.forbidden("somente o próprio usuário pode alterar a configuração")
+        elif channel_id not in DMS and not any(c["id"] == channel_id for c in CHANNELS):
+            handler.problem(404, "Recurso não encontrado", "canal não encontrado")
+        elif data.get("notification_settings") not in NOTIFY_VALUES:
+            handler.problem(400, "Parâmetro inválido", "notification_settings deve ser all, only_mentions ou off")
+        else:
+            NOTIFY_SETTINGS[(me, channel_id)] = data["notification_settings"]
+            handler.send(200, {"user_id": me, "channel_id": channel_id, "notification_settings": data["notification_settings"], "updated_at": now()})
+        return True
+    return False
+
+
+def seed_notifications():
+    """Linhas para o que já foi semeado: a menção e a resposta do `papo` e as DMs de `ana` e `bia`. Sem eventos."""
+    for ms in list(MESSAGES.values()):
+        for message in ms:
+            notify_message(message, deliver=False)
+
+
+# ── Notificações: fim ────────────────────────────────────────────────────────────────────────────
 
 
 # Limites do `POST /messages` no servidor de verdade (`handlers/messages.go`, `services/attachments.go`, `middleware/bodylimit.go`);
@@ -2470,5 +2660,6 @@ if __name__ == "__main__":
         announce_access()
     seed_track_a()
     seed_track_b()
+    seed_notifications()
     print(f"{NAME} em http://0.0.0.0:{PORT}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

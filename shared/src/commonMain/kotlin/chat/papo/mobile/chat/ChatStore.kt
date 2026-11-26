@@ -11,6 +11,7 @@ import chat.papo.mobile.data.api.DirectConversationDto
 import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.ExternalAuthorDto
 import chat.papo.mobile.data.api.MessageDto
+import chat.papo.mobile.data.api.MessageListResponse
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.PapoJson
 import chat.papo.mobile.data.api.ReactionRequest
@@ -28,9 +29,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
@@ -144,6 +149,14 @@ class ChatStore(
      * ainda faltar, e um canal sem leitura então mostra o aviso de acesso negado ao abrir.
      */
     val channelsSynced: StateFlow<Boolean> = _channelsSynced.asStateFlow()
+
+    private val _readMarks = MutableSharedFlow<ReadMark>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /**
+     * Cada leitura que o servidor aceitou (`PUT /channels/{id}/read`). Ele marca as notificações do canal até a mensagem
+     * e não avisa por evento; quem guarda cópia delas aplica o mesmo aqui ([markReadUpTo]).
+     */
+    val readMarks: SharedFlow<ReadMark> = _readMarks.asSharedFlow()
 
     val connection: StateFlow<WsState> get() = ws.state
 
@@ -401,9 +414,15 @@ class ChatStore(
      * um buraco entre eles, e o trecho guardado dá lugar à vizinhança: o canal
      * fica marcado em [detached] até [loadNewer] ou [refreshLatest] o levarem de
      * volta ao fim do histórico.
+     *
+     * Com [approximate], [createdAtIso] é o de uma notificação, que sai um pouco depois da mensagem: uma página
+     * decrescente a partir dele (com o id da mensagem como desempate) a contém, e o instante exato dela, lido ali,
+     * leva ao mesmo caminho acima. Quando a mensagem é a mais nova do canal, essa página já termina nela, e é
+     * ela que vira o trecho guardado. Se a página não a traz, ela foi apagada: [Located.Missing].
      */
-    suspend fun locate(channelId: String, messageId: String, createdAtIso: String): Located {
+    suspend fun locate(channelId: String, messageId: String, createdAtIso: String, approximate: Boolean = false): Located {
         position(channelId, messageId)?.let { return Located.Found(it) }
+        if (approximate) return locateFromNotification(channelId, messageId, createdAtIso)
         val after = reportingForbidden {
             api.messages(channelId, since = createdAtIso, lastId = messageId, order = "asc", limit = AROUND_NEWER)
         }
@@ -411,6 +430,23 @@ class ChatStore(
         val next = after.messages.firstOrNull() ?: return Located.Missing
         val before = reportingForbidden { api.messages(channelId, since = next.createdAt, lastId = next.id, limit = PAGE_SIZE) }
         if (before.messages.none { it.id == messageId }) return Located.Missing
+        return joinAround(channelId, messageId, before, after)
+    }
+
+    private suspend fun locateFromNotification(channelId: String, messageId: String, notifiedAtIso: String): Located {
+        val before = reportingForbidden { api.messages(channelId, since = notifiedAtIso, lastId = messageId, limit = PAGE_SIZE) }
+        val message = before.messages.firstOrNull { it.id == messageId } ?: return Located.Missing
+        val after = reportingForbidden {
+            api.messages(channelId, since = message.createdAt, lastId = messageId, order = "asc", limit = AROUND_NEWER)
+        }
+        return joinAround(channelId, messageId, before, after)
+    }
+
+    /**
+     * Grava a vizinhança de uma mensagem: [before] é a página decrescente que a contém e [after], a crescente que
+     * vem depois dela. Ver [locate] para o que acontece com o trecho que já estava guardado.
+     */
+    private suspend fun joinAround(channelId: String, messageId: String, before: MessageListResponse, after: MessageListResponse): Located {
         val around = before.messages + after.messages
         withContext(io) {
             q.transaction {
@@ -588,17 +624,29 @@ class ChatStore(
     }
 
     suspend fun markRead(channelId: String, messageId: String) {
+        var createdAt: String? = null
         val alreadyRead = withContext(io) {
             val channel = q.selectChannel(channelId).executeAsOneOrNull()
             val dm = q.selectDm(channelId).executeAsOneOrNull()
             val read = (channel?.last_read_message ?: dm?.last_read_message) == messageId && (dm?.unread_count ?: 0L) == 0L
+            createdAt = q.selectMessage(messageId).executeAsOneOrNull()?.created_at
             q.transaction {
                 q.setChannelRead(messageId, channelId)
                 q.setDmRead(messageId, channelId)
             }
             read
         }
-        if (!alreadyRead) api.markRead(channelId, messageId)
+        if (alreadyRead) return
+        api.markRead(channelId, messageId)
+        _readMarks.tryEmit(ReadMark(channelId, messageId, createdAt))
+    }
+
+    /** Onde estão as mensagens guardadas de [ids]; as que o aparelho não tem ficam de fora. */
+    suspend fun storedPositions(ids: Collection<String>): Map<String, MessagePosition> {
+        if (ids.isEmpty()) return emptyMap()
+        return withContext(io) {
+            q.selectMessagePositions(ids.toList()).executeAsList().associate { it.id to MessagePosition(it.created_us, it.id) }
+        }
     }
 
     // Pins

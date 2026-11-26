@@ -340,6 +340,37 @@ data class SearchResponse(
     @SerialName("has_more") val hasMore: Boolean = false,
 )
 
+/**
+ * Uma linha da caixa de notificações (`Notification`). [messageContent] vem truncado a 512 caracteres e, como a linha
+ * junta a mensagem, traz o conteúdo atual dela. [createdAt] é o da notificação, um pouco depois do da mensagem.
+ */
+@Serializable
+data class NotificationDto(
+    val id: String,
+    @SerialName("message_id") val messageId: String,
+    @SerialName("channel_id") val channelId: String,
+    @SerialName("author_id") val authorId: String? = null,
+    @SerialName("webhook_id") val webhookId: String? = null,
+    @SerialName("external_author") val externalAuthor: ExternalAuthorDto? = null,
+    @SerialName("message_content") val messageContent: String = "",
+    val read: Boolean = false,
+    @SerialName("created_at") val createdAt: String,
+)
+
+/** Uma página de `GET /users/{id}/notifications`; [hasMore] vale para a direção pedida. */
+@Serializable
+data class NotificationListDto(
+    val notifications: List<NotificationDto> = emptyList(),
+    @SerialName("has_more") val hasMore: Boolean = false,
+)
+
+/** Corpo de `PUT /users/{id}/read_notification`: de 1 a 1000 ids. */
+@Serializable
+data class MarkNotificationsReadRequest(@SerialName("notification_ids") val notificationIds: List<String>)
+
+@Serializable
+data class MarkNotificationsReadResponse(val updated: Int = 0)
+
 @Serializable
 data class IceServerDto(val urls: List<String> = emptyList(), val username: String? = null, val credential: String? = null)
 
