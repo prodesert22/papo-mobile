@@ -5,7 +5,6 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
@@ -16,10 +15,7 @@ import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.gestures.snapTo
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.absolutePadding
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.AbsoluteRoundedCornerShape
 import androidx.compose.foundation.shape.CornerSize
@@ -38,7 +34,6 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.RectangleShape
@@ -47,12 +42,11 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -124,12 +118,11 @@ class ConversationPanelState internal constructor(chats: ParkedChats, open: Bool
 fun rememberConversationPanelState(): ConversationPanelState =
     rememberSaveable(saver = ConversationPanelState.Saver) { ConversationPanelState() }
 
-/**
- * A faixa da conversa que fica à vista na borda direita com a lista aberta: tocar nela ou puxá-la traz a conversa de volta.
- * O painel é sempre estacionado à direita da tela, como as telas empilhadas entram e saem: por isso as medidas daqui são
- * absolutas (esquerda e direita), e não do começo e do fim, que se invertem nos idiomas da direita para a esquerda.
+/*
+ * O painel é sempre estacionado à direita da tela, inteiro fora dela, como as telas empilhadas entram e saem: por isso as
+ * medidas daqui são absolutas (esquerda e direita), e não do começo e do fim, que se invertem nos idiomas da direita para
+ * a esquerda.
  */
-private val ParkedStrip = 56.dp
 
 /** Quanto a lista anda para a esquerda enquanto o painel a cobre. */
 private val ListParallax = 40.dp
@@ -153,11 +146,11 @@ private val PanelFling = spring<Float>(dampingRatio = Spring.DampingRatioNoBounc
 
 /**
  * A tela principal ([home]: contas e lista de canais) com a conversa ([chat]) num painel por cima dela, como no Discord.
- * [parked] é a última conversa da conta que o [home] mostra; sem ela não há painel, faixa nem gesto.
+ * [parked] é a última conversa da conta que o [home] mostra; sem ela não há painel nem gesto.
  *
  * O painel acompanha o dedo nos dois sentidos, a qualquer momento, e solto assenta aberto ou fechado pelo ponto e pela
- * velocidade. Fechado, a conversa fica estacionada à direita e deixa uma faixa à vista. O arraste começa em qualquer lugar
- * (a lista, a faixa, a conversa) e só assume depois da folga de toque no sentido horizontal; quem tem rolagem horizontal
+ * velocidade. Fechado, a conversa fica estacionada à direita, inteira fora da tela, e volta puxando a lista para a
+ * esquerda (ou pela ação de acessibilidade da lista). O arraste começa em qualquer lugar (a lista, a conversa) e só assume depois da folga de toque no sentido horizontal; quem tem rolagem horizontal
  * própria, ou responde mensagens, fica com o arraste antes e só entrega o que sobra (rolagem aninhada).
  *
  * [chat] recebe a conversa e se ela está à vista (`active`): estacionada, ela não conta as mensagens novas como lidas.
@@ -170,13 +163,11 @@ fun ConversationPanelHost(
     chat: @Composable (chat: ParkedChat, active: Boolean) -> Unit,
 ) {
     val state = panel.anchored
-    val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val stripPx = with(density) { ParkedStrip.toPx() }
     var widthPx by remember { mutableIntStateOf(0) }
     // A posição decide se a conversa está estacionada, não o `settledValue`: o arraste que vem pela rolagem aninhada (sobre
     // as mensagens) anda por `dispatchRawDelta`, fora de um `anchoredDrag`, e o assentado ficaria "aberto" com o painel
-    // já parado à direita — sem a faixa, e com o toque nela caindo na conversa de baixo.
+    // já parado à direita, e a lista seguiria tratada como coberta.
     val open by remember(state) {
         derivedStateOf {
             val offset = state.offset
@@ -256,21 +247,34 @@ fun ConversationPanelHost(
                 state.updateAnchors(
                     DraggableAnchors {
                         PanelValue.Open at 0f
-                        PanelValue.Closed at (size.width - stripPx).coerceAtLeast(0f)
+                        PanelValue.Closed at size.width.toFloat()
                     },
                 )
             }
             .nestedScroll(connection)
             .anchoredDraggable(state = state, orientation = Orientation.Horizontal, enabled = parked != null, flingBehavior = fling),
     ) {
-        // A lista deixa a faixa livre, para o que ela tem na borda direita (os botões do topo) não ficar sob a conversa.
+        val resume = stringResource(Res.string.conversation_panel_resume)
         Box(
             Modifier
                 .fillMaxSize()
-                .absolutePadding(right = if (parked != null) ParkedStrip else 0.dp)
                 .graphicsLayer { translationX = -ListParallax.toPx() * openFraction() }
-                // Coberta pelo painel, a lista não é lida nem percorrida pelo leitor de tela.
-                .then(if (open && parked != null) Modifier.clearAndSetSemantics {} else Modifier),
+                // Coberta pelo painel, a lista não é lida nem percorrida pelo leitor de tela; com a conversa estacionada fora
+                // da tela, quem não faz o gesto volta a ela pela ação da lista.
+                .then(
+                    when {
+                        parked == null -> Modifier
+                        open -> Modifier.clearAndSetSemantics {}
+                        else -> Modifier.semantics {
+                            customActions = listOf(
+                                CustomAccessibilityAction(resume) {
+                                    scope.launch { state.animateTo(PanelValue.Open, PanelSlide) }
+                                    true
+                                },
+                            )
+                        }
+                    },
+                ),
         ) { home() }
 
         if (parked != null) {
@@ -280,8 +284,9 @@ fun ConversationPanelHost(
                     .fillMaxSize()
                     .graphicsLayer {
                         val offset = state.offset
-                        // Antes de medir não se sabe onde o painel está: nada dele aparece.
-                        alpha = if (offset.isNaN()) 0f else 1f
+                        // Antes de medir não se sabe onde o painel está, e parado fechado ele está todo fora da tela: nada dele
+                        // aparece, nem a sombra na borda.
+                        alpha = if (offset.isNaN() || !open) 0f else 1f
                         translationX = if (offset.isNaN()) 0f else offset
                         // Sombra e cantos crescem com o quanto o painel saiu da borda: aberto, ele é a tela inteira.
                         val reveal = if (offset.isNaN()) 0f else (offset / EdgeReveal.toPx()).coerceIn(0f, 1f)
@@ -292,20 +297,9 @@ fun ConversationPanelHost(
                     }
                     .background(MaterialTheme.colorScheme.background),
             ) {
-                // Estacionada, a conversa fica só na vista: o leitor de tela vai para a faixa.
+                // Estacionada fora da tela, a conversa não é lida pelo leitor de tela.
                 Box(Modifier.fillMaxSize().then(if (open) Modifier else Modifier.clearAndSetSemantics {})) {
                     chat(parked, open)
-                }
-                if (!open) {
-                    val resume = stringResource(Res.string.conversation_panel_resume)
-                    Box(
-                        Modifier
-                            .align(AbsoluteAlignment.CenterLeft)
-                            .fillMaxHeight()
-                            .width(ParkedStrip)
-                            .clickable(role = Role.Button) { scope.launch { state.animateTo(PanelValue.Open, PanelSlide) } }
-                            .semantics { contentDescription = resume },
-                    )
                 }
             }
         }
