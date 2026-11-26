@@ -1,5 +1,8 @@
 package chat.papo.mobile.ui.media
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -148,8 +151,12 @@ internal fun VideoViewer(
     val download = video.attachment?.let { rememberAttachmentDownload(session, it) }
     var attempt by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<PlaybackFailure?>(null) }
+    // A barra de título acompanha os controles do player: some com eles e deixa o vídeo limpo.
+    var controlsVisible by remember { mutableStateOf(true) }
     val resume = remember { Resume(startAtMs) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // Tela cheia de verdade: sem a largura padrão do diálogo e sem deixar a janela ao redor das barras do sistema (o
+    // player as esconde). A barra de título abaixo já respeita os recuos, então nada importante fica sob elas.
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             val failed = failure
             if (failed == null) {
@@ -166,6 +173,7 @@ internal fun VideoViewer(
                             onPosition(it)
                         },
                         onFailure = { failure = it },
+                        onControlsVisible = { controlsVisible = it },
                     )
                 }
             } else {
@@ -180,26 +188,33 @@ internal fun VideoViewer(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            Row(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            // Sem o player (painel de falha) não há controles, e o título com o fechar fica sempre à vista.
+            AnimatedVisibility(
+                visible = controlsVisible || failure != null,
+                modifier = Modifier.align(Alignment.TopStart),
+                enter = fadeIn(),
+                exit = fadeOut(),
             ) {
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Filled.Close, contentDescription = stringResource(Res.string.action_close), tint = Color.White)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                        .padding(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(Res.string.action_close), tint = Color.White)
+                    }
+                    Text(
+                        video.media.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis,
+                        modifier = Modifier.weight(1f).padding(end = 12.dp),
+                    )
                 }
-                Text(
-                    video.media.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis,
-                    modifier = Modifier.weight(1f).padding(end = 12.dp),
-                )
             }
         }
     }

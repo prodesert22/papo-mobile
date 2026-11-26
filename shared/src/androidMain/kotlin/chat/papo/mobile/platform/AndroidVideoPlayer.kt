@@ -1,6 +1,7 @@
 package chat.papo.mobile.platform
 
 import android.content.Context
+import android.view.View
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -80,6 +81,8 @@ private class PlayerHolder(context: Context, client: PapoClient) : RememberObser
  *
  * O player vale para o par ([client], [media]); [startAtMs] só conta na primeira composição, porque
  * a tela devolve a posição que recebe de [onPosition] e ela não pode reiniciar o vídeo.
+ * [onControlsVisible] acompanha os controles do `PlayerView`: começa verdadeiro (o player os mostra ao se ligar) e
+ * depois segue cada vez que eles somem ou voltam.
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -90,11 +93,13 @@ internal fun AndroidVideoPlayer(
     modifier: Modifier,
     onPosition: (Long) -> Unit,
     onFailure: (PlaybackFailure) -> Unit,
+    onControlsVisible: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val currentOnPosition by rememberUpdatedState(onPosition)
     val currentOnFailure by rememberUpdatedState(onFailure)
+    val currentOnControlsVisible by rememberUpdatedState(onControlsVisible)
     val player = remember(client, media.key) { PlayerHolder(context, client) }.player
 
     DisposableEffect(player) {
@@ -129,6 +134,8 @@ internal fun AndroidVideoPlayer(
             }
         }
         player.addListener(listener)
+        // O `PlayerView` novo mostra os controles; a tela pode ter ficado com o estado de um player anterior.
+        currentOnControlsVisible(true)
         player.setMediaItem(MediaItem.fromUri(media.url), startAtMs.coerceAtLeast(0L))
         player.playWhenReady = true
 
@@ -174,9 +181,23 @@ internal fun AndroidVideoPlayer(
                 // Um vídeo só: anterior e próximo não levam a lugar nenhum.
                 setShowPreviousButton(false)
                 setShowNextButton(false)
+                // Arrastar a barra de busca só busca ao soltar: cada busca em trecho não carregado é um pedido
+                // `Range`, e o servidor limita os pedidos por endereço (10 por segundo). É o padrão do Media3;
+                // fica explícito porque ligar o "scrubbing" mandaria um pedido por movimento do dedo.
+                setTimeBarScrubbingEnabled(false)
+                setControllerVisibilityListener(
+                    PlayerView.ControllerVisibilityListener { visibility -> currentOnControlsVisible(visibility == View.VISIBLE) },
+                )
             }
         },
-        update = { view -> view.player = player },
+        update = { view ->
+            if (view.player !== player) {
+                view.player = player
+                // Com o vídeo já carregando o `PlayerView` não mostra os controles sozinho, e a tela (que começa
+                // contando com eles) ficaria com a barra de título à vista sem eles. Mostrados, somem juntos.
+                view.showController()
+            }
+        },
         // O dono do player o libera; a view só precisa largá-lo antes.
         onRelease = { view -> view.player = null },
     )

@@ -83,7 +83,8 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
         modifier: Modifier,
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
-    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure)
+        onControlsVisible: (Boolean) -> Unit,
+    ) = AndroidVideoPlayer(client, media, startAtMs, modifier, onPosition, onFailure, onControlsVisible)
 
     private fun describe(uri: Uri): OutgoingFile {
         var name = uri.lastPathSegment ?: "arquivo"

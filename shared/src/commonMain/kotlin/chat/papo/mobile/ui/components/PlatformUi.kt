@@ -29,6 +29,8 @@ interface PlatformUi {
      * [onPosition] recebe a posição atual em milissegundos, para a tela guardá-la e voltar ao
      * mesmo ponto depois de girar o aparelho. [onFailure] recebe o motivo uma vez, depois de a
      * política de repetição (`retryDelay`) se esgotar; o texto e as ações do erro são da tela comum.
+     * [onControlsVisible] diz quando os controles do player aparecem e somem, para a tela esconder
+     * junto o que ela desenha por cima do vídeo.
      */
     @Composable
     fun VideoPlayer(
@@ -38,6 +40,7 @@ interface PlatformUi {
         modifier: Modifier,
         onPosition: (Long) -> Unit,
         onFailure: (PlaybackFailure) -> Unit,
+        onControlsVisible: (Boolean) -> Unit = {},
     )
 
     /**
