@@ -8,6 +8,8 @@ import chat.papo.mobile.media.embedAuthorKey
 import chat.papo.mobile.media.embedImageKey
 import chat.papo.mobile.media.fetchEmbedAuthorIcon
 import chat.papo.mobile.media.fetchEmbedImage
+import chat.papo.mobile.media.hasAuthorIcon
+import chat.papo.mobile.media.hasImage
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -22,7 +24,9 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** A imagem do embed e o ícone do autor vêm do mesmo `GET /embeds/{id}`: um pedido só, e os dois no cache cifrado. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -51,6 +55,24 @@ class EmbedMediaTest {
         thumbnail = if (withImage) EmbedMediaDto(mimeType = "image/png", width = 120, height = 63) else null,
         author = EmbedAuthorDto(name = "Robô de Build", media = EmbedMediaDto(mimeType = "image/png", width = 64, height = 64)),
     )
+
+    @Test
+    fun oEmbedTemImagemComThumbnailOuImagemESemNenhumaDasDuasNao() {
+        val png = EmbedMediaDto(mimeType = "image/png")
+        assertTrue(EmbedDto(id = "e", thumbnail = png).hasImage())
+        assertTrue(EmbedDto(id = "e", image = png).hasImage())
+        assertTrue(EmbedDto(id = "e", thumbnail = png, image = png).hasImage())
+        // O vídeo e o ícone do autor não são a imagem que o servidor serve como `image_data`.
+        assertFalse(EmbedDto(id = "e", video = png, author = EmbedAuthorDto(media = png)).hasImage())
+    }
+
+    @Test
+    fun oIconeDoAutorSoExisteQuandoOAutorTemMidia() {
+        val png = EmbedMediaDto(mimeType = "image/png")
+        assertTrue(EmbedDto(id = "e", author = EmbedAuthorDto(name = "Robô de Build", media = png)).hasAuthorIcon())
+        assertFalse(EmbedDto(id = "e", author = EmbedAuthorDto(name = "Robô de Build")).hasAuthorIcon())
+        assertFalse(EmbedDto(id = "e", thumbnail = png).hasAuthorIcon())
+    }
 
     @Test
     fun umPedidoTrazAImagemEGravaOIconeNoCache() = runTest {
