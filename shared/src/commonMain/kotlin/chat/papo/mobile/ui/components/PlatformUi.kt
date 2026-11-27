@@ -127,6 +127,15 @@ interface PlatformUi {
      * chega com [OutgoingFile.unavailable]. Roda na thread principal, dentro da entrega do conteúdo.
      */
     fun receiveMedia(onMedia: (List<OutgoingFile>) -> Unit): Modifier
+
+    // 0.9.0 · item 14 (links externos)
+
+    /**
+     * Abre [url] fora do app (no navegador ou no app que o sistema escolher). Só abre o que [chat.papo.mobile.core.safeExternalUrl] aceita
+     * (`http` e `https`, regra 6); qualquer outro esquema não abre nada. Devolve false quando não abriu: link recusado ou
+     * nenhum app para abri-lo.
+     */
+    fun openExternalUrl(url: String): Boolean
 }
 
 /** Tamanho máximo de cada imagem ou vídeo recebido pelo teclado ou colado: ele fica na memória até ser enviado ou tirado. */

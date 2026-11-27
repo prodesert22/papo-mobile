@@ -1,10 +1,13 @@
 package chat.papo.mobile.platform
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import androidx.annotation.DrawableRes
+import androidx.core.content.pm.PackageInfoCompat
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.PlatformDeps
 import chat.papo.mobile.core.AppDispatchers
+import chat.papo.mobile.core.BuildInfo
 import chat.papo.mobile.security.LockState
 import io.ktor.client.engine.okhttp.OkHttp
 import android.os.Process
@@ -53,7 +56,7 @@ fun createAndroidGraph(
             mediaDirectory = java.io.File(app.cacheDir, "media").absolutePath,
             voice = WebRtcVoiceEngineFactory(app, requests),
             videoPosters = AndroidVideoPosterExtractor(),
-            appVersion = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty(),
+            build = buildInfo(app),
             webPlayerData = YouTubeWebData,
             audio = androidAudioEngineFactory(app),
             notifier = notifier,
@@ -66,4 +69,14 @@ fun createAndroidGraph(
     // O Android mostra os pushes sozinho, no canal que o manifesto aponta: ele precisa existir antes da primeira mensagem.
     if (pushTokens.available) graph.scope.launch { notifier.ensurePushChannel() }
     return graph
+}
+
+/** A compilação instalada, lida do pacote; sem o pacote (não acontece no aparelho), uma vazia. */
+private fun buildInfo(app: Context): BuildInfo {
+    val info = runCatching { app.packageManager.getPackageInfo(app.packageName, 0) }.getOrNull() ?: return BuildInfo()
+    return BuildInfo(
+        versionName = info.versionName.orEmpty(),
+        versionCode = PackageInfoCompat.getLongVersionCode(info),
+        debuggable = app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
+    )
 }

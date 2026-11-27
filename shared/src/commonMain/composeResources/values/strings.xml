@@ -649,6 +649,8 @@
     <string name="settings_account_local">Esta conta no aparelho</string>
     <string name="settings_server_info">Informações do servidor</string>
     <string name="channel_settings">Configurações do canal</string>
+    <string name="about_title">Sobre o Papo Mobile</string>
+    <string name="licenses_title">Licenças de terceiros</string>
 
     <!-- 0.9.0 · trilha A: configurações e segurança -->
     <!-- fim da trilha A -->

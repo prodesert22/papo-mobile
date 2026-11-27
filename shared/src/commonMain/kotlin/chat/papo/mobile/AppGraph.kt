@@ -1,5 +1,6 @@
 package chat.papo.mobile
 
+import chat.papo.mobile.core.BuildInfo
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.account.AccountManager
 import chat.papo.mobile.account.AccountResources
@@ -58,8 +59,8 @@ class PlatformDeps(
     val voice: VoiceEngineFactory? = null,
     /** Tira o quadro da capa dos vídeos; null onde a plataforma ainda não sabe, e então os cartões ficam sem capa. */
     val videoPosters: VideoPosterExtractor? = null,
-    /** Versão instalada do app, como mostrada ao usuário. */
-    val appVersion: String = "",
+    /** A compilação instalada: versão mostrada ao usuário, número da versão e se é de desenvolvimento. */
+    val build: BuildInfo = BuildInfo(),
     /** Apaga o que o player web do YouTube deixou em claro; null onde a plataforma não tem um. Roda quando a sessão fecha. */
     val webPlayerData: WebPlayerData? = null,
     /** Motor do player de áudio; null onde a plataforma ainda não tem um, e então os áudios aparecem como arquivos. */
@@ -106,7 +107,9 @@ class AppSession internal constructor(
 class AppGraph(private val platform: PlatformDeps) {
     val scope = CoroutineScope(SupervisorJob() + platform.dispatchers.main)
 
-    val appVersion: String get() = platform.appVersion
+    val build: BuildInfo get() = platform.build
+
+    val appVersion: String get() = platform.build.versionName
 
     /** A permissão de notificar do sistema; null onde a plataforma não tem notificações. */
     val notificationPermission: NotificationPermission? get() = platform.notificationPermission

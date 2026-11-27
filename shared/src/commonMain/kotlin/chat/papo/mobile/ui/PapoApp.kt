@@ -90,6 +90,8 @@ import chat.papo.mobile.ui.search.SearchViewModel
 import chat.papo.mobile.ui.notifications.AccountNotificationsScreen
 import chat.papo.mobile.ui.notifications.InboxScreen
 import chat.papo.mobile.ui.notifications.InboxViewModel
+import chat.papo.mobile.ui.about.AboutScreen
+import chat.papo.mobile.ui.about.LicensesScreen
 import chat.papo.mobile.ui.channel.ChannelSettingsScreen
 import chat.papo.mobile.ui.settings.AccountLocalScreen
 import chat.papo.mobile.ui.settings.DeviceDataScreen
@@ -157,6 +159,14 @@ private data class DevicesRoute(val accountId: String)
 /** O servidor da conta [accountId]: nome, dono, contagens. */
 @Serializable
 private data class ServerInfoRoute(val accountId: String)
+
+/** Sobre o Papo Mobile: versão, links do projeto, licença. */
+@Serializable
+private data object AboutRoute
+
+/** As licenças das bibliotecas e dos recursos que vão no app. */
+@Serializable
+private data object LicensesRoute
 
 /** Configurações do canal [channelId] da conta [accountId] (nome e descrição); só para quem tem `manage_channels`. */
 @Serializable
@@ -486,6 +496,15 @@ private fun Unlocked(
             ServerThemeScreen(session, route.accountId, onBack = { navController.popBackStack() })
         }
         // ---- fim da trilha B ----
+
+        // ---- 0.9.0 · item 14: sobre e licenças (onda 2: Sobre da trilha A, Licenças da trilha D) ----
+        composable<AboutRoute> {
+            AboutScreen(graph.build, onLicenses = { navController.navigate(LicensesRoute) }, onBack = { navController.popBackStack() })
+        }
+        composable<LicensesRoute> {
+            LicensesScreen(onBack = { navController.popBackStack() })
+        }
+        // ---- fim do item 14 ----
 
         // ---- 0.9.0 · trilha D: configurações do canal (só a trilha D muda este bloco) ----
         composable<ChannelSettingsRoute> { entry ->
