@@ -95,6 +95,8 @@ class ChannelNotificationLevels(
     private val reload: suspend () -> Unit,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
+    /** Chamado num 403: o que o app sabia das permissões ficou velho (`ChatStore.requestRefresh`). */
+    private val onForbidden: () -> Unit = {},
 ) : ServerChannelLevels {
     private val lock = Mutex()
 
@@ -130,6 +132,7 @@ class ChannelNotificationLevels(
                 throw e
             } catch (e: Throwable) {
                 status = (e as? ApiException)?.status
+                if (status == 403) onForbidden()
                 classifyMutation(e)
             }
             // A mudança pode ter sido gravada: conferir no servidor, que é uma leitura, e não mandar de novo.

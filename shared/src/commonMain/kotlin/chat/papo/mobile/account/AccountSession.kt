@@ -63,7 +63,7 @@ class AccountSession(
     val permissions = AccessStore(db.metaQueries, api, scope, io, server = auth::server)
     val chat = ChatStore(userId, db, api, ws, scope, io, permissions)
     /** O nível de notificação que o servidor guarda por canal; é o que vale nos canais sincronizados. */
-    private val channelLevels = ChannelNotificationLevels(api, db.chatQueries, userId, chat.channels, chat::reloadChannels, scope, io)
+    private val channelLevels = ChannelNotificationLevels(api, db.chatQueries, userId, chat.channels, chat::reloadChannels, scope, io, chat::requestRefresh)
     /** Silêncio, supressão e nível das notificações desta conta; ficam no banco cifrado dela (o nível sincronizado, no servidor). */
     val notificationPrefs = NotificationPrefs(db.metaQueries, scope, io, channelLevels)
     /** Caixa de notificações desta conta, só em memória; as contagens de menção saem dela. */

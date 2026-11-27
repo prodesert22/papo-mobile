@@ -91,6 +91,7 @@ class ChannelNotificationLevelsTest {
         val queries = AccountDb(TestResources.driver()).chatQueries
         val channels = MutableStateFlow<List<Channel>>(emptyList())
         val api = ChatApi(PapoClient(server.engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt")))
+        var forbidden = 0
         val levels = ChannelNotificationLevels(
             api, queries, "u1", channels,
             reload = {
@@ -98,6 +99,7 @@ class ChannelNotificationLevelsTest {
                 refreshChannels()
             },
             scope.backgroundScope, dispatcher,
+            onForbidden = { forbidden++ },
         )
 
         init {
@@ -164,6 +166,8 @@ class ChannelNotificationLevelsTest {
             assertEquals(listOf(post), server.requests.toList(), "$status")
             assertEquals("all", f.stored(), "$status")
             assertEquals(LevelSave(failure = LevelFailure("c1", reason)), f.levels.save.value)
+            // Só o 403 pede a releitura das permissões; ela não reenvia nada.
+            assertEquals(if (status == HttpStatusCode.Forbidden) 1 else 0, f.forbidden, "$status")
         }
     }
 

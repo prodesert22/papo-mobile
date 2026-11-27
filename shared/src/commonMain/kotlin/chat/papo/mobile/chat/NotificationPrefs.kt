@@ -141,21 +141,21 @@ class NotificationPrefs(
     }
 
     /**
-     * Liga ou desliga a sincronização do servidor inteiro. Nenhum canal muda de nível por isso: os que seguem o servidor
-     * e mudariam guardam neste aparelho o nível que tinham (e, se passariam a sincronizar com outro nível, ficam sem
-     * sincronização, porque ligar nunca manda o nível do aparelho ao servidor).
+     * Liga ou desliga a sincronização do servidor inteiro. Desligar não muda o nível de nenhum canal na hora: os que
+     * seguem o servidor e mudariam guardam neste aparelho o nível que tinham. Ligar faz os canais sem escolha própria
+     * de sincronização seguirem o nível do servidor, mesmo que ele mude (sem mandar o do aparelho para lá); os que
+     * escolheram sincronizar ou não, no próprio canal, ficam como estão.
      */
     fun setServerSync(value: Boolean) {
         val ids = levelsOnServer.levels.value.keys + _channels.value.keys
         val before = ids.associateWith(::effectiveFor)
         updateServer { it.copy(sync = value) }
         for ((id, was) in before) {
-            val after = effectiveFor(id)
-            if (after.level == was.level) {
+            if (value) {
                 // Sincronizado, o nível do aparelho não vale mais: não deixa um valor velho guardado.
-                if (after.sync && _channels.value[id]?.level != null) updateChannel(id) { it.copy(level = null) }
-            } else {
-                updateChannel(id) { it.copy(sync = if (after.sync) false else it.sync, level = was.level) }
+                if (effectiveFor(id).sync && _channels.value[id]?.level != null) updateChannel(id) { it.copy(level = null) }
+            } else if (effectiveFor(id).level != was.level) {
+                updateChannel(id) { it.copy(level = was.level) }
             }
         }
     }

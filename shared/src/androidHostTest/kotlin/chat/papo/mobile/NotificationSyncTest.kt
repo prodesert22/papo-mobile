@@ -170,27 +170,32 @@ class NotificationSyncTest {
     }
 
     @Test
-    fun ligarASincronizacaoDoServidorNaoMudaONivelDeNenhumCanalEFicaSemSincronizarQuemMudaria() = runTest {
-        val levels = FakeServerLevels(mapOf("c1" to all, "c2" to mentions, "c3" to nothing, "c4" to mentions))
+    fun ligarASincronizacaoDoServidorFazOsCanaisSemEscolhaPropriaSeguirOServidor() = runTest {
+        val levels = FakeServerLevels(mapOf("c1" to all, "c2" to mentions, "c3" to nothing, "c4" to mentions, "c5" to nothing))
         val prefs = prefs(levels)
         runCurrent()
         prefs.updateServer { it.copy(sync = false, level = all) } // o geral do aparelho passa a ser "todas"
         prefs.updateChannel("c3") { it.copy(level = nothing) } // coincide com o do servidor; vale só no aparelho
-        prefs.updateChannel("c4") { it.copy(sync = true) }
-        val before = listOf("c1", "c2", "c3", "c4").associateWith { prefs.level(it) }
-        assertEquals(mapOf("c1" to all, "c2" to all, "c3" to nothing, "c4" to mentions), before)
+        prefs.updateChannel("c4") { it.copy(sync = true) } // escolheu sincronizar
+        prefs.updateChannel("c5") { it.copy(sync = false, level = mentions) } // escolheu não sincronizar
+        val before = listOf("c1", "c2", "c3", "c4", "c5").associateWith { prefs.level(it) }
+        assertEquals(mapOf("c1" to all, "c2" to all, "c3" to nothing, "c4" to mentions, "c5" to mentions), before)
 
         prefs.setServerSync(true)
 
-        assertEquals(before, before.keys.associateWith { prefs.level(it) })
         assertTrue(prefs.server.value.sync)
-        assertNull(prefs.channels.value["c1"]) // o servidor já tinha "todas": passa a sincronizar
-        assertTrue(prefs.isSyncing("c1"))
-        assertEquals(false, prefs.channels.value["c2"]?.sync) // o servidor tem "só menções": ficaria diferente
-        assertEquals(all, prefs.channels.value["c2"]?.level)
-        assertFalse(prefs.isSyncing("c2"))
-        assertNull(prefs.channels.value["c3"]) // o nível do aparelho igual ao do servidor é largado ao sincronizar
-        assertTrue(prefs.isSyncing("c3"))
+        // Sem escolha própria: segue o servidor, mesmo que o nível mude (c2 era "todas" no aparelho, "só menções" lá).
+        assertEquals(all, prefs.level("c1"))
+        assertEquals(mentions, prefs.level("c2"))
+        assertEquals(nothing, prefs.level("c3"))
+        assertTrue(listOf("c1", "c2", "c3").all(prefs::isSyncing))
+        assertEquals(emptyMap(), prefs.channels.value - setOf("c4", "c5")) // sem entradas velhas nem canais sem sincronização
+        // Com escolha própria: ficam como estavam.
+        assertEquals(before["c4"], prefs.level("c4"))
+        assertEquals(true, prefs.channels.value["c4"]?.sync)
+        assertEquals(before["c5"], prefs.level("c5"))
+        assertEquals(mentions, prefs.channels.value["c5"]?.level)
+        assertFalse(prefs.isSyncing("c5"))
         assertEquals(emptyList(), levels.sets) // ligar nunca manda o nível do aparelho
     }
 
@@ -205,7 +210,7 @@ class NotificationSyncTest {
     }
 
     @Test
-    fun nenhumaCombinacaoDeLigarOuDesligarMudaONivelDeAgoraSalvoLigarUmCanalComNivelDoAparelho() = runTest {
+    fun desligarNaoMudaNadaELigarSoMudaOsCanaisSemEscolhaPropriaDeSincronizacao() = runTest {
         val levelsOnServer = mapOf("a" to all, "b" to mentions, "c" to nothing)
         val locals = listOf<NotificationLevel?>(null, all, mentions, nothing)
         val channelSyncs = listOf<Boolean?>(null, true, false)
@@ -218,10 +223,16 @@ class NotificationSyncTest {
             val label = "servidor=$serverSync canal=$channelSync local=$local geral=$serverLevel"
 
             prefs.setServerSync(!serverSync)
-            assertEquals(before, levelsOnServer.keys.associateWith { prefs.level(it) }, "servidor invertido: $label")
+            val expected = if (serverSync) {
+                before // desligou: nada muda na hora
+            } else {
+                // Ligou: quem não escolheu sincronizar ou não, no próprio canal, passa a seguir o servidor.
+                levelsOnServer.mapValues { (id, level) -> if (id == "a" && channelSync == false) before.getValue(id) else level }
+            }
+            assertEquals(expected, levelsOnServer.keys.associateWith { prefs.level(it) }, "servidor invertido: $label")
 
             prefs.setChannelSync("a", false)
-            assertEquals(before, levelsOnServer.keys.associateWith { prefs.level(it) }, "canal desligado: $label")
+            assertEquals(expected, levelsOnServer.keys.associateWith { prefs.level(it) }, "canal desligado: $label")
         }
     }
 }
