@@ -411,10 +411,11 @@ class CallController(
             "voice-already-in-room" -> if (joining) finish(CallEnd.Failed, error.message)
             // Fora da entrada, costuma ser corrida (ex.: assinar quem acabou de parar de transmitir).
             "voice-not-found" -> if (joining) finish(CallEnd.Failed, error.message) else refuseLastSubscription(code)
-            "voice-rate-limited" -> {
-                refuseLastSubscription(code)
-                _state.update { it.copy(errorDetail = error.message) }
-            }
+            // Não mexe nas assinaturas: o servidor tem um limitador próprio para track_subscribe (checkSubscribe, 5/s com
+            // rajada 10, webrtc/manager.go:236,486,531) que o app não alcança (no máximo 6 vídeos e 2 áudios de tela). O que
+            // dispara na prática é o de sinalização (checkSignal: ICE, mute, câmera, tela), com o mesmo código e a mesma
+            // mensagem; ligá-lo à última assinatura derrubaria uma que está funcionando.
+            "voice-rate-limited" -> _state.update { it.copy(errorDetail = error.message) }
             "voice-invalid-sdp", "voice-codec-unsupported" -> {
                 answer?.completeExceptionally(IllegalStateException(error.message))
                 _state.update { it.copy(errorDetail = error.message) }
@@ -514,7 +515,7 @@ class CallController(
     }
 
     /**
-     * O servidor recusou algo e o erro (`voice-room-full`, `voice-not-found`, `voice-rate-limited`) só traz código e
+     * O servidor recusou algo e o erro (`voice-room-full`, `voice-not-found`) só traz código e
      * texto: não diz canal, pessoa nem tipo, e não há confirmação do que deu certo. A ligação é conservadora: o erro
      * vale para o pedido de assinatura mais recente, desde que tenha saído há menos de [SUBSCRIPTION_ERROR_WINDOW]
      * (o servidor atende em ordem, e uma recusa chega logo). Se esse pedido foi um cancelamento, ou nenhum é recente,

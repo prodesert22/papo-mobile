@@ -468,16 +468,15 @@ class CallControllerTest {
     }
 
     @Test
-    fun limiteDeTaxaTiraOVideoDoSlotENaoReenvia() = runTest {
+    fun faixaNaoEncontradaTiraOVideoDoSlotENaoReenvia() = runTest {
         val f = connected()
         f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", "bia", muted = false, cameraOn = true))
         runCurrent()
         assertEquals(mapOf(0 to VideoKey("bia", "video")), f.call.state.value.videoSlots)
 
-        f.signal.events.emit(WsEvent.ServerError("muitas assinaturas", "voice-rate-limited"))
+        f.signal.events.emit(WsEvent.ServerError("faixa não encontrada", "voice-not-found"))
         runCurrent()
         assertTrue(f.call.state.value.videoSlots.isEmpty())
-        assertEquals("muitas assinaturas", f.call.state.value.errorDetail)
 
         // Outra mudança de Bia com a câmera ainda ligada não reenvia o pedido recusado.
         f.signal.sent.clear()
@@ -500,7 +499,7 @@ class CallControllerTest {
         val f = connected()
         screenAudio(f, "bia")
         advanceTimeBy(4.seconds)
-        f.signal.events.emit(WsEvent.ServerError("muitas mensagens", "voice-rate-limited"))
+        f.signal.events.emit(WsEvent.ServerError("sem slot livre", "voice-room-full"))
         runCurrent()
         assertEquals(setOf("bia"), f.call.state.value.screenAudioSubs)
     }
@@ -521,9 +520,30 @@ class CallControllerTest {
         screenAudio(f, "bia")
         screenAudio(f, "caio")
         screenAudio(f, "bia", on = false) // o último pedido é o cancelamento de Bia
-        f.signal.events.emit(WsEvent.ServerError("muitas assinaturas", "voice-rate-limited"))
+        f.signal.events.emit(WsEvent.ServerError("faixa não encontrada", "voice-not-found"))
         runCurrent()
         assertEquals(setOf("caio"), f.call.state.value.screenAudioSubs)
+    }
+
+    @Test
+    fun limiteDeTaxaLogoDepoisDeAssinarMantemAsAssinaturas() = runTest {
+        val f = connected()
+        f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", "bia", muted = false, cameraOn = true))
+        runCurrent()
+        screenAudio(f, "caio")
+        val slots = f.call.state.value.videoSlots
+        f.signal.sent.clear()
+
+        // O limite de sinalização (mute, ICE, câmera) usa o mesmo código do de assinaturas: não é erro de assinatura.
+        f.signal.events.emit(WsEvent.ServerError("muitas mensagens", "voice-rate-limited"))
+        runCurrent()
+        assertEquals(slots, f.call.state.value.videoSlots)
+        assertEquals(setOf("caio"), f.call.state.value.screenAudioSubs)
+        assertEquals("muitas mensagens", f.call.state.value.errorDetail)
+
+        // E nada é reenviado nem cancelado por causa dele.
+        screenAudio(f, "dani", on = false)
+        assertTrue(f.signal.sent.none { it is WsCommand.TrackSubscribe || it is WsCommand.TrackUnsubscribe })
     }
 
     @Test
@@ -531,10 +551,10 @@ class CallControllerTest {
         val f = connected()
         screenAudio(f, "bia")
         screenAudio(f, "caio")
-        f.signal.events.emit(WsEvent.ServerError("muitas assinaturas", "voice-rate-limited"))
+        f.signal.events.emit(WsEvent.ServerError("faixa não encontrada", "voice-not-found"))
         runCurrent()
         assertEquals(setOf("bia"), f.call.state.value.screenAudioSubs)
-        f.signal.events.emit(WsEvent.ServerError("muitas assinaturas", "voice-rate-limited"))
+        f.signal.events.emit(WsEvent.ServerError("faixa não encontrada", "voice-not-found"))
         runCurrent()
         assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
     }
