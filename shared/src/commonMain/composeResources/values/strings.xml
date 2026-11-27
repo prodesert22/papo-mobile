@@ -776,5 +776,22 @@
     <string name="channel_edit_forbidden">O servidor recusou: sua conta não pode editar canais.</string>
     <string name="channel_edit_gone">Este canal não existe mais.</string>
     <string name="channel_edit_uncertain">Não deu para confirmar se a mudança foi salva. Confira o canal antes de tentar de novo.</string>
+    <!-- item 14 · licenças de terceiros -->
+    <string name="licenses_resources">Recursos incluídos</string>
+    <string name="licenses_libraries">Bibliotecas</string>
+    <string name="licenses_resource_font">Fonte Bricolage Grotesque</string>
+    <string name="licenses_resource_font_license">SIL Open Font License 1.1</string>
+    <string name="licenses_resource_emoji">Dados de emoji do Emojibase</string>
+    <string name="licenses_resource_emoji_license">Licença MIT</string>
+    <string name="licenses_resource_unicode">Dados do Unicode</string>
+    <string name="licenses_resource_unicode_license">Unicode License v3</string>
+    <string name="licenses_version_and_licenses">%1$s · %2$s</string>
+    <string name="licenses_unknown">Licença não informada</string>
+    <string name="licenses_text_missing">O texto desta licença não vem no aplicativo.</string>
+    <string name="licenses_unavailable">A lista de bibliotecas não está disponível nesta versão.</string>
+    <string name="licenses_text_unavailable">Não foi possível ler o texto da licença.</string>
+    <string name="licenses_open_page">Abrir página</string>
+    <string name="licenses_open_license">Abrir a licença</string>
+    <string name="licenses_open_failed">Não foi possível abrir o link.</string>
     <!-- fim da trilha D -->
 </resources>
