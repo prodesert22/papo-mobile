@@ -47,9 +47,12 @@ class MainActivity : FragmentActivity() {
         openFromNotification(intent)
     }
 
-    /** O pedido fica na fila do grafo até a tela principal atendê-lo, depois do bloqueio e do carregamento das contas. */
+    /**
+     * O pedido fica na fila do grafo até a tela principal atendê-lo, depois do bloqueio e do carregamento das contas. Vem de
+     * uma notificação do app ou de um push que o Android mostrou sozinho (só com o canal; a conta se escolhe depois).
+     */
     private fun openFromNotification(intent: Intent?) {
-        NotificationIntents.parse(intent)?.let(app.graph.notificationOpens::submit)
+        (NotificationIntents.parse(intent) ?: NotificationIntents.parsePush(intent))?.let(app.graph.notificationOpens::submit)
     }
 
     override fun onDestroy() {

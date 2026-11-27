@@ -20,6 +20,9 @@ object NotificationIntents {
     private const val EXTRA_CREATED_AT = "chat.papo.mobile.extra.CREATED_AT"
     private const val EXTRA_APPROXIMATE = "chat.papo.mobile.extra.APPROXIMATE"
 
+    /** A chave do dado do push com o id do canal ou da conversa direta (`Data.channel_id` do papo-push). */
+    private const val PUSH_CHANNEL = "channel_id"
+
     /**
      * Abre a activity do lançador na conversa de [notification]. O intent é explícito (o componente do lançador do
      * próprio app) e o `PendingIntent` imutável. O endereço dele tem a conta e a conversa: o sistema compara os
@@ -51,5 +54,15 @@ object NotificationIntents {
             createdAt = intent.getStringExtra(EXTRA_CREATED_AT),
             approximate = intent.getBooleanExtra(EXTRA_APPROXIMATE, false),
         )
+    }
+
+    /**
+     * O toque numa notificação de push que o Android mostrou sozinho: ele abre o lançador do app com os dados da mensagem
+     * como extras do intent, sem a nossa ação. Só se lê o `channel_id`; a conta é escolhida depois do desbloqueio
+     * ([chat.papo.mobile.push.accountForPush]). Um intent de notificação nossa (com a ação própria) não é este.
+     */
+    fun parsePush(intent: Intent?): NotificationOpen? {
+        if (intent == null || intent.action == ACTION_OPEN) return null
+        return NotificationOpen.fromPush(intent.getStringExtra(PUSH_CHANNEL))
     }
 }

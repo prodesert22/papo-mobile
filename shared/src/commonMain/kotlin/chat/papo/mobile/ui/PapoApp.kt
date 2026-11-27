@@ -236,7 +236,7 @@ private fun Unlocked(
         navController.popBackStack(HomeRoute, inclusive = false)
         panel.open(accountId, chat)
     }
-    OpenFromNotification(notificationOpens, accounts, openChat)
+    OpenFromNotification(notificationOpens, accounts, session.accounts::pushTargetAccount, openChat)
     OpenTopChatOnStart(session, panel, navController, openChat)
     ReopenChatOnReturn(session, panel, navController, openChat)
     // Só com uma conta: sem ela ainda não há do que avisar, e a primeira tela é a de entrar no servidor.
@@ -476,19 +476,24 @@ private fun Unlocked(
  * outros pedidos de abrir conversa. O pedido espera aqui até o app estar destravado e as contas carregadas. Se a conta
  * não existe (saiu depois da notificação), o pedido é descartado sem abrir nada. Vem antes da abertura automática: a
  * conversa estacionada por ele a faz desistir de abrir o canal do topo.
+ *
+ * Um pedido sem conta é o de um push que o Android mostrou sozinho: [pushTarget] diz qual conta tem a conversa, e sem
+ * nenhuma o app só fica aberto.
  */
 @Composable
 private fun OpenFromNotification(
     requests: NotificationOpenRequests,
     accounts: List<Account>,
+    pushTarget: suspend (conversationId: String) -> String?,
     openChat: (accountId: String, chat: ParkedChat) -> Unit,
 ) {
     val request by requests.pending.collectAsStateWithLifecycle()
     val current = request ?: return
     LaunchedEffect(current) {
-        if (accounts.any { it.id == current.accountId }) {
+        val accountId = current.accountId ?: pushTarget(current.conversationId)
+        if (accountId != null && accounts.any { it.id == accountId }) {
             val target = current.target?.let { MessageTarget(it.messageId, it.createdAt, it.approximate) }
-            openChat(current.accountId, ParkedChat(current.conversationId, target))
+            openChat(accountId, ParkedChat(current.conversationId, target))
         }
         requests.consume(current)
     }

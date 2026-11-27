@@ -98,9 +98,15 @@ data class NotificationTexts(
     val emptyMessage: String,
 )
 
-/** Um pedido para abrir uma conversa, vindo de tocar numa notificação. Os campos já passaram por [NotificationOpen.parse]. */
+/**
+ * Um pedido para abrir uma conversa, vindo de tocar numa notificação. Os campos já passaram por [NotificationOpen.parse]
+ * ou por [NotificationOpen.fromPush].
+ *
+ * [accountId] é nulo no toque numa notificação de push que o Android mostrou sozinho: o que o servidor manda diz o canal
+ * e a mensagem, mas não de que servidor nem de que usuário, e o app escolhe a conta ([chat.papo.mobile.push.accountForPush]).
+ */
 data class NotificationOpen(
-    val accountId: String,
+    val accountId: String?,
     val conversationId: String,
     val target: NotificationTarget?,
 ) {
@@ -130,6 +136,14 @@ data class NotificationOpen(
             }
             return NotificationOpen(accountId, conversationId, target)
         }
+
+        /**
+         * Lê o toque numa notificação de push, que só traz o id do canal ou da conversa direta (`channel_id`). O que vem
+         * de fora não é confiável: um id fora do formato dos ids do servidor invalida o pedido (null). A mensagem não
+         * entra: o push não diz quando ela foi criada, e abrir uma mensagem pede o instante, então só a conversa abre.
+         */
+        fun fromPush(channelId: String?): NotificationOpen? =
+            channelId?.takeIf(::isSafeId)?.let { NotificationOpen(accountId = null, conversationId = it, target = null) }
 
         private fun isSafeId(value: String?): Boolean = value != null && value.length <= MAX_ID && safeId.matches(value)
     }

@@ -20,9 +20,16 @@ import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.notif_system_channel_dms
 import chat.papo.mobile.resources.notif_system_channel_mentions
 import chat.papo.mobile.resources.notif_system_channel_messages
+import chat.papo.mobile.resources.notif_system_channel_push
 import chat.papo.mobile.resources.notif_system_summary
 import org.jetbrains.compose.resources.getString
 import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * O canal dos pushes que o Android mostra sozinho (`default_notification_channel_id` no manifesto do app, que repete este
+ * valor). É um canal do app, não de uma conta: o push não diz de que conta veio.
+ */
+const val PUSH_CHANNEL_ID = "papo.push"
 
 /**
  * As notificações do Android. Cada conta tem um grupo de canais ("servidor · @usuário") com três canais: menções e
@@ -55,6 +62,20 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
         }
         manager.notify(tag(notification.accountId, notification.conversationId), NOTIFICATION_ID, conversation(notification, channel))
         postSummaryIfAbsent(notification)
+    }
+
+    /**
+     * Cria o canal global dos pushes ([PUSH_CHANNEL_ID]) logo que o app abre: sem ele o Android mostraria o push no canal
+     * "Diversos". Importância alta, com selo, como as menções. Criar de novo um canal que já existe não muda as escolhas
+     * que a pessoa fez nele.
+     */
+    suspend fun ensurePushChannel() {
+        manager.createNotificationChannel(
+            NotificationChannelCompat.Builder(PUSH_CHANNEL_ID, NotificationManager.IMPORTANCE_HIGH)
+                .setName(getString(Res.string.notif_system_channel_push))
+                .setShowBadge(true)
+                .build(),
+        )
     }
 
     override fun cancelConversation(accountId: String, conversationId: String) {

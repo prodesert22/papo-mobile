@@ -25,11 +25,14 @@ import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AuthApi
 import chat.papo.mobile.data.api.ChatApi
 import chat.papo.mobile.data.api.PapoClient
+import chat.papo.mobile.data.api.PushApi
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.ws.WsClient
 import chat.papo.mobile.media.MediaCache
 import chat.papo.mobile.media.VideoPosterExtractor
 import chat.papo.mobile.media.VideoPosters
+import chat.papo.mobile.push.PushRegistration
+import chat.papo.mobile.push.PushTokens
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +57,8 @@ class AccountSession(
     notifications: SystemNotifications? = null,
     /** O nome da conta nas notificações (servidor e `@usuário`), lido a cada notificação porque o rótulo pode mudar. */
     accountLabel: () -> String = { accountId },
+    /** O token de push do aparelho; nulo onde a plataforma não tem push, e então a conta não registra o aparelho. */
+    pushTokens: PushTokens? = null,
 ) {
     private val driver = resources.driver
     val media: MediaCache = resources.media
@@ -104,6 +109,10 @@ class AccountSession(
             scope = scope,
         )
     }
+    /** O registro do aparelho para push no servidor desta conta; só existe se a plataforma tem push. */
+    val push: PushRegistration? = pushTokens?.let { tokens ->
+        PushRegistration(PushApi(client), tokens, db.metaQueries, scope, io, hasSession = { client.cookies.get() != null })
+    }
     /** Avatares dos webhooks: um pedido ao servidor por sessão, depois o cache de mídia cifrado da conta. */
     val webhookAvatars = WebhookAvatars(api, media, scope)
     /** Quem esta conta bloqueou; a lista é desta sessão e não vale para outra conta. */
@@ -123,6 +132,8 @@ class AccountSession(
             chat.start()
             blocks.start()
             inbox.start()
+            // Uma vez por sessão: com o app indo e voltando da frente só o tempo real religa (regra 15).
+            push?.start()
         } else {
             ws.start()
         }
