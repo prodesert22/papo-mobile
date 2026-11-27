@@ -36,6 +36,8 @@ import chat.papo.mobile.media.VideoPosterExtractor
 import chat.papo.mobile.media.VideoPosters
 import chat.papo.mobile.push.PushRegistration
 import chat.papo.mobile.push.PushTokens
+import chat.papo.mobile.voice.StoredVoiceVolumes
+import chat.papo.mobile.voice.VoiceVolumes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -73,6 +75,8 @@ class AccountSession(
     val emojis = EmojiCatalog(api, media, db.metaQueries, scope, io, background)
     val recentEmojis = RecentEmojis(db.metaQueries, scope, io)
     val drafts = Drafts(db.metaQueries, scope, io)
+    /** O volume de cada pessoa nas chamadas desta conta; no banco cifrado dela, sem ir ao servidor. */
+    val voiceVolumes: VoiceVolumes = StoredVoiceVolumes(db.metaQueries, scope, io)
     val recentSearches = RecentSearchFilters()
     /** O tema só deste servidor, se a conta tiver um; no banco cifrado dela. */
     val theme = ServerThemeStore(db.metaQueries, scope, io)

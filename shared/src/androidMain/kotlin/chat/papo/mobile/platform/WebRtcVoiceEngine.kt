@@ -20,7 +20,11 @@ import chat.papo.mobile.voice.VideoTrackHandle
 import chat.papo.mobile.voice.VoiceEngine
 import chat.papo.mobile.voice.VoiceEngineFactory
 import chat.papo.mobile.voice.VoiceSlots
+import chat.papo.mobile.voice.answerTrackIds
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -120,6 +124,10 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     private var serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
     private var remoteDescriptionSet = false
     private val queuedCandidates = ArrayList<IceCandidate>()
+    private val remoteAudio = RemoteAudio()
+    private val _headsetButton = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val headsetButton: Flow<Unit> = _headsetButton
+    private val headset = HeadsetButtons(context) { _headsetButton.tryEmit(Unit) }
     private var closed = false
 
     override suspend fun ensurePermission(permission: MediaPermission): Boolean {
@@ -140,6 +148,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             WebRtcRuntime.initialize(context)
             CallService.ensure(context, serviceTypes, "")
             startAudioSession()
+            headset.start()
 
             val adm = JavaAudioDeviceModule.builder(context)
                 .setUseHardwareAcousticEchoCanceler(true)
@@ -177,6 +186,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
                 connection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, recvOnly)
             }
             _remoteVideo.value = video.map { transceiver -> (transceiver.receiver.track() as? VideoTrack)?.let(::VideoTrackHandle) }
+            synchronized(remoteAudio) { remoteAudio.transceivers = audio }
 
             // O microfone ocupa a primeira m-line de áudio (vira sendrecv), como no cliente web.
             val constraints = MediaConstraints().apply {
@@ -206,6 +216,11 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     override suspend fun applyAnswer(sdp: String) {
         val connection = pc ?: error("conexão fechada")
         awaitSet { connection.setRemoteDescription(it, SessionDescription(SessionDescription.Type.ANSWER, sdp)) }
+        // O servidor diz em cada m-line de áudio qual faixa (papo-audio-N) ele pôs nela; é por aí que o ganho acha o receptor.
+        synchronized(remoteAudio) {
+            remoteAudio.trackIdsByMid = answerTrackIds(sdp)
+            remoteAudio.applyAll()
+        }
         val queued = synchronized(queuedCandidates) {
             remoteDescriptionSet = true
             queuedCandidates.toList().also { queuedCandidates.clear() }
@@ -333,14 +348,19 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
 
     override fun selectOutput(id: String) = Unit
 
-    override fun setRemoteAudioGain(trackId: String, gain: Double) = Unit
+    override fun setRemoteAudioGain(trackId: String, gain: Double) {
+        synchronized(remoteAudio) { remoteAudio.setGain(trackId, gain) }
+    }
 
     override fun close() {
         if (closed) return
         closed = true
         _connection.value = EngineConnection.Closed
+        headset.stop()
         releaseCamera()
         releaseScreen()
+        // Os receptores morrem com a conexão: nenhum ganho pode tocar neles depois daqui.
+        synchronized(remoteAudio) { remoteAudio.clear() }
         runCatching { pc?.dispose() }
         pc = null
         runCatching { audioSource?.dispose() }
