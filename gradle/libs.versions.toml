@@ -26,6 +26,8 @@ accompanist = "0.37.3"
 zoomable = "2.16.0"
 # Só o motor de cores do Material (sem Compose): o MaterialKolor 5.0.1 exige material3 1.12.0-alpha03 e puxaria o projeto para uma alfa.
 material-color-utilities = "5.0.1"
+# Seletor de cor (roda de matiz e saturação, controle de brilho). 1.3.0 depende só de runtime, foundation e ui 1.12.0 (sem material3).
+colorpicker = "1.3.0"
 sqlcipher = "4.20.0"
 webrtc = "1.3.10"
 androidx-activity = "1.13.0"
@@ -97,6 +99,8 @@ accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-dra
 zoomable = { module = "net.engawapg.lib:zoomable", version.ref = "zoomable" }
 # Esquemas de cor do Material por cor semente, para as predefinições de tema.
 material-color-utilities = { module = "com.materialkolor:material-color-utilities", version.ref = "material-color-utilities" }
+# O seletor de cor do editor de tema (Compose Multiplatform, Apache-2.0).
+colorpicker-compose = { module = "com.github.skydoves:colorpicker-compose", version.ref = "colorpicker" }
 
 # Android
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }

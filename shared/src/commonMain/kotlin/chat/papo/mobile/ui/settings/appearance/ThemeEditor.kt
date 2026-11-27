@@ -60,37 +60,40 @@ internal fun ThemeMode.label(): StringResource = when (this) {
 }
 
 /**
- * Os controles de um tema: a prévia, o modo e as predefinições. Quem usa guarda o [spec] e recebe cada mudança em
- * [onChange]; o editor não grava nada. As cores item por item entram depois das predefinições.
+ * Os controles de um tema: a prévia, o modo, as predefinições e as cores item por item. Quem usa guarda o [spec] e recebe
+ * cada mudança em [onChange]; o editor não grava nada.
  */
 @Composable
 fun ThemeEditor(spec: ThemeSpec, onChange: (ThemeSpec) -> Unit, modifier: Modifier = Modifier) {
+    val systemDark = isSystemInDarkTheme()
+    // Com o modo Sistema a prévia mostra os dois lados, e as cores trocadas valem para o lado que está na prévia.
+    var previewDark by rememberSaveable { mutableStateOf(systemDark) }
+    val shownDark = if (spec.mode == ThemeMode.System) previewDark else systemDark
     Column(modifier.padding(horizontal = SettingsPadding, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        PreviewSection(spec)
+        PreviewSection(spec, shownDark, onPickDark = { previewDark = it })
         ModeSection(spec, onChange)
         PresetSection(spec, onChange)
+        ItemsSection(spec, shownDark, onChange)
     }
 }
 
 @Composable
-private fun SectionTitle(text: String) {
+internal fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
 }
 
 @Composable
-private fun PreviewSection(spec: ThemeSpec) {
-    val systemDark = isSystemInDarkTheme()
-    // Com o modo Sistema a prévia mostra os dois lados; nos outros modos só há um e a chave some.
-    var previewDark by rememberSaveable { mutableStateOf(systemDark) }
+private fun PreviewSection(spec: ThemeSpec, shownDark: Boolean, onPickDark: (Boolean) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.weight(1f)) { SectionTitle(stringResource(Res.string.theme_preview_title)) }
+            // Nos outros modos só há um lado e a chave some.
             if (spec.mode == ThemeMode.System) {
-                FilterChip(selected = !previewDark, onClick = { previewDark = false }, label = { Text(stringResource(Res.string.theme_mode_light)) })
-                FilterChip(selected = previewDark, onClick = { previewDark = true }, label = { Text(stringResource(Res.string.theme_mode_dark)) })
+                FilterChip(selected = !shownDark, onClick = { onPickDark(false) }, label = { Text(stringResource(Res.string.theme_mode_light)) })
+                FilterChip(selected = shownDark, onClick = { onPickDark(true) }, label = { Text(stringResource(Res.string.theme_mode_dark)) })
             }
         }
-        ThemePreview(spec, systemDark = if (spec.mode == ThemeMode.System) previewDark else systemDark)
+        ThemePreview(spec, systemDark = shownDark)
     }
 }
 

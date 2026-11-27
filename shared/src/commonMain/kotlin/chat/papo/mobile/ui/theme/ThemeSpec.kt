@@ -115,8 +115,8 @@ fun resolveTheme(spec: ThemeSpec, systemDark: Boolean): ResolvedTheme {
     return base.withOverrides(spec.overrides[variant].orEmpty())
 }
 
-private const val MinTextContrast = 4.5f
-private const val MinMutedContrast = 3f
+internal const val MinTextContrast = 4.5f
+internal const val MinMutedContrast = 3f
 
 /** O que a plataforma precisa do tema fora do Compose: o fundo da janela (ARGB) e se o tema é escuro. */
 class WindowStyle(val backgroundArgb: Int, val dark: Boolean)

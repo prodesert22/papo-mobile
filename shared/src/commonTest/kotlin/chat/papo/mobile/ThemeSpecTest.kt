@@ -73,11 +73,34 @@ class ThemeSpecTest {
             val scheme = theme.colorScheme
             val blacks = listOf(
                 scheme.background, scheme.surface, scheme.surfaceVariant, scheme.surfaceContainerLowest, scheme.surfaceContainerLow,
-                scheme.surfaceContainer, scheme.surfaceContainerHigh, scheme.surfaceContainerHighest, theme.papo.rail,
+                scheme.surfaceContainer, theme.papo.rail,
             )
             assertTrue(blacks.all { it == Color.Black }, "${preset.id}: algum fundo não é preto")
             assertTrue(theme.dark)
         }
+    }
+
+    @Test
+    fun oledSeparaOsElementosQueFlutuamDoFundoPreto() {
+        ThemePresets.all.forEach { preset ->
+            val theme = resolveTheme(ThemeSpec(ThemeMode.Oled, preset.id), systemDark = false)
+            val scheme = theme.colorScheme
+            // Diálogos (High) e campos preenchidos (Highest) saem do preto, em degraus, mas continuam quase pretos.
+            assertTrue(contrastRatio(scheme.surfaceContainerHigh, Color.Black) >= 1.1f, "${preset.id}: diálogo")
+            assertTrue(luminanceOf(scheme.surfaceContainerHighest) > luminanceOf(scheme.surfaceContainerHigh), "${preset.id}: degraus")
+            assertTrue(contrastRatio(scheme.surfaceContainerHighest, Color.Black) < 1.5f, "${preset.id}: quase preto")
+            // O texto continua legível sobre eles.
+            assertTrue(contrastRatio(scheme.onSurface, scheme.surfaceContainerHighest) >= 7f, "${preset.id}: texto no campo")
+            assertTrue(contrastRatio(scheme.onSurfaceVariant, scheme.surfaceContainerHighest) >= 4.5f, "${preset.id}: texto secundário no campo")
+            // A cortina atrás das folhas não é preta, senão a folha preta some no fundo preto.
+            assertNotEquals(Color.Black, scheme.scrim, "${preset.id}: cortina")
+        }
+    }
+
+    @Test
+    fun cortinaForaDoOledContinuaPreta() {
+        assertEquals(Color.Black, DarkColors.scrim)
+        assertEquals(Color.Black, resolveTheme(ThemeSpec(ThemeMode.Dark, "ocean"), systemDark = false).colorScheme.scrim)
     }
 
     @Test

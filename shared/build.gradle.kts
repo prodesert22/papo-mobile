@@ -55,6 +55,7 @@ kotlin {
             implementation(libs.sqldelight.coroutines)
             implementation(libs.zoomable)
             implementation(libs.material.color.utilities)
+            implementation(libs.colorpicker.compose)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
