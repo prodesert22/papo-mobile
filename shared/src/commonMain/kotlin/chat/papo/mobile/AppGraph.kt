@@ -31,6 +31,7 @@ import chat.papo.mobile.security.AppLock
 import chat.papo.mobile.security.AppPrefs
 import chat.papo.mobile.security.LockState
 import chat.papo.mobile.security.MasterKeyStore
+import chat.papo.mobile.security.NotificationPrivacy
 import chat.papo.mobile.security.UnlockedSession
 import chat.papo.mobile.security.WebPlayerData
 import chat.papo.mobile.voice.CallManager
@@ -71,6 +72,8 @@ class PlatformDeps(
     val notificationPermission: NotificationPermission? = null,
     /** O token de push do aparelho; null onde a plataforma não tem push, e então nenhuma conta registra o aparelho. */
     val pushTokens: PushTokens? = null,
+    /** O conteúdo que as notificações montadas pelo app mostram; o [notifier] lê o mesmo objeto que a tela de segurança muda. */
+    val notificationPrivacy: NotificationPrivacy = NotificationPrivacy(prefs),
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -113,6 +116,9 @@ class AppGraph(private val platform: PlatformDeps) {
 
     /** A permissão de notificar do sistema; null onde a plataforma não tem notificações. */
     val notificationPermission: NotificationPermission? get() = platform.notificationPermission
+
+    /** O que as notificações do app mostram de uma mensagem; a tela de segurança muda, o notificador lê. */
+    val notificationPrivacy: NotificationPrivacy get() = platform.notificationPrivacy
 
     /** A explicação única que antecede o pedido da permissão; null onde não há permissão a pedir. */
     val notificationPrompt: NotificationPermissionPrompt? =

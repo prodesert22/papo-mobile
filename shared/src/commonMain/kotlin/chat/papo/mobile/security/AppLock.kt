@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -36,12 +37,21 @@ sealed interface LockState {
 enum class LockTimeout(val id: String, val duration: Duration) {
     Immediately("immediately", Duration.ZERO),
     OneMinute("1m", 1.minutes),
-    FiveMinutes("5m", 5.minutes);
+    FiveMinutes("5m", 5.minutes),
+    FifteenMinutes("15m", 15.minutes),
+    OneHour("1h", 1.hours);
 
     companion object {
         fun fromId(id: String?): LockTimeout = entries.firstOrNull { it.id == id } ?: Immediately
     }
 }
+
+/**
+ * Se a janela do app esconde o conteúdo (capturas, gravação de tela e lista de apps recentes). [pref] é a escolha da
+ * pessoa, ou nulo se ela nunca escolheu: então vale o padrão de sempre, esconder com o bloqueio ligado e liberar sem ele.
+ * Com escolha, vale a escolha, com ou sem o bloqueio.
+ */
+fun secureWindow(lockEnabled: Boolean, pref: Boolean?): Boolean = pref ?: lockEnabled
 
 enum class LockChange { Done, Cancelled, Unavailable, Failed }
 
@@ -78,9 +88,10 @@ class AppLock(
     private val _timeout = MutableStateFlow(LockTimeout.fromId(prefs.getString(PREF_TIMEOUT)))
     val timeout: StateFlow<LockTimeout> = _timeout.asStateFlow()
 
-    private val _secureScreen = MutableStateFlow(prefs.getString(PREF_SECURE_SCREEN) != "false")
-    /** Esconde o conteúdo em capturas de tela e na lista de apps recentes enquanto o bloqueio está ligado. */
-    val secureScreen: StateFlow<Boolean> = _secureScreen.asStateFlow()
+    // Só "true" e "false" são escolhas; sem valor (ou com lixo) a pessoa não escolheu e vale o padrão de [secureWindow].
+    private val _secureScreen = MutableStateFlow(prefs.getString(PREF_SECURE_SCREEN)?.toBooleanStrictOrNull())
+    /** A escolha de esconder o conteúdo em capturas e na lista de apps recentes; nula enquanto não houve escolha. */
+    val secureScreen: StateFlow<Boolean?> = _secureScreen.asStateFlow()
 
     private val _dataWasWiped = MutableStateFlow(false)
     /** Os dados locais foram apagados porque a chave do aparelho deixou de valer. */

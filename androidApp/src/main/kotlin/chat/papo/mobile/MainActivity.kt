@@ -11,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import chat.papo.mobile.platform.AndroidPlatformUi
 import chat.papo.mobile.platform.NotificationIntents
+import chat.papo.mobile.security.secureWindow
 import chat.papo.mobile.ui.PapoApp
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -25,10 +26,10 @@ class MainActivity : FragmentActivity() {
 
         val lock = app.graph.lock
         // Antes do primeiro quadro, para a prévia nos apps recentes já nascer protegida.
-        applySecureFlag(lock.lockEnabled.value && lock.secureScreen.value)
+        applySecureFlag(secureWindow(lock.lockEnabled.value, lock.secureScreen.value))
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.CREATED) {
-                combine(lock.lockEnabled, lock.secureScreen) { enabled, secure -> enabled && secure }
+                combine(lock.lockEnabled, lock.secureScreen, ::secureWindow)
                     .collect(::applySecureFlag)
             }
         }

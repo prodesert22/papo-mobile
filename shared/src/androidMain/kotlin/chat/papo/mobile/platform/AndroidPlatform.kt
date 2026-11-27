@@ -9,6 +9,7 @@ import chat.papo.mobile.PlatformDeps
 import chat.papo.mobile.core.AppDispatchers
 import chat.papo.mobile.core.BuildInfo
 import chat.papo.mobile.security.LockState
+import chat.papo.mobile.security.NotificationPrivacy
 import io.ktor.client.engine.okhttp.OkHttp
 import android.os.Process
 import kotlinx.coroutines.Dispatchers
@@ -42,14 +43,16 @@ fun createAndroidGraph(
     val app = context.applicationContext
     val crypto = JcaCrypto()
     val requests = ActivityRequests(app, activities)
-    val notifier = AndroidSystemNotifier(app, notificationIcon)
+    val prefs = AndroidPrefs(app)
+    val notificationPrivacy = NotificationPrivacy(prefs)
+    val notifier = AndroidSystemNotifier(app, notificationIcon) { notificationPrivacy.content.value }
     // O app ainda não criou nenhum WebView: o que um processo encerrado com o player do YouTube aberto deixou sai agora.
     YouTubeWebData.sweepLeftovers(app)
     val graph = AppGraph(
         PlatformDeps(
             crypto = crypto,
             keyStore = AndroidMasterKeyStore(app, crypto, activities),
-            prefs = AndroidPrefs(app),
+            prefs = prefs,
             databases = AndroidDatabaseFactory(app),
             httpEngine = OkHttp.create(),
             dispatchers = AppDispatchers(Dispatchers.Main.immediate, Dispatchers.IO, Dispatchers.Default, backgroundDispatcher),
@@ -62,6 +65,7 @@ fun createAndroidGraph(
             notifier = notifier,
             notificationPermission = AndroidNotificationPermission(app, requests),
             pushTokens = pushTokens,
+            notificationPrivacy = notificationPrivacy,
         ),
     )
     // O que ficou para outros aplicativos lerem (Compartilhar) não sobrevive ao bloqueio nem ao apagamento dos dados locais.
