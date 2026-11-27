@@ -1,6 +1,8 @@
 package chat.papo.mobile.voice
 
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 data class IceServer(val urls: List<String>, val username: String?, val credential: String?)
 
@@ -92,6 +94,12 @@ interface VoiceEngine {
      * 1.0 é o volume normal, 0.0 silencia; id desconhecido é ignorado.
      */
     fun setRemoteAudioGain(trackId: String, gain: Double)
+
+    /**
+     * Um aperto do botão do fone (gancho ou tocar/pausar) durante a chamada. O motor só escuta enquanto a conexão
+     * existe; quem decide o que o aperto faz é o [CallController]. Plataformas sem botão não emitem nada.
+     */
+    val headsetButton: Flow<Unit> get() = emptyFlow()
 
     fun close()
 }

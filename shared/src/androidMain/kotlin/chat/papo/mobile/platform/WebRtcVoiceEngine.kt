@@ -22,6 +22,9 @@ import chat.papo.mobile.voice.VoiceEngineFactory
 import chat.papo.mobile.voice.VoiceSlots
 import chat.papo.mobile.voice.answerTrackIds
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -122,6 +125,9 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     private var remoteDescriptionSet = false
     private val queuedCandidates = ArrayList<IceCandidate>()
     private val remoteAudio = RemoteAudio()
+    private val _headsetButton = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val headsetButton: Flow<Unit> = _headsetButton
+    private val headset = HeadsetButtons(context) { _headsetButton.tryEmit(Unit) }
     private var closed = false
 
     override suspend fun ensurePermission(permission: MediaPermission): Boolean {
@@ -142,6 +148,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             WebRtcRuntime.initialize(context)
             CallService.ensure(context, serviceTypes, "")
             startAudioSession()
+            headset.start()
 
             val adm = JavaAudioDeviceModule.builder(context)
                 .setUseHardwareAcousticEchoCanceler(true)
@@ -349,6 +356,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         if (closed) return
         closed = true
         _connection.value = EngineConnection.Closed
+        headset.stop()
         releaseCamera()
         releaseScreen()
         // Os receptores morrem com a conexão: nenhum ganho pode tocar neles depois daqui.

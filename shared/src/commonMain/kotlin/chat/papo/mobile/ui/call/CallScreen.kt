@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,8 +45,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,7 +59,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -83,6 +90,9 @@ import chat.papo.mobile.resources.call_hangup
 import chat.papo.mobile.resources.call_joining
 import chat.papo.mobile.resources.call_mute
 import chat.papo.mobile.resources.call_muted
+import chat.papo.mobile.resources.call_push_to_talk
+import chat.papo.mobile.resources.call_push_to_talk_hold
+import chat.papo.mobile.resources.call_push_to_talk_talking
 import chat.papo.mobile.resources.call_reconnecting
 import chat.papo.mobile.resources.call_screen_audio_on
 import chat.papo.mobile.resources.call_screen_audio_overflow
@@ -145,6 +155,7 @@ fun CallScreen(session: AppSession, onBack: () -> Unit, onOpenChat: (accountId: 
                 }
             } else {
                 Participants(accountSession, current, state, Modifier.weight(1f))
+                PushToTalk(current, state)
                 Controls(current, state)
             }
         }
@@ -363,6 +374,59 @@ private fun ParticipantTile(
     }
 }
 
+/** A chave "Apertar para falar" desta chamada (não é guardada) e, ligada, o botão que abre o microfone enquanto é segurado. */
+@Composable
+private fun PushToTalk(controller: CallController, state: CallState) {
+    val ready = state.phase == CallPhase.Connected || state.phase == CallPhase.Reconnecting
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(Res.string.call_push_to_talk), style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            Switch(checked = state.pushToTalk, onCheckedChange = controller::setPushToTalk, enabled = ready)
+        }
+        if (state.pushToTalk) HoldToTalkButton(controller, state.talking)
+    }
+}
+
+@Composable
+private fun HoldToTalkButton(controller: CallController, talking: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val label = stringResource(if (talking) Res.string.call_push_to_talk_talking else Res.string.call_push_to_talk_hold)
+    // Sair da tela segurando o botão solta o microfone.
+    DisposableEffect(controller) { onDispose { controller.setTalking(false) } }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .height(64.dp)
+            .clip(RoundedCornerShape(32.dp))
+            .background(if (talking) scheme.primary else scheme.surfaceContainerHighest)
+            .pointerInput(controller) {
+                detectTapGestures(
+                    onPress = {
+                        controller.setTalking(true)
+                        try {
+                            awaitRelease()
+                        } finally {
+                            // Soltar, arrastar para fora ou o gesto ser cancelado: o microfone fecha na hora.
+                            controller.setTalking(false)
+                        }
+                    },
+                )
+            }
+            // Leitor de tela: não dá para "segurar", então tocar alterna.
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                onClick(label = label) {
+                    controller.setTalking(!talking)
+                    true
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = MaterialTheme.typography.titleMedium, color = if (talking) scheme.onPrimary else scheme.onSurface)
+    }
+}
+
 @Composable
 private fun Controls(controller: CallController, state: CallState) {
     val ready = state.phase == CallPhase.Connected || state.phase == CallPhase.Reconnecting
@@ -375,7 +439,7 @@ private fun Controls(controller: CallController, state: CallState) {
             icon = if (state.micMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
             label = stringResource(if (state.micMuted) Res.string.call_unmute else Res.string.call_mute),
             active = !state.micMuted,
-            enabled = ready && !state.busy,
+            enabled = ready && !state.busy && !state.pushToTalk,
             onClick = controller::toggleMute,
         )
         ControlButton(

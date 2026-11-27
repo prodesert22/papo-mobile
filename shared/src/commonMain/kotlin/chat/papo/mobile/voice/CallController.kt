@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -150,6 +151,12 @@ class CallController(
     private val outgoingCandidates = Channel<LocalCandidate>(Channel.UNLIMITED)
     private var finished = false
 
+    /** Todo `voice_mute` sai por aqui: um a cada 250 ms no máximo (o limite de sinalização do servidor é 10/s). */
+    private val mute = MuteCoalescer(scope, { muted -> ws.send(WsCommand.VoiceMute(channelId, muted)) })
+
+    /** O estado do microfone antes de ligar o apertar-para-falar, para voltar a ele ao desligar. */
+    private var mutedBeforePushToTalk = true
+
     fun start() {
         scope.launch { ws.events.collect(::onEvent) }
         scope.launch {
@@ -176,6 +183,8 @@ class CallController(
             }
         }
         volumes?.let { source -> scope.launch { applyGains(source) } }
+        // O botão do fone alterna o mute, com o app em qualquer lugar.
+        scope.launch { engine.headsetButton.collect { toggleMute() } }
         scope.launch { runJoin() }
     }
 
@@ -208,8 +217,8 @@ class CallController(
             subscriptionLock.withLock { subscriptionsReady = true }
             reconcileSubscriptions()
 
-            // Chamada no celular começa falando, como uma ligação.
-            setMuted(false)
+            // Chamada no celular começa falando, como uma ligação (a não ser que o apertar-para-falar já esteja ligado).
+            if (!_state.updateAndGet { if (it.pushToTalk) it else it.copy(micMuted = false) }.pushToTalk) applyMute(false)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -230,13 +239,62 @@ class CallController(
 
     // Ações do usuário
 
-    fun toggleMute() = action { setMuted(!_state.value.micMuted) }
-
-    private suspend fun setMuted(muted: Boolean) {
-        if (!ws.send(WsCommand.VoiceMute(channelId, muted))) return
-        engine.setMicrophoneEnabled(!muted)
-        _state.update { it.copy(micMuted = muted) }
+    /** Alterna o microfone. Com apertar-para-falar ligado quem decide é o botão, então não faz nada. */
+    fun toggleMute() {
+        var muted: Boolean? = null
+        _state.update { s ->
+            if (s.live && !s.pushToTalk) {
+                muted = !s.micMuted
+                s.copy(micMuted = !s.micMuted)
+            } else {
+                muted = null
+                s
+            }
+        }
+        muted?.let(::applyMute)
     }
+
+    /**
+     * Liga ou desliga o apertar-para-falar. Ligado, o microfone fica fechado até [setTalking]; desligado, volta ao
+     * estado que tinha antes de ligar.
+     */
+    fun setPushToTalk(enabled: Boolean) {
+        var muted: Boolean? = null
+        _state.update { s ->
+            muted = null
+            when {
+                !s.live || s.pushToTalk == enabled -> s
+                enabled -> {
+                    mutedBeforePushToTalk = s.micMuted
+                    muted = true
+                    s.copy(pushToTalk = true, talking = false, micMuted = true)
+                }
+                else -> {
+                    muted = mutedBeforePushToTalk
+                    s.copy(pushToTalk = false, talking = false, micMuted = mutedBeforePushToTalk)
+                }
+            }
+        }
+        muted?.let(::applyMute)
+    }
+
+    /** O botão de falar foi apertado ([talking] verdadeiro) ou solto. O microfone abre e fecha na hora; o servidor é avisado sem passar do limite. */
+    fun setTalking(talking: Boolean) {
+        var changed = false
+        _state.update { s ->
+            changed = s.pushToTalk && s.phase != CallPhase.Ended && s.talking != talking
+            if (changed) s.copy(talking = talking, micMuted = !talking) else s
+        }
+        if (changed) applyMute(!talking)
+    }
+
+    /** O microfone local acompanha na hora; o `voice_mute` passa pelo [mute], que junta pedidos seguidos. */
+    private fun applyMute(muted: Boolean) {
+        engine.setMicrophoneEnabled(!muted)
+        mute.submit(muted)
+    }
+
+    private val CallState.live: Boolean get() = phase == CallPhase.Connected || phase == CallPhase.Reconnecting
 
     fun toggleCamera() = action {
         if (_state.value.cameraOn) {
@@ -479,7 +537,8 @@ class CallController(
     private suspend fun finish(end: CallEnd, detail: String? = null) {
         if (finished) return
         finished = true
-        _state.update { it.copy(phase = CallPhase.Ended, end = end, errorDetail = detail ?: it.errorDetail) }
+        // Sair segurando o botão de falar: o microfone fecha junto com o motor (abaixo) e o estado não fica "falando".
+        _state.update { it.copy(phase = CallPhase.Ended, end = end, errorDetail = detail ?: it.errorDetail, talking = false) }
         withContext(NonCancellable) {
             if (joinSent) runCatching { ws.send(WsCommand.VoiceLeave(channelId)) }
             runCatching { engine.close() }

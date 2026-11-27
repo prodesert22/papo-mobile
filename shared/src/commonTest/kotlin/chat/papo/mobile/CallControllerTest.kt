@@ -33,6 +33,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -122,6 +123,8 @@ class CallControllerTest {
         override fun setRemoteAudioGain(trackId: String, gain: Double) {
             gains[trackId] = gain
         }
+
+        override val headsetButton = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
 
         override fun close() {
             closed = true
@@ -626,5 +629,268 @@ class CallControllerTest {
         val f = connected()
         routes(f, Triple("papo-audio-0", "bia", "audio"))
         assertTrue(f.engine.gains.isEmpty())
+    }
+
+    // Botão do fone e apertar-para-falar
+
+    private fun Fixture.mutes() = signal.sent.filterIsInstance<WsCommand.VoiceMute>()
+
+    private fun Fixture.mics() = engine.log.filter { it.startsWith("mic:") }
+
+    @Test
+    fun alternarOMuteFechaOMicrofoneEAvisaOServidor() = runTest {
+        val f = connected()
+        assertFalse(f.call.state.value.micMuted)
+
+        f.call.toggleMute()
+        assertTrue(f.call.state.value.micMuted)
+        assertEquals("mic:false", f.engine.log.last()) // o microfone local fecha na hora
+        runCurrent()
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true)), f.mutes())
+
+        advanceTimeBy(300.milliseconds)
+        f.call.toggleMute()
+        runCurrent()
+        assertFalse(f.call.state.value.micMuted)
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true), WsCommand.VoiceMute("v1", false)), f.mutes())
+    }
+
+    @Test
+    fun toquesRapidosNoMuteViramNoMaximoUmComandoPorIntervalo() = runTest {
+        val f = connected()
+        repeat(9) {
+            f.call.toggleMute()
+            advanceTimeBy(20.milliseconds)
+        }
+        advanceTimeBy(500.milliseconds)
+        // Nove alternâncias a partir de "falando" terminam em "mudo": um comando na frente e o estado final depois.
+        assertTrue(f.call.state.value.micMuted)
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true)), f.mutes().takeLast(1))
+        assertTrue(f.mutes().size <= 2)
+    }
+
+    @Test
+    fun muteSoValeComAChamadaNoAr() = runTest {
+        val f = Fixture(this)
+        f.signal.answerOffers = false
+        f.call.start()
+        runCurrent()
+        f.call.toggleMute() // ainda entrando
+        assertTrue(f.call.state.value.micMuted)
+        assertTrue(f.mutes().isEmpty())
+    }
+
+    @Test
+    fun botaoDoFoneAlternaOMute() = runTest {
+        val f = connected()
+        f.engine.headsetButton.emit(Unit)
+        runCurrent()
+        assertTrue(f.call.state.value.micMuted)
+        assertEquals("mic:false", f.engine.log.last())
+
+        advanceTimeBy(300.milliseconds)
+        f.engine.headsetButton.emit(Unit)
+        runCurrent()
+        assertFalse(f.call.state.value.micMuted)
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true), WsCommand.VoiceMute("v1", false)), f.mutes())
+    }
+
+    @Test
+    fun apertarParaFalarFechaOMicrofoneEMandaMutadoAoLigar() = runTest {
+        val f = connected()
+        f.call.setPushToTalk(true)
+        runCurrent()
+
+        val state = f.call.state.value
+        assertTrue(state.pushToTalk)
+        assertTrue(state.micMuted)
+        assertFalse(state.talking)
+        assertEquals("mic:false", f.engine.log.last())
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true)), f.mutes())
+    }
+
+    @Test
+    fun segurarAbreOMicrofoneNaHoraESoltarFechaNaHora() = runTest {
+        val f = connected()
+        f.call.setPushToTalk(true)
+        advanceTimeBy(300.milliseconds)
+        f.signal.sent.clear()
+
+        f.call.setTalking(true)
+        assertEquals("mic:true", f.engine.log.last()) // antes de qualquer comando sair
+        runCurrent()
+        assertEquals(listOf(WsCommand.VoiceMute("v1", false)), f.mutes())
+        assertTrue(f.call.state.value.talking)
+        assertFalse(f.call.state.value.micMuted)
+
+        advanceTimeBy(300.milliseconds)
+        f.signal.sent.clear()
+        f.call.setTalking(false)
+        assertEquals("mic:false", f.engine.log.last())
+        runCurrent()
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true)), f.mutes())
+        assertFalse(f.call.state.value.talking)
+        assertTrue(f.call.state.value.micMuted)
+    }
+
+    @Test
+    fun apertosRapidosNaoPassamDoLimiteDeSinalizacao() = runTest {
+        val f = connected()
+        f.call.setPushToTalk(true)
+        advanceTimeBy(300.milliseconds)
+        f.signal.sent.clear()
+        val micsBefore = f.mics().size
+
+        repeat(10) {
+            f.call.setTalking(true)
+            advanceTimeBy(10.milliseconds)
+            f.call.setTalking(false)
+            advanceTimeBy(10.milliseconds)
+        }
+        advanceTimeBy(500.milliseconds)
+
+        // O microfone local acompanhou cada aperto e cada solta; o servidor recebeu só o primeiro e o estado final.
+        assertEquals(20, f.mics().size - micsBefore)
+        assertEquals(listOf(WsCommand.VoiceMute("v1", false), WsCommand.VoiceMute("v1", true)), f.mutes())
+    }
+
+    @Test
+    fun desligarApertarParaFalarVoltaAoEstadoAnterior() = runTest {
+        val f = connected() // falando
+        f.call.setPushToTalk(true)
+        advanceTimeBy(300.milliseconds)
+        f.call.setPushToTalk(false)
+        runCurrent()
+
+        val state = f.call.state.value
+        assertFalse(state.pushToTalk)
+        assertFalse(state.micMuted)
+        assertEquals("mic:true", f.engine.log.last())
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true), WsCommand.VoiceMute("v1", false)), f.mutes())
+    }
+
+    @Test
+    fun desligarApertarParaFalarVoltaAoMuteQueTinha() = runTest {
+        val f = connected()
+        f.call.toggleMute() // já estava mudo
+        advanceTimeBy(300.milliseconds)
+        f.call.setPushToTalk(true)
+        f.call.setTalking(true)
+        advanceTimeBy(300.milliseconds)
+        f.call.setPushToTalk(false) // soltando junto: o microfone fecha
+        advanceTimeBy(300.milliseconds)
+
+        assertTrue(f.call.state.value.micMuted)
+        assertFalse(f.call.state.value.talking)
+        assertEquals("mic:false", f.engine.log.last())
+        assertEquals(WsCommand.VoiceMute("v1", true), f.mutes().last())
+    }
+
+    @Test
+    fun ligarEDesligarLogoSaiOPrimeiroEORestauradoSoDepoisDoIntervalo() = runTest {
+        val f = connected()
+        f.signal.sent.clear()
+        f.call.setPushToTalk(true)
+        f.call.setPushToTalk(false)
+        runCurrent()
+        // O primeiro pedido depois de um tempo parado sai na hora; o seguinte espera o intervalo.
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true)), f.mutes())
+        advanceTimeBy(300.milliseconds)
+        assertEquals(listOf(WsCommand.VoiceMute("v1", true), WsCommand.VoiceMute("v1", false)), f.mutes())
+        assertFalse(f.call.state.value.micMuted)
+        assertEquals("mic:true", f.engine.log.last())
+    }
+
+    @Test
+    fun comApertarParaFalarOMuteComumENaoFazNada() = runTest {
+        val f = connected()
+        f.call.setPushToTalk(true)
+        advanceTimeBy(300.milliseconds)
+        f.signal.sent.clear()
+        val micsBefore = f.mics().size
+
+        f.call.toggleMute()
+        f.engine.headsetButton.emit(Unit)
+        advanceTimeBy(300.milliseconds)
+        assertTrue(f.call.state.value.micMuted)
+        assertEquals(micsBefore, f.mics().size)
+        assertTrue(f.mutes().isEmpty())
+    }
+
+    @Test
+    fun segurarSemApertarParaFalarEIgnorado() = runTest {
+        val f = connected()
+        f.signal.sent.clear()
+        f.call.setTalking(true)
+        advanceTimeBy(300.milliseconds)
+        assertFalse(f.call.state.value.talking)
+        assertFalse(f.call.state.value.micMuted)
+        assertTrue(f.mutes().isEmpty())
+    }
+
+    @Test
+    fun soltarSemEstarFalandoOuLigarDeNovoNaoFazNada() = runTest {
+        val f = connected()
+        f.call.setPushToTalk(true)
+        advanceTimeBy(300.milliseconds)
+        f.signal.sent.clear()
+        val micsBefore = f.mics().size
+
+        f.call.setTalking(false)
+        f.call.setPushToTalk(true)
+        advanceTimeBy(300.milliseconds)
+        assertEquals(micsBefore, f.mics().size)
+        assertTrue(f.mutes().isEmpty())
+    }
+
+    @Test
+    fun apertarParaFalarSoLigaComAChamadaNoAr() = runTest {
+        val f = Fixture(this)
+        f.signal.answerOffers = false
+        f.call.start()
+        runCurrent()
+        f.call.setPushToTalk(true)
+        assertFalse(f.call.state.value.pushToTalk)
+    }
+
+    @Test
+    fun apertarParaFalarLigadoAntesDeAbrirOMicrofoneNaoAbre() = runTest {
+        val f = Fixture(this)
+        f.signal.answerOffers = false
+        f.call.start()
+        runCurrent()
+        // A conexão sobe antes de a entrada terminar; o usuário liga o apertar-para-falar nesse intervalo.
+        f.engine.connection.value = EngineConnection.Connected
+        runCurrent()
+        f.call.setPushToTalk(true)
+        f.signal.events.emit(WsEvent.VoiceAnswer("v1", "resposta"))
+        advanceTimeBy(1.seconds)
+
+        assertTrue(f.call.state.value.pushToTalk)
+        assertTrue(f.call.state.value.micMuted)
+        assertTrue(f.mics().none { it == "mic:true" })
+        assertTrue(f.mutes().none { !it.muted })
+    }
+
+    @Test
+    fun sairSegurandoFechaTudoESoltaOBotao() = runTest {
+        val f = connected()
+        f.call.setPushToTalk(true)
+        advanceTimeBy(300.milliseconds)
+        f.call.setTalking(true)
+        runCurrent()
+
+        f.call.leave()
+        advanceTimeBy(1.seconds)
+        assertEquals(CallEnd.Left, f.call.state.value.end)
+        assertFalse(f.call.state.value.talking)
+        assertTrue(f.engine.closed)
+        assertEquals(WsCommand.VoiceLeave("v1"), f.signal.sent.last())
+
+        // Depois do fim, soltar o botão não mexe em nada.
+        val sent = f.signal.sent.size
+        f.call.setTalking(false)
+        advanceTimeBy(1.seconds)
+        assertEquals(sent, f.signal.sent.size)
     }
 }
