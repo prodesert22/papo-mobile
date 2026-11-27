@@ -3,6 +3,7 @@ package chat.papo.mobile
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.PixelSize
 import chat.papo.mobile.media.PosterSource
+import chat.papo.mobile.media.attachmentThumbKey
 import chat.papo.mobile.media.isNearlyBlack
 import chat.papo.mobile.media.posterKey
 import chat.papo.mobile.media.posterRetryTimeUs
@@ -35,16 +36,15 @@ class VideoPosterTest {
     // posterKey
 
     @Test
-    fun achaveDaCapaTemAContaEOAnexo() {
-        assertEquals("att-poster/conta-1/att-1", posterKey("conta-1", "att-1"))
+    fun achaveDaCapaEstaNaAreaDasMensagensEPorAnexo() {
+        assertEquals("msg/att-poster/att-1", posterKey("att-1"))
     }
 
     @Test
-    fun achaveDaCapaDifereEntreContasEntreAnexosEDaMiniaturaDoServidor() {
-        assertNotEquals(posterKey("conta-1", "att-1"), posterKey("conta-2", "att-1"))
-        assertNotEquals(posterKey("conta-1", "att-1"), posterKey("conta-1", "att-2"))
-        // A miniatura do servidor usa "att-thumb/<id>": as duas nunca se confundem no mesmo cache.
-        assertNotEquals("att-thumb/att-1", posterKey("conta-1", "att-1"))
+    fun achaveDaCapaDifereEntreAnexosEDaMiniaturaDoServidor() {
+        assertNotEquals(posterKey("att-1"), posterKey("att-2"))
+        // A miniatura do servidor usa outro nome: as duas nunca se confundem no mesmo cache.
+        assertNotEquals(attachmentThumbKey("att-1"), posterKey("att-1"))
     }
 
     // posterSource

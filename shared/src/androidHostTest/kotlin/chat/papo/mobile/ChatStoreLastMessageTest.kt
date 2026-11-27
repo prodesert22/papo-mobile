@@ -54,7 +54,7 @@ class ChatStoreLastMessageTest {
         channel: String,
         stored: IntRange,
     ): ChatStore {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf(channel)).chat
         chat.sync()
         runCurrent()
         stored.forEach { chat.handle(created(it, channel)) }
@@ -228,7 +228,7 @@ class ChatStoreLastMessageTest {
     @Test
     fun longeDoFimDoHistoricoApagarAUltimaLimpaAPreviaEmVezDeUsarUmaMensagemAntiga() = runTest {
         val server = PagedChannel(200)
-        val chat = TestResources.session(server.engine, this).chat
+        val chat = TestResources.session(server.engine, this, open = listOf("c1")).chat
         chat.handle(WsEvent.ChannelCreated("c1", "papo", "text", 1))
         chat.locate("c1", "m50", server.ts(50), approximate = false)
         assertTrue(chat.isDetached("c1"))

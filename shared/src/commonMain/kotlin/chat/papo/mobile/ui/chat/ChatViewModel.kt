@@ -110,6 +110,8 @@ class ChatViewModel(
     private val pickedMentions = HashMap<String, String>()
 
     init {
+        // Enquanto este ViewModel existir a conversa não é podada do aparelho ([onCleared] encerra a contagem).
+        chat.conversationOpened(channelId)
         chat.setViewing(channelId)
         var located = false
         whileReadable {
@@ -505,6 +507,7 @@ class ChatViewModel(
 
     override fun onCleared() {
         chat.clearViewing(channelId)
+        chat.conversationClosed(channelId)
     }
 
     private fun launch(block: suspend () -> Unit) {

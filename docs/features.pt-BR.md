@@ -28,6 +28,10 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   abre os dados guardados fica no hardware seguro do celular.
 - Contas, sessões, mensagens, rascunhos e mídia em cache ficam cifrados e fora
   dos backups do aparelho.
+- O celular guarda só as 120 mensagens mais novas das 3 conversas, canais ou
+  mensagens diretas, que você abriu por último em cada conta, com as imagens,
+  os GIFs e as capas de vídeo delas. Vídeos nunca são guardados. O resto do
+  histórico sai do celular e vem do servidor quando você abre a conversa.
 - Opcionalmente, bloqueie capturas de tela e esconda as conversas na lista de
   apps recentes.
 - O player do YouTube dentro do app é a única exceção: enquanto ele está aberto,
