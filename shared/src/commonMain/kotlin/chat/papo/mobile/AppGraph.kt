@@ -22,6 +22,9 @@ import chat.papo.mobile.media.AudioEngineFactory
 import chat.papo.mobile.media.AudioPlayback
 import chat.papo.mobile.media.MediaCache
 import chat.papo.mobile.media.VideoPosterExtractor
+import chat.papo.mobile.media.VoiceClipPlayerFactory
+import chat.papo.mobile.media.VoiceRecorder
+import chat.papo.mobile.media.VoiceRecording
 import chat.papo.mobile.push.PushTokens
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.notif_system_attachment
@@ -45,6 +48,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
+import kotlin.time.Clock
 import org.jetbrains.compose.resources.getString
 
 /** O que cada plataforma precisa fornecer ao código comum. */
@@ -81,6 +85,10 @@ class PlatformDeps(
      * só o chama por [AppGraph.readLibraryDefinitions].
      */
     val libraryDefinitions: () -> String? = { null },
+    /** O gravador de mensagens de voz; null onde a plataforma não tem um, e então o clipe não oferece gravar. Vale junto com [voiceClipPlayers]. */
+    val voiceRecorder: VoiceRecorder? = null,
+    /** O player da revisão de uma gravação; null junto com [voiceRecorder]. */
+    val voiceClipPlayers: VoiceClipPlayerFactory? = null,
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -92,12 +100,16 @@ class AppSession internal constructor(
     private val scope: CoroutineScope,
     /** O player de áudio de todas as contas (um áudio por vez); null sem motor na plataforma. */
     val audio: AudioPlayback? = null,
+    /** A gravação de mensagens de voz (uma por vez no app); null sem gravador na plataforma. */
+    val voiceRecording: VoiceRecording? = null,
 ) : UnlockedSession {
     /** Em chamada o app não bloqueia sozinho nem desliga o tempo real. */
     override val busy: StateFlow<Boolean> get() = calls.active
 
     override suspend fun close() {
         calls.leave()
+        // A gravação que ficou na memória não sobrevive à sessão (nem ao bloqueio, que a fecha).
+        voiceRecording?.release()
         audio?.release()
         // Um rótulo ou cor escolhido há instantes ainda pode esperar o escritor; falhar aqui não pode deixar o registro aberto.
         try {
@@ -167,6 +179,8 @@ class AppGraph(private val platform: PlatformDeps) {
     fun onBackground() {
         // Tocar em segundo plano exigiria um serviço de mídia, que o app não tem: o áudio pausa, mesmo com uma chamada aberta.
         currentSession()?.audio?.pause()
+        // O Android não deixa capturar o microfone em segundo plano sem um serviço, que o app não tem: a gravação para e fica para a revisão.
+        currentSession()?.voiceRecording?.onBackground()
         currentSession()?.takeIf { !it.busy.value }?.accounts?.setForeground(false)
         lock.onBackground()
     }
@@ -225,6 +239,22 @@ class AppGraph(private val platform: PlatformDeps) {
             }
             AudioPlayback(engines, sessionScope, live)
         }
-        AppSession(accounts, keys, CallManager(platform.voice, sessionScope), driver, sessionScope, audio)
+        val calls = CallManager(platform.voice, sessionScope)
+        val recorder = platform.voiceRecorder
+        val clipPlayers = platform.voiceClipPlayers
+        val voiceRecording = if (recorder != null && clipPlayers != null) {
+            VoiceRecording(
+                recorder = recorder,
+                players = clipPlayers,
+                scope = sessionScope,
+                io = platform.dispatchers.io,
+                callActive = calls.active,
+                pauseOtherAudio = { audio?.pause() },
+                wallClockMs = { Clock.System.now().toEpochMilliseconds() },
+            )
+        } else {
+            null
+        }
+        AppSession(accounts, keys, calls, driver, sessionScope, audio, voiceRecording)
     }
 }

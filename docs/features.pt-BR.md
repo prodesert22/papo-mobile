@@ -38,6 +38,10 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Escolha o que as notificações do próprio app mostram: tudo, nada na tela de
   bloqueio do celular, ou só "Nova mensagem" em todo lugar. As notificações
   push que o Android mostra seguem a prévia do servidor.
+- O celular guarda só as 120 mensagens mais novas das 3 conversas, canais ou
+  mensagens diretas, que você abriu por último em cada conta, com as imagens,
+  os GIFs e as capas de vídeo delas. Vídeos nunca são guardados. O resto do
+  histórico sai do celular e vem do servidor quando você abre a conversa.
 - O player do YouTube dentro do app é a única exceção: enquanto ele está aberto,
   o componente web do celular guarda cookies e cache sem cifrar na pasta do app.
   Eles são apagados quando o player fecha e quando o app trava; algumas bases
@@ -86,6 +90,12 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   anexo. Até 10 arquivos, 100 MB cada e 105 MB somados; os arquivos sobem em
   fluxo, com progresso e botão de cancelar, e uma foto JPEG que leva a sua
   localização avisa antes de enviar.
+- Grave uma mensagem de voz no menu do clipe: o app pede o microfone, grava até
+  30 minutos e, depois de parar, você pode ouvir, descartar ou enviar. Ela sai
+  como uma mensagem só dela, respondendo à mensagem que você estava
+  respondendo, e o que você digitou e os arquivos que anexou ficam no
+  compositor. É enviada como um arquivo de áudio que toca na mensagem aqui e no
+  web, e fica só na memória: nunca é gravada no armazenamento do celular.
 - Respostas, edição e exclusão, reações, mensagens fixadas e menções. As
   menções acham as pessoas por qualquer parte do nome, sem se importar com
   acentos (numa conversa direta, só as duas pessoas dela), e as mensagens que
@@ -272,4 +282,8 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   o app não tira a localização. O que vem do teclado tem limite de 20 MB por item.
 - Mensagens que esperam para sair e arquivos anexados a um rascunho se perdem
   quando o app trava ou fecha.
+- Não dá para gravar uma mensagem de voz durante uma chamada de voz, e sair do
+  app para a gravação: ela fica guardada para você ouvir e enviar quando voltar.
+  Ela é descartada quando você sai da conversa ou o app trava. A permissão do
+  microfone recusada de vez precisa ser dada nas configurações do celular.
 - A interface está em português.

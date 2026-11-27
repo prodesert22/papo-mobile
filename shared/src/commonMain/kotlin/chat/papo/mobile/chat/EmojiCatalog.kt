@@ -24,6 +24,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlin.io.encoding.Base64
@@ -263,6 +264,20 @@ class EmojiCatalog(
 
         /** Chave, na tabela `meta` da conta, da última lista completa. */
         internal const val CACHE_KEY = "emoji.server"
+
+        /**
+         * As chaves de mídia dos emojis da última lista completa guardada em [meta]; vazio se não há lista ou ela não
+         * se lê. Bloqueante: só dentro de um dispatcher de E/S.
+         */
+        internal fun cachedMediaKeys(meta: MetaQueries): List<String> {
+            val stored = meta.get(CACHE_KEY).executeAsOneOrNull() ?: return emptyList()
+            val list = try {
+                json.decodeFromString(listSerializer, stored)
+            } catch (e: SerializationException) {
+                return emptyList()
+            }
+            return list.map { mediaKey(it.id) }
+        }
 
         private val json = Json { ignoreUnknownKeys = true }
         private val listSerializer = ListSerializer(ServerEmoji.serializer())

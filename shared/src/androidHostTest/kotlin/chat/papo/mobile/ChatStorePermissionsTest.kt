@@ -123,7 +123,9 @@ class ChatStorePermissionsTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val client = PapoClient(engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt"))
         val resources = TestResources.inMemory(dispatcher)
-        return Account(AccountSession("conta", userId, client, backgroundScope, resources, dispatcher), AccountDb(resources.driver))
+        val session = AccountSession("conta", userId, client, backgroundScope, resources, dispatcher)
+        listOf("c1", "c2").forEach(session.chat::conversationOpened) // só conversa aberta guarda mensagens do tempo real
+        return Account(session, AccountDb(resources.driver))
     }
 
     private fun count(request: String) = requests.count { it == request }

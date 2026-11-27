@@ -47,6 +47,7 @@ import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.ModerationView
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PosterSource
+import chat.papo.mobile.media.attachmentThumbKey
 import chat.papo.mobile.media.guardGone
 import chat.papo.mobile.media.moderationView
 import chat.papo.mobile.media.posterKey
@@ -98,8 +99,8 @@ internal fun VideoAttachment(
     val poster by rememberMediaImage(
         session,
         when (source) {
-            PosterSource.Server -> "att-thumb/${attachment.id}"
-            PosterSource.Extract -> posterKey(session.accountId, attachment.id)
+            PosterSource.Server -> attachmentThumbKey(attachment.id)
+            PosterSource.Extract -> posterKey(attachment.id)
             PosterSource.None -> null
         },
     ) {

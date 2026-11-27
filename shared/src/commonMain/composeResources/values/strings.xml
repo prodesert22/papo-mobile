@@ -470,6 +470,19 @@
     <string name="attach_problem_too_many">Uma mensagem leva até %1$s arquivos. O que passou disso não foi adicionado.</string>
     <string name="attach_problem_file_too_large">“%1$s” passa de %2$s MB, o limite de cada arquivo, e não foi adicionado.</string>
     <string name="attach_problem_total_too_large">Os arquivos passam de %1$s MB juntos. O que não coube não foi adicionado: mande o resto em outra mensagem.</string>
+    <string name="attach_voice">Gravar áudio</string>
+    <string name="attach_voice_in_call">Gravar áudio (indisponível em chamada)</string>
+    <string name="voice_recording">Gravando</string>
+    <string name="voice_stop">Parar a gravação</string>
+    <string name="voice_discard">Descartar a gravação</string>
+    <string name="voice_send">Enviar o áudio</string>
+    <string name="voice_review_position">Posição da gravação</string>
+    <string name="voice_open_settings">Configurações</string>
+    <string name="voice_problem_denied">O Papo precisa do microfone para gravar. Toque em Gravar áudio de novo para permitir.</string>
+    <string name="voice_problem_blocked">O microfone está bloqueado para o Papo. Libere a permissão nas configurações do aparelho.</string>
+    <string name="voice_problem_in_call">Não dá para gravar durante uma chamada de voz.</string>
+    <string name="voice_problem_failed">Não foi possível gravar o áudio. Tente de novo.</string>
+    <string name="voice_problem_playback">Não foi possível tocar a gravação. Você ainda pode enviá-la.</string>
     <string name="outbox_failed_too_large">Não enviada: os arquivos passam do limite de tamanho do servidor. Tire alguns e reenvie.</string>
     <string name="outbox_failed_file_unavailable">Não enviada: “%1$s” não está mais disponível.</string>
     <!-- 02 · trilha B · onda 1 (embed completo, GIF, moderação) -->
