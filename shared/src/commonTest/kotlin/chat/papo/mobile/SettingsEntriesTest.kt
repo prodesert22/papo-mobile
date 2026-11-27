@@ -2,35 +2,28 @@ package chat.papo.mobile
 
 import chat.papo.mobile.ui.settings.AppEntry
 import chat.papo.mobile.ui.settings.ServerEntry
-import chat.papo.mobile.ui.settings.SettingsTab
+import chat.papo.mobile.ui.settings.SettingsPage
 import chat.papo.mobile.ui.settings.appEntries
 import chat.papo.mobile.ui.settings.serverEntries
-import chat.papo.mobile.ui.settings.settingsTabs
-import chat.papo.mobile.ui.settings.visibleTab
+import chat.papo.mobile.ui.settings.settingsPage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class SettingsEntriesTest {
     @Test
-    fun semContaSoHaAAbaDoAplicativo() {
-        assertEquals(listOf(SettingsTab.App), settingsTabs(null))
+    fun aEngrenagemAbreAsConfiguracoesDoApp() {
+        assertEquals(SettingsPage.App, settingsPage(SettingsPage.App, null))
+        assertEquals(SettingsPage.App, settingsPage(SettingsPage.App, "conta-1"))
     }
 
     @Test
-    fun comContaHaAsDuasAbas() {
-        assertEquals(listOf(SettingsTab.App, SettingsTab.Server), settingsTabs("conta-1"))
+    fun osTresPontosAbremAsConfiguracoesDoServidorDaConta() {
+        assertEquals(SettingsPage.Server, settingsPage(SettingsPage.Server, "conta-1"))
     }
 
     @Test
-    fun aAbaServidorSemContaVoltaParaAAbaDoAplicativo() {
-        assertEquals(SettingsTab.App, visibleTab(SettingsTab.Server, null))
-    }
-
-    @Test
-    fun aAbaEscolhidaValeQuandoExiste() {
-        assertEquals(SettingsTab.Server, visibleTab(SettingsTab.Server, "conta-1"))
-        assertEquals(SettingsTab.App, visibleTab(SettingsTab.App, "conta-1"))
-        assertEquals(SettingsTab.App, visibleTab(SettingsTab.App, null))
+    fun asDoServidorSemContaFicamAsDoApp() {
+        assertEquals(SettingsPage.App, settingsPage(SettingsPage.Server, null))
     }
 
     @Test

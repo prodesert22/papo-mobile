@@ -20,9 +20,10 @@ release notes in [releases/](../releases/) describe each version's changes.
   differ.
 - A quick switcher that finds any conversation of any of your accounts, with
   mentions and unread conversations first.
-- Settings in two tabs, as in Android's own settings: "Aplicativo" for this
-  phone and "Servidor" for the selected account, each a list with a short
-  summary of every item. The server bar shows your avatar on each account.
+- Settings as lists with a short summary of every item, as in Android's own
+  settings: the gear at the bottom of the server bar opens the app settings and
+  the menu at the top of the channel list opens the server settings of the
+  account. The server bar shows your avatar on each account.
 
 ## Privacy on the device
 

@@ -27,9 +27,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -56,6 +54,7 @@ import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.notif_account_open
 import chat.papo.mobile.resources.notif_account_section
 import chat.papo.mobile.resources.profile_edit_row_body
+import chat.papo.mobile.resources.rail_settings
 import chat.papo.mobile.resources.settings_about
 import chat.papo.mobile.resources.settings_account_local
 import chat.papo.mobile.resources.settings_account_local_summary
@@ -72,11 +71,9 @@ import chat.papo.mobile.resources.settings_remove_summary
 import chat.papo.mobile.resources.settings_server_info
 import chat.papo.mobile.resources.settings_server_theme
 import chat.papo.mobile.resources.settings_server_theme_summary
+import chat.papo.mobile.resources.settings_server_title
 import chat.papo.mobile.resources.settings_storage
 import chat.papo.mobile.resources.settings_storage_summary
-import chat.papo.mobile.resources.settings_tab_app
-import chat.papo.mobile.resources.settings_tab_server
-import chat.papo.mobile.resources.settings_title
 import chat.papo.mobile.resources.settings_version
 import chat.papo.mobile.ui.components.AccountAvatar
 import chat.papo.mobile.ui.components.LocalNotificationPermission
@@ -84,8 +81,8 @@ import chat.papo.mobile.ui.settings.appearance.themeSummary
 import chat.papo.mobile.ui.theme.ThemeSpec
 import org.jetbrains.compose.resources.stringResource
 
-/** As abas da tela de configurações: as do aparelho e as da conta (servidor). */
-enum class SettingsTab { App, Server }
+/** Qual das duas telas de configurações: as do app (do aparelho) ou as do servidor de uma conta. */
+enum class SettingsPage { App, Server }
 
 /**
  * Para onde a tela de configurações leva. As funções com conta recebem o id dela: é a conta que a aba Servidor mostra.
@@ -107,8 +104,8 @@ class SettingsNavigation(
 )
 
 /**
- * Configurações em duas abas, Aplicativo e Servidor, cada uma uma lista de itens com resumo. Sem [accountId] só há a aba
- * Aplicativo, e a barra de abas some.
+ * As configurações de um lado só: as do app (a engrenagem da faixa de servidores) ou as do servidor da conta [accountId]
+ * (os três pontos do topo da lista), cada uma uma lista de itens com resumo. Sem conta, só as do app.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,49 +115,26 @@ fun SettingsScreen(
     /** O tema do app, para o resumo do item Aparência. */
     appTheme: ThemeSpec,
     accountId: String?,
-    initialTab: SettingsTab,
+    page: SettingsPage,
     nav: SettingsNavigation,
 ) {
-    val tabs = settingsTabs(accountId)
-    var selected by rememberSaveable { mutableIntStateOf(initialTab.ordinal) }
-    val tab = visibleTab(SettingsTab.entries[selected], accountId)
-
+    val shown = settingsPage(page, accountId)
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text(stringResource(Res.string.settings_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = nav.back) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(Res.string.action_back))
-                        }
-                    },
-                )
-                if (tabs.size > 1) {
-                    PrimaryTabRow(selectedTabIndex = tabs.indexOf(tab)) {
-                        tabs.forEach { item ->
-                            Tab(
-                                selected = item == tab,
-                                onClick = { selected = item.ordinal },
-                                text = {
-                                    Text(
-                                        stringResource(
-                                            if (item == SettingsTab.App) Res.string.settings_tab_app else Res.string.settings_tab_server,
-                                        ),
-                                    )
-                                },
-                            )
-                        }
+            TopAppBar(
+                title = {
+                    Text(stringResource(if (shown == SettingsPage.Server) Res.string.settings_server_title else Res.string.rail_settings))
+                },
+                navigationIcon = {
+                    IconButton(onClick = nav.back) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(Res.string.action_back))
                     }
-                }
-            }
+                },
+            )
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            when {
-                tab == SettingsTab.Server && accountId != null -> ServerTab(session, accountId, nav)
-                else -> AppTab(appVersion, appTheme, nav)
-            }
+            if (shown == SettingsPage.Server && accountId != null) ServerTab(session, accountId, nav) else AppTab(appVersion, appTheme, nav)
         }
     }
 }

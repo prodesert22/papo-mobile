@@ -6,13 +6,9 @@ enum class AppEntry { Appearance, Security, AndroidNotifications, DeviceData, Ab
 /** Os itens da aba Servidor, na ordem em que aparecem. */
 enum class ServerEntry { Profile, AccountLocal, ServerTheme, Notifications, Blocked, Password, Devices, ServerInfo, SignOut }
 
-/** As abas que a tela mostra: sem conta só há a do aplicativo. */
-fun settingsTabs(accountId: String?): List<SettingsTab> =
-    if (accountId == null) listOf(SettingsTab.App) else listOf(SettingsTab.App, SettingsTab.Server)
-
-/** A aba que vale: a escolhida, ou a do aplicativo quando a escolhida deixou de existir (a conta saiu). */
-fun visibleTab(selected: SettingsTab, accountId: String?): SettingsTab =
-    if (selected in settingsTabs(accountId)) selected else SettingsTab.App
+/** A tela que vale: a do servidor só com uma conta (a pedida pode ter saído); senão a do app. */
+fun settingsPage(requested: SettingsPage, accountId: String?): SettingsPage =
+    if (requested == SettingsPage.Server && accountId != null) SettingsPage.Server else SettingsPage.App
 
 /** [systemSettings]: a plataforma sabe abrir as configurações de notificação do sistema; sem isso o item não faz sentido. */
 fun appEntries(systemSettings: Boolean): List<AppEntry> = buildList {

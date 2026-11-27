@@ -103,7 +103,7 @@ import chat.papo.mobile.ui.settings.SecurityScreen
 import chat.papo.mobile.ui.settings.ServerInfoScreen
 import chat.papo.mobile.ui.settings.SettingsNavigation
 import chat.papo.mobile.ui.settings.SettingsScreen
-import chat.papo.mobile.ui.settings.SettingsTab
+import chat.papo.mobile.ui.settings.SettingsPage
 import chat.papo.mobile.ui.settings.appearance.AppearanceScreen
 import chat.papo.mobile.ui.settings.appearance.ServerThemeScreen
 import chat.papo.mobile.ui.settings.BlockedUsersScreen
@@ -130,8 +130,7 @@ private data object HomeRoute
 private data class AddServerRoute(val address: String? = null, val username: String? = null)
 
 /**
- * As configurações em abas: Aplicativo e Servidor. [accountId] é a conta da aba Servidor (sem conta, só há a aba
- * Aplicativo); [serverTab] abre direto nela.
+ * As configurações: as do app, ou, com [serverTab], as do servidor da conta [accountId] (sem a conta, as do app).
  */
 @Serializable
 private data class SettingsRoute(val accountId: String? = null, val serverTab: Boolean = false)
@@ -353,7 +352,7 @@ private fun Unlocked(
                             onInbox = { navController.navigate(InboxRoute(it.id)) },
                             onEditProfile = { navController.navigate(EditProfileRoute(it.id)) },
                             onSwitch = { navController.navigate(SwitcherRoute()) },
-                            onAppSettings = { navController.navigate(SettingsRoute(selected?.id)) },
+                            onAppSettings = { navController.navigate(SettingsRoute()) },
                             content = { account ->
                                 sessions[account.id]?.let { accountSession ->
                                     Column {
@@ -472,7 +471,7 @@ private fun Unlocked(
                 appVersion = appVersion,
                 appTheme = appTheme,
                 accountId = accountId,
-                initialTab = if (route.serverTab && accountId != null) SettingsTab.Server else SettingsTab.App,
+                page = if (route.serverTab) SettingsPage.Server else SettingsPage.App,
                 nav = SettingsNavigation(
                     back = { navController.popBackStack() },
                     appearance = { navController.navigate(AppearanceRoute) },

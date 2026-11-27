@@ -21,10 +21,10 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   eles diferem.
 - Troca rápida que acha qualquer conversa de qualquer uma das suas contas, com
   menções e conversas não lidas primeiro.
-- Configurações em duas abas, como as do próprio Android: "Aplicativo" para
-  este celular e "Servidor" para a conta selecionada, cada uma uma lista com
-  um resumo curto de cada item. A barra de servidores mostra o seu avatar em
-  cada conta.
+- Configurações em listas com um resumo curto de cada item, como as do próprio
+  Android: a engrenagem no pé da barra de servidores abre as configurações do
+  app e o menu no topo da lista de canais abre as configurações do servidor da
+  conta. A barra de servidores mostra o seu avatar em cada conta.
 
 ## Privacidade no aparelho
 

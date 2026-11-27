@@ -1,10 +1,10 @@
 ## Settings
 
-- Settings are split into two tabs, "Aplicativo" for this phone and "Servidor"
-  for the selected account, each a list with a short summary of what is inside,
-  as in Android's own settings. The gear at the bottom of the server bar opens
-  the app tab and the account menu opens the server tab.
-- "Notificações do Android" in the app tab opens the system notification
+- Settings are lists with a short summary of what is inside each item, as in
+  Android's own settings. The gear at the bottom of the server bar opens the
+  app settings, and the menu at the top of the channel list opens the settings
+  of that server's account.
+- "Notificações do Android" in the app settings opens the system notification
   settings, where the sound and vibration of each channel live.
 
 ## Appearance
@@ -58,3 +58,9 @@
   settings, when you may change them, above the notification settings.
 - The server bar shows your avatar on each account, instead of the first letter
   of your name.
+
+## Fixes
+
+- An avatar with a transparent background no longer shows a colored circle
+  behind it in conversations, profiles and the member list. The account tile in
+  the server bar keeps the account color behind it.

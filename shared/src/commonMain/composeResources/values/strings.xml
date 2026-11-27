@@ -203,7 +203,6 @@
     <string name="reset_done">Senha redefinida. Entre com a senha nova.</string>
 
     <!-- Configurações do app -->
-    <string name="settings_title">Configurações</string>
     <string name="settings_lock">Bloquear com digital</string>
     <string name="settings_lock_body">Pede sua digital (ou a senha do aparelho) para abrir o Papo. Sem ela, os dados guardados aqui não podem ser lidos.</string>
     <string name="settings_lock_not_enrolled">Cadastre uma digital nas configurações do aparelho para usar o bloqueio.</string>
@@ -635,8 +634,7 @@
     <string name="crop_area">Área de recorte. Arraste para mover a imagem e use dois dedos para ampliar.</string>
 
     <!-- 0.9.0 · comum (onda 0): nomes que mais de uma trilha usa -->
-    <string name="settings_tab_app">Aplicativo</string>
-    <string name="settings_tab_server">Servidor</string>
+    <string name="settings_server_title">Configurações do servidor</string>
     <string name="settings_appearance">Aparência</string>
     <string name="settings_server_theme">Aparência deste servidor</string>
     <string name="settings_privacy">Segurança e privacidade</string>
