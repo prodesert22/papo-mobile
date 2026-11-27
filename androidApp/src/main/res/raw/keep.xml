@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O plugin do AboutLibraries gera o JSON como @raw/aboutlibraries e o código só o acha pelo id; sem isto a redução de
+     recursos do release o apaga por achar que ninguém o usa. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/aboutlibraries" />

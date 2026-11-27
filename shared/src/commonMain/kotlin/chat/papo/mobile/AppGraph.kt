@@ -75,6 +75,12 @@ class PlatformDeps(
     val pushTokens: PushTokens? = null,
     /** O conteúdo que as notificações montadas pelo app mostram; o [notifier] lê o mesmo objeto que a tela de segurança muda. */
     val notificationPrivacy: NotificationPrivacy = NotificationPrivacy(prefs),
+    /**
+     * O JSON das bibliotecas de terceiros e das suas licenças (o que o plugin do AboutLibraries gerou na compilação); null
+     * onde a plataforma não o tem ou não o conseguiu ler. Lê do recurso a cada chamada: bloqueia, por isso o código comum
+     * só o chama por [AppGraph.readLibraryDefinitions].
+     */
+    val libraryDefinitions: () -> String? = { null },
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -114,6 +120,9 @@ class AppGraph(private val platform: PlatformDeps) {
     val build: BuildInfo get() = platform.build
 
     val appVersion: String get() = platform.build.versionName
+
+    /** O JSON das bibliotecas de terceiros, lido sob demanda fora da thread principal; o chamador não o guarda depois de usar. */
+    suspend fun readLibraryDefinitions(): String? = withContext(platform.dispatchers.io) { platform.libraryDefinitions() }
 
     /** A permissão de notificar do sistema; null onde a plataforma não tem notificações. */
     val notificationPermission: NotificationPermission? get() = platform.notificationPermission

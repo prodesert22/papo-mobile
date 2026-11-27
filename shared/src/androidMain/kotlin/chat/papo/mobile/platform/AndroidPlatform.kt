@@ -2,7 +2,9 @@ package chat.papo.mobile.platform
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.content.res.Resources
 import androidx.annotation.DrawableRes
+import androidx.annotation.RawRes
 import androidx.core.content.pm.PackageInfoCompat
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.PlatformDeps
@@ -15,6 +17,7 @@ import android.os.Process
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
+import java.io.IOException
 import java.util.concurrent.Executors
 
 /**
@@ -32,12 +35,14 @@ private val backgroundDispatcher by lazy {
 
 /**
  * Monta o grafo do app com as implementações Android. [notificationIcon] é o ícone de uma cor das notificações, que mora
- * nos recursos do aplicativo. [pushTokens] é o mesmo objeto a que o serviço do FCM entrega as trocas de token.
+ * nos recursos do aplicativo; [libraryDefinitionsRes] é o JSON das licenças de terceiros que o plugin gera. [pushTokens] é
+ * o mesmo objeto a que o serviço do FCM entrega as trocas de token.
  */
 fun createAndroidGraph(
     context: Context,
     activities: ActivityHolder,
     @DrawableRes notificationIcon: Int,
+    @RawRes libraryDefinitionsRes: Int,
     pushTokens: AndroidPushTokens,
 ): AppGraph {
     val app = context.applicationContext
@@ -66,6 +71,7 @@ fun createAndroidGraph(
             notificationPermission = AndroidNotificationPermission(app, requests),
             pushTokens = pushTokens,
             notificationPrivacy = notificationPrivacy,
+            libraryDefinitions = { readRawText(app, libraryDefinitionsRes) },
         ),
     )
     // O que ficou para outros aplicativos lerem (Compartilhar) não sobrevive ao bloqueio nem ao apagamento dos dados locais.
@@ -73,6 +79,15 @@ fun createAndroidGraph(
     // O Android mostra os pushes sozinho, no canal que o manifesto aponta: ele precisa existir antes da primeira mensagem.
     if (pushTokens.available) graph.scope.launch { notifier.ensurePushChannel() }
     return graph
+}
+
+/** O texto do recurso `raw` [id]; null se o recurso não existe ou não pôde ser lido. */
+private fun readRawText(app: Context, @RawRes id: Int): String? = try {
+    app.resources.openRawResource(id).use { it.readBytes().decodeToString() }
+} catch (_: Resources.NotFoundException) {
+    null
+} catch (_: IOException) {
+    null
 }
 
 /** A compilação instalada, lida do pacote; sem o pacote (não acontece no aparelho), uma vazia. */

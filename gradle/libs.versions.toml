@@ -24,6 +24,8 @@ lifecycle = "2.11.0"
 coil = "3.6.3"
 accompanist = "0.37.3"
 zoomable = "2.16.0"
+# Lista de licenças de terceiros: o plugin gera o JSON na compilação e o `core` o lê (sem a interface pronta, que abre links sem o filtro da regra 6).
+aboutlibraries = "15.3.0"
 # Só o motor de cores do Material (sem Compose): o MaterialKolor 5.0.1 exige material3 1.12.0-alpha03 e puxaria o projeto para uma alfa.
 material-color-utilities = "5.0.1"
 sqlcipher = "4.20.0"
@@ -43,6 +45,8 @@ media3 = "1.12.0-rc01"
 firebase-bom = "35.2.0"
 google-services = "4.6.0"
 turbine = "1.2.1"
+# Só o leitor do aboutlibraries-core em Android usa org.json, e o android.jar dos testes na JVM só tem stubs: o teste precisa da implementação.
+org-json = "20260814"
 androidx-test-runner = "1.7.0"
 androidx-test-junit = "1.3.0"
 
@@ -98,6 +102,9 @@ zoomable = { module = "net.engawapg.lib:zoomable", version.ref = "zoomable" }
 # Esquemas de cor do Material por cor semente, para as predefinições de tema.
 material-color-utilities = { module = "com.materialkolor:material-color-utilities", version.ref = "material-color-utilities" }
 
+# Licenças de terceiros: só o leitor do JSON gerado pelo plugin (Apache-2.0, multiplataforma).
+aboutlibraries-core = { module = "com.mikepenz:aboutlibraries-core", version.ref = "aboutlibraries" }
+
 # Android
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
@@ -121,6 +128,7 @@ kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotl
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
 androidx-test-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-test-junit" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
+org-json = { module = "org.json:json", version.ref = "org-json" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -131,3 +139,4 @@ compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-m
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 google-services = { id = "com.google.gms.google-services", version.ref = "google-services" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
+aboutlibraries-android = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutlibraries" }

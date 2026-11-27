@@ -517,7 +517,7 @@ private fun Unlocked(
             AboutScreen(graph.build, onLicenses = { navController.navigate(LicensesRoute) }, onBack = { navController.popBackStack() })
         }
         composable<LicensesRoute> {
-            LicensesScreen(onBack = { navController.popBackStack() })
+            LicensesScreen(readDefinitions = graph::readLibraryDefinitions, onBack = { navController.popBackStack() })
         }
         // ---- fim do item 14 ----
 

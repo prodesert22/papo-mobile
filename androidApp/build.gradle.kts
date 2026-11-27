@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.aboutlibraries.android)
 }
 
 kotlin {
@@ -49,6 +50,23 @@ val releaseSigning: Map<String, String>? = run {
 // Um APK por arquitetura mais o universal. Só nas releases (-Ppapo.abiSplits=true):
 // no dia a dia o APK de debug continua único e com o nome de sempre.
 val abiSplits = providers.gradleProperty("papo.abiSplits").orNull == "true"
+
+// Licenças de terceiros: o plugin lê o grafo real de dependências do APK e gera o JSON que a tela mostra. `offlineMode`
+// proíbe qualquer acesso à rede na compilação (nem licença remota, nem texto SPDX); por isso o texto das licenças e o que o
+// POM não informa entram à mão em `aboutlibraries/licenses`.
+aboutLibraries {
+    offlineMode = true
+    collect {
+        configPath = file("aboutlibraries")
+    }
+    // Modo estrito: uma dependência nova com licença fora desta lista (ou sem licença) derruba a compilação, e alguém
+    // confere o que ela exige antes de ela entrar no APK.
+    license {
+        strictMode = com.mikepenz.aboutlibraries.plugin.StrictMode.FAIL
+        // A licença do SQLCipher não tem identificador SPDX: entra pelo nome que `aboutlibraries/licenses/sqlcipher.json` lhe dá.
+        allowedLicenses.addAll("Apache-2.0", "MIT", "BSD-3-Clause", "ASDKL", "SQLCipher Community Edition License")
+    }
+}
 
 android {
     namespace = "chat.papo.mobile"
