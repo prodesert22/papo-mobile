@@ -47,8 +47,20 @@ release notes in [releases/](../releases/) describe each version's changes.
   black background and black list areas to save energy on OLED screens. Six
   presets (Papo, Oceano, Floresta, Ametista, Âmbar and Rosa) and a live
   preview of the channel list and a conversation.
+- Change each color of a theme (accent, background, list areas, server bar,
+  text, secondary text, mentions and the mention highlight) with a color
+  wheel, a `#RRGGBB` code or quick swatches, with a warning when the text gets
+  hard to read.
 - A server can have its own theme, used while that account is selected; the
   lock screen and adding a server always use the app's theme.
+
+## About the app
+
+- "Sobre o Papo Mobile", in the app settings, shows the version and build,
+  links to the project and the app's license, the GNU AGPL v3.0, to read in
+  the app. "Licenças de terceiros" lists the libraries and the font and emoji
+  data the app includes, with their licenses.
+- Links open outside the app only when they use `http` or `https`.
 
 ## Messages
 

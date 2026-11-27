@@ -49,9 +49,21 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   fundo e áreas da lista em preto para economizar energia em telas OLED. Seis
   predefinições (Papo, Oceano, Floresta, Ametista, Âmbar e Rosa) e uma prévia
   ao vivo da lista de canais e de uma conversa.
+- Mude cada cor de um tema (destaque, fundo, áreas da lista, barra de
+  servidores, texto, texto secundário, menções e o destaque da menção) com uma
+  roda de cores, um código `#RRGGBB` ou amostras rápidas, com um aviso quando o
+  texto fica difícil de ler.
 - Um servidor pode ter o próprio tema, usado enquanto aquela conta está
   selecionada; a tela de bloqueio e a de adicionar servidor usam sempre o
   tema do app.
+
+## Sobre o app
+
+- "Sobre o Papo Mobile", nas configurações do app, mostra a versão e o build,
+  links do projeto e a licença do app, a GNU AGPL v3.0, para ler no app.
+  "Licenças de terceiros" lista as bibliotecas e os dados de fonte e de emoji
+  que o app inclui, com as licenças.
+- Links só abrem fora do app quando usam `http` ou `https`.
 
 ## Mensagens
 

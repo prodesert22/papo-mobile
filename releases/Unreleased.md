@@ -14,6 +14,11 @@
   presets (Papo, the current look, plus Oceano, Floresta, Ametista, Âmbar and
   Rosa) and a live preview of the channel list and a conversation before you
   choose.
+- Change each color of a theme: accent, background, list areas, server bar,
+  text, secondary text, mentions and the mention highlight, with a color
+  wheel, a `#RRGGBB` code or quick swatches, and the preview following every
+  change. A warning shows when the text gets hard to read, and each color can
+  go back to the preset's.
 - A server can have its own theme, used while that account is selected; the
   lock screen and adding a server always use the app's theme.
 
@@ -28,6 +33,15 @@
   the phone's lock screen, or only "Nova mensagem" everywhere, without the
   author or the picture. Push notifications shown by Android follow the
   server's preview instead.
+
+## About the app
+
+- "Sobre o Papo Mobile" in the app settings: the version, beta and build
+  number with a button to copy them, links to the source code, the releases
+  and the server, web and terminal projects, and the app's license, the GNU
+  AGPL v3.0, to read inside the app.
+- "Licenças de terceiros" lists the libraries the app ships with their
+  licenses, and the font and emoji data it includes, without going online.
 
 ## Channels and direct conversations
 
