@@ -88,12 +88,19 @@ fun rememberMediaPainter(
     return image
 }
 
+/**
+ * A imagem do avatar de [user], pelo cache de mídia da conta de [session] (nula sem usuário, sem avatar ou enquanto carrega).
+ * Avatares aparecem às dezenas (conversa, lista de membros): a falha de um não é repetida a cada exibição.
+ */
 @Composable
-fun UserAvatar(session: AccountSession, user: User?, modifier: Modifier = Modifier, size: Dp = 40.dp, fallbackName: String = "?") {
-    // Avatares aparecem às dezenas (conversa, lista de membros): a falha de um não é repetida a cada exibição.
-    val image = rememberMediaImage(session, user?.let { "avatar/${it.id}/${it.avatarVersion}" }, holdFailures = true) {
+fun rememberUserAvatarImage(session: AccountSession, user: User?): State<ImageBitmap?> =
+    rememberMediaImage(session, user?.let { "avatar/${it.id}/${it.avatarVersion}" }, holdFailures = true) {
         user?.let { session.api.avatar(it.id) }
     }
+
+@Composable
+fun UserAvatar(session: AccountSession, user: User?, modifier: Modifier = Modifier, size: Dp = 40.dp, fallbackName: String = "?") {
+    val image = rememberUserAvatarImage(session, user)
     val color = colorFor(user?.id ?: fallbackName)
     Box(modifier.size(size).clip(CircleShape).background(color.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
         val bitmap = image.value

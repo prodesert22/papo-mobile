@@ -536,8 +536,8 @@
     <!-- Notificações: configurações -->
     <string name="notif_open">Notificações</string>
     <string name="notif_more_options">Mais opções</string>
-    <string name="notif_channel_title">Notificações de #%1$s</string>
-    <string name="notif_dm_title">Notificações de %1$s</string>
+    <string name="notif_channel_title">#%1$s</string>
+    <string name="notif_dm_title">%1$s</string>
     <string name="notif_account_section">Notificações</string>
     <string name="notif_account_open">Nível, silêncio e menções</string>
     <string name="notif_account_title">Notificações da conta</string>
@@ -659,6 +659,10 @@
     <!-- fim da trilha B -->
 
     <!-- 0.9.0 · trilha C: lista de canais e conversas diretas -->
+    <string name="channels_tab_channels">Canais</string>
+    <string name="channels_tab_direct_short">Diretas</string>
+    <string name="channels_direct_empty">Nenhuma conversa direta</string>
+    <string name="channels_new_dm_button">Nova conversa</string>
     <!-- fim da trilha C -->
 
     <!-- 0.9.0 · trilha D: descrição e edição do canal -->

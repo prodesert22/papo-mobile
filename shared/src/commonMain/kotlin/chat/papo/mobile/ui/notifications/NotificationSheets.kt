@@ -1,11 +1,20 @@
 package chat.papo.mobile.ui.notifications
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -16,7 +25,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,6 +41,8 @@ import chat.papo.mobile.chat.MuteDuration
 import chat.papo.mobile.chat.NotificationLevel
 import chat.papo.mobile.chat.NotificationPrefs
 import chat.papo.mobile.resources.Res
+import chat.papo.mobile.resources.channel_settings
+import chat.papo.mobile.resources.dm_close
 import chat.papo.mobile.resources.notif_allow
 import chat.papo.mobile.resources.notif_channel_title
 import chat.papo.mobile.resources.notif_dm_title
@@ -61,10 +75,11 @@ private enum class Section { Mute, Level, SuppressEveryone, SuppressMentions, Sy
 /**
  * A folha de notificações de um canal: silêncio, nível, supressão de `@everyone` e de menções, e sincronização.
  * Cada opção começa em "Usar padrão do servidor". Para abrir de um toque longo no canal ou do menu da conversa.
+ * [onOpenSettings], quando dado, põe "Configurações do canal" no topo: quem abre a folha decide se a conta pode editar o canal.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChannelNotificationSheet(prefs: NotificationPrefs, channel: Channel, onDismiss: () -> Unit) {
+fun ChannelNotificationSheet(prefs: NotificationPrefs, channel: Channel, onDismiss: () -> Unit, onOpenSettings: (() -> Unit)? = null) {
     val server by prefs.server.collectAsStateWithLifecycle()
     val channels by prefs.channels.collectAsStateWithLifecycle()
     val serverLevels by prefs.serverLevels.collectAsStateWithLifecycle()
@@ -88,6 +103,12 @@ fun ChannelNotificationSheet(prefs: NotificationPrefs, channel: Channel, onDismi
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             SheetTitle(stringResource(Res.string.notif_channel_title, channel.name))
+            if (onOpenSettings != null) {
+                SheetAction(Icons.Filled.Settings, stringResource(Res.string.channel_settings)) {
+                    onDismiss()
+                    onOpenSettings()
+                }
+            }
 
             MuteSection(
                 title = stringResource(Res.string.notif_mute_channel),
@@ -142,10 +163,13 @@ fun ChannelNotificationSheet(prefs: NotificationPrefs, channel: Channel, onDismi
     }
 }
 
-/** A folha de notificações de uma conversa direta: só o silêncio, porque o servidor não tem nível para elas. [name] é o nome da outra pessoa. */
+/**
+ * A folha de uma conversa direta: o silêncio, porque o servidor não tem nível de notificação para elas, e, com
+ * [onClose], "Fechar conversa". [name] é o nome da outra pessoa.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DmNotificationSheet(prefs: NotificationPrefs, dmId: String, name: String, onDismiss: () -> Unit) {
+fun DmNotificationSheet(prefs: NotificationPrefs, dmId: String, name: String, onDismiss: () -> Unit, onClose: (() -> Unit)? = null) {
     val server by prefs.server.collectAsStateWithLifecycle()
     val dms by prefs.dms.collectAsStateWithLifecycle()
     val edits = remember(prefs) { NotificationEdits(prefs) }
@@ -158,6 +182,13 @@ fun DmNotificationSheet(prefs: NotificationPrefs, dmId: String, name: String, on
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             SheetTitle(if (name.isBlank()) stringResource(Res.string.notif_open) else stringResource(Res.string.notif_dm_title, name))
+            if (onClose != null) {
+                // Sem confirmação: não apaga o histórico, e uma mensagem nova ou o "+" a trazem de volta.
+                SheetAction(Icons.Filled.Close, stringResource(Res.string.dm_close)) {
+                    onDismiss()
+                    onClose()
+                }
+            }
 
             MuteSection(
                 title = stringResource(Res.string.notif_mute_conversation),
@@ -174,6 +205,23 @@ fun DmNotificationSheet(prefs: NotificationPrefs, dmId: String, name: String, on
             )
             NoteText(stringResource(Res.string.notif_local_only_note))
         }
+    }
+}
+
+/** Uma ação da folha, no alto, antes das seções de notificação. */
+@Composable
+private fun SheetAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = ContentPadding, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(16.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
