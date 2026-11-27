@@ -342,6 +342,7 @@ private fun Unlocked(
                                             onOpenChannelSettings = { channelId ->
                                                 navController.navigate(ChannelSettingsRoute(account.id, channelId))
                                             },
+                                            onDmClosed = { dmId -> panel.forget(account.id, dmId) },
                                         )
                                     }
                                 }

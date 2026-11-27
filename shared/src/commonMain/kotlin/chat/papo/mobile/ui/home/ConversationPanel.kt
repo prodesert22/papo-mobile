@@ -115,6 +115,14 @@ class ConversationPanelState internal constructor(
         startup = StartupOpening.Done
     }
 
+    /**
+     * A conversa [channelId] deixou de existir para [accountId] (uma conversa direta fechada): se era a última dela, o
+     * painel a esquece e volta a ser o de fechado, e o painel nunca volta a ela. Outra conversa não muda nada.
+     */
+    fun forget(accountId: String, channelId: String) {
+        chats = chats.without(accountId, channelId)
+    }
+
     /** As contas que saíram levam as conversas delas. */
     fun retain(accountIds: Set<String>) {
         chats = chats.retaining(accountIds)

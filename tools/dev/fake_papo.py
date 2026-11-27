@@ -182,6 +182,7 @@ PAPO = CHANNELS[1]["id"]
 MESSAGES = {}    # channel_id -> [message]
 READS = {}       # (user_id, channel_id) -> message_id
 DMS = {}         # dm_id -> (user_a, user_b)
+CLOSED_DMS = set()  # (user_id, dm_id): a DM que o usuário fechou; sai só da lista dele, e uma mensagem nova ou POST /dms a reabre
 PINS = {}        # channel_id -> [message_id]
 FILES = {}       # attachment_id -> (mime, bytes)
 THUMBS = {}      # attachment_id -> (mime, bytes): miniatura de um anexo que não é imagem (o servidor real só gera para imagem)
@@ -1433,7 +1434,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, {"channels": out})
         elif path == "/dms":
             # Uma DM com bloqueio, em qualquer sentido, não sai da lista (o servidor a esconde; desbloquear não a reabre).
-            self.send(200, {"dms": [dm_view(d, me) for d, pair in DMS.items() if me in pair and not blocked_between(*pair)]})
+            self.send(200, {"dms": [dm_view(d, me) for d, pair in DMS.items()
+                                    if me in pair and (me, d) not in CLOSED_DMS and not blocked_between(*pair)]})
         elif path == "/users":
             self.send(200, {"users": [summary(n) for n in USERS], "has_more": False})
         elif path == "/roles" and ACCESS["on"]:
@@ -1555,6 +1557,7 @@ class Handler(BaseHTTPRequestHandler):
             crawl_links(m)
             if m["channel_id"] in DMS:
                 for u in set(DMS[m["channel_id"]]):
+                    CLOSED_DMS.discard((u, m["channel_id"]))
                     emit({"type": "dm_update", "dm": dm_view(m["channel_id"], u)}, only={u})
             if control["status"] >= 400:
                 return self.problem(control["status"], "Erro simulado", "Mensagem criada, mas a resposta foi simulada como erro")
@@ -1575,7 +1578,15 @@ class Handler(BaseHTTPRequestHandler):
             if dm_id is None:
                 dm_id = str(uuid.uuid4())
                 DMS[dm_id] = (me, other)
+            CLOSED_DMS.discard((me, dm_id))
             return self.send(200, dm_view(dm_id, me))
+        m = re.fullmatch(r"/dms/([^/]+)", path)
+        if method == "DELETE" and m:
+            # Fecha só para quem pediu e não apaga o histórico; sem evento, e quem não é da conversa recebe 404.
+            if me not in DMS.get(m.group(1), ()):
+                return self.problem(404, "Recurso não encontrado", "conversa não encontrada")
+            CLOSED_DMS.add((me, m.group(1)))
+            return self.send(204, None)
         m = re.fullmatch(r"/messages/([^/]+)", path)
         if m:
             msg = self.find(m.group(1))

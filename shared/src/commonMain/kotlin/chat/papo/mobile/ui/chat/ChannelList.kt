@@ -3,6 +3,7 @@ package chat.papo.mobile.ui.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,10 +26,13 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,11 +40,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +62,7 @@ import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.RowStyle
+import chat.papo.mobile.chat.canManageChannels
 import chat.papo.mobile.chat.conversationAccess
 import chat.papo.mobile.chat.effective
 import chat.papo.mobile.chat.effectiveDm
@@ -70,13 +77,17 @@ import chat.papo.mobile.resources.action_cancel
 import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.action_retry
 import chat.papo.mobile.resources.channels_direct
+import chat.papo.mobile.resources.channels_direct_empty
 import chat.papo.mobile.resources.channels_in_voice
 import chat.papo.mobile.resources.channels_new_dm
+import chat.papo.mobile.resources.channels_new_dm_button
 import chat.papo.mobile.resources.channels_none
 import chat.papo.mobile.resources.channels_none_visible
 import chat.papo.mobile.resources.channels_open_chat
 import chat.papo.mobile.resources.channels_reconnecting
 import chat.papo.mobile.resources.channels_sync_failed
+import chat.papo.mobile.resources.channels_tab_channels
+import chat.papo.mobile.resources.channels_tab_direct_short
 import chat.papo.mobile.resources.channels_uncategorized
 import chat.papo.mobile.resources.dm_pick_search
 import chat.papo.mobile.resources.dm_pick_title
@@ -93,7 +104,10 @@ import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import org.jetbrains.compose.resources.stringResource
 
-/** Lista de conversas diretas e canais (por categoria) da conta ativa. */
+/**
+ * A lista da conta ativa em duas abas: os canais (por categoria, a aba de abertura) e as conversas diretas. A aba
+ * escolhida fica lembrada por conta, e o deslizar lateral não troca de aba: esse gesto é do painel da conversa.
+ */
 @Composable
 fun ChannelListPane(
     session: AccountSession,
@@ -101,6 +115,8 @@ fun ChannelListPane(
     onJoinVoice: (channelId: String) -> Unit,
     /** Abre as configurações do canal (nome e descrição). Só se oferece a quem tem `manage_channels` ([canManageChannels]). */
     onOpenChannelSettings: (channelId: String) -> Unit = {},
+    /** A conversa direta [dmId] foi fechada: quem guarda a conversa aberta ou estacionada a esquece. */
+    onDmClosed: (dmId: String) -> Unit = {},
 ) {
     val chat = session.chat
     // Só os canais que a conta pode ver; `allChannels` diz se o servidor tem algum, para a mensagem de lista vazia.
@@ -127,66 +143,79 @@ fun ChannelListPane(
     val mentions by session.mentions.mentions.collectAsStateWithLifecycle()
     var sheetChannel by remember { mutableStateOf<Channel?>(null) }
     var sheetDm by remember { mutableStateOf<Dm?>(null) }
+    var tabs by rememberSaveable(stateSaver = ListTabs.Saver) { mutableStateOf(ListTabs.Empty) }
+    val tab = tabs[session.accountId]
+    val badges = remember(mentions) { tabBadges(mentions) }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    Column(Modifier.fillMaxSize()) {
+        ListTabRow(tab, badges) { tabs = tabs.selected(session.accountId, it) }
+        // Os avisos de conexão valem para as duas abas e ficam à vista, fora da rolagem.
         if (connection != WsState.Connected && !syncing && allChannels.isNotEmpty()) {
-            item(key = "offline") { StatusLine(stringResource(Res.string.channels_reconnecting)) }
+            StatusLine(stringResource(Res.string.channels_reconnecting))
         }
         if (syncError != null) {
-            item(key = "sync-error") {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        stringResource(Res.string.channels_sync_failed),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { scope.launch { chat.runSync() } }) { Text(stringResource(Res.string.action_retry)) }
-                }
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(Res.string.channels_sync_failed),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { scope.launch { chat.runSync() } }) { Text(stringResource(Res.string.action_retry)) }
             }
         }
 
-        item(key = "dm-header") {
-            SectionHeader(stringResource(Res.string.channels_direct)) {
-                IconButton(onClick = { pickingUser = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = stringResource(Res.string.channels_new_dm))
+        when (tab) {
+            ListTab.Channels -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                if (channels.isEmpty() && !syncing && syncError == null) {
+                    val message = if (allChannels.isEmpty()) Res.string.channels_none else Res.string.channels_none_visible
+                    item(key = "empty") { StatusLine(stringResource(message)) }
+                }
+                groups.forEach { group ->
+                    item(key = "cat-" + (group.category?.id ?: "none")) {
+                        SectionHeader(group.category?.name ?: stringResource(Res.string.channels_uncategorized))
+                    }
+                    items(group.channels, key = { "ch-" + it.id }) { channel ->
+                        val access = if (channel.type == ChannelType.Voice) {
+                            conversationAccess(permissions, session.userId, channel.id, isDm = false)
+                        } else {
+                            null
+                        }
+                        // Tocar no canal de voz entra na chamada, se a conta pode; senão abre o chat. O chat também abre pelo botão
+                        // no fim da linha, que só existe quando o toque entra na chamada e a conta lê o canal.
+                        val joinsCall = access?.joinVoice == true
+                        val chatButton = joinsCall && access?.read == true
+                        val muted = !showsUnreadDot(effective(serverSettings, channelSettings[channel.id] ?: ChannelNotificationSettings(), Clock.System.now()))
+                        val style = rowStyle(channel.unread, mentions.perChannel[channel.id] ?: 0, mentions.capped, muted)
+                        ChannelRow(
+                            channel,
+                            voice[channel.id].orEmpty().size,
+                            style,
+                            onOpenChat = if (chatButton) ({ onOpen(channel.id) }) else null,
+                            onLongClick = { sheetChannel = channel },
+                        ) {
+                            if (joinsCall) onJoinVoice(channel.id) else onOpen(channel.id)
+                        }
+                    }
                 }
             }
-        }
-        items(dms, key = { "dm-" + it.id }) { dm ->
-            val muted = !showsUnreadDot(effectiveDm(serverSettings, dmSettings[dm.id] ?: DmNotificationSettings(), Clock.System.now()))
-            val style = rowStyle(dm.unreadCount > 0, mentions.perDm[dm.id] ?: 0, capped = false, muted = muted)
-            DmRow(session, dm, users[dm.userId], presence[dm.userId], users, style, onLongClick = { sheetDm = dm }) { onOpen(dm.id) }
-        }
-
-        if (channels.isEmpty() && !syncing && syncError == null) {
-            val message = if (allChannels.isEmpty()) Res.string.channels_none else Res.string.channels_none_visible
-            item(key = "empty") { StatusLine(stringResource(message)) }
-        }
-        groups.forEach { group ->
-            item(key = "cat-" + (group.category?.id ?: "none")) {
-                SectionHeader(group.category?.name ?: stringResource(Res.string.channels_uncategorized))
-            }
-            items(group.channels, key = { "ch-" + it.id }) { channel ->
-                val access = if (channel.type == ChannelType.Voice) {
-                    conversationAccess(permissions, session.userId, channel.id, isDm = false)
-                } else {
-                    null
-                }
-                // Tocar no canal de voz entra na chamada, se a conta pode; senão abre o chat. O chat também abre pelo botão
-                // no fim da linha, que só existe quando o toque entra na chamada e a conta lê o canal.
-                val joinsCall = access?.joinVoice == true
-                val chatButton = joinsCall && access?.read == true
-                val muted = !showsUnreadDot(effective(serverSettings, channelSettings[channel.id] ?: ChannelNotificationSettings(), Clock.System.now()))
-                val style = rowStyle(channel.unread, mentions.perChannel[channel.id] ?: 0, mentions.capped, muted)
-                ChannelRow(
-                    channel,
-                    voice[channel.id].orEmpty().size,
-                    style,
-                    onOpenChat = if (chatButton) ({ onOpen(channel.id) }) else null,
-                    onLongClick = { sheetChannel = channel },
-                ) {
-                    if (joinsCall) onJoinVoice(channel.id) else onOpen(channel.id)
+            ListTab.Direct -> if (dms.isEmpty()) {
+                // A mensagem de vazio só vale com a leitura feita e sem erro: antes disso, ou com o aviso de falha acima, não se sabe.
+                if (!syncing && syncError == null) EmptyDirect { pickingUser = true }
+            } else {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                    item(key = "dm-new") {
+                        Row(Modifier.fillMaxWidth().padding(end = 4.dp), horizontalArrangement = Arrangement.End) {
+                            IconButton(onClick = { pickingUser = true }) {
+                                Icon(Icons.Filled.Add, contentDescription = stringResource(Res.string.channels_new_dm))
+                            }
+                        }
+                    }
+                    items(dms, key = { "dm-" + it.id }) { dm ->
+                        val muted = !showsUnreadDot(effectiveDm(serverSettings, dmSettings[dm.id] ?: DmNotificationSettings(), Clock.System.now()))
+                        val style = rowStyle(dm.unreadCount > 0, mentions.perDm[dm.id] ?: 0, capped = false, muted = muted)
+                        DmRow(session, dm, users[dm.userId], presence[dm.userId], users, style, onLongClick = { sheetDm = dm }) { onOpen(dm.id) }
+                    }
                 }
             }
         }
@@ -213,9 +242,34 @@ fun ChannelListPane(
             },
         )
     }
-    sheetChannel?.let { channel -> ChannelNotificationSheet(prefs, channel, onDismiss = { sheetChannel = null }) }
+    sheetChannel?.let { channel ->
+        ChannelNotificationSheet(
+            prefs,
+            channel,
+            onDismiss = { sheetChannel = null },
+            // Só a quem tem a permissão de certeza: o que é de administração não se oferece para o servidor recusar.
+            onOpenSettings = if (canManageChannels(permissions, session.userId)) ({ onOpenChannelSettings(channel.id) }) else null,
+        )
+    }
     sheetDm?.let { dm ->
-        DmNotificationSheet(prefs, dm.id, users[dm.userId]?.displayName ?: "?", onDismiss = { sheetDm = null })
+        DmNotificationSheet(
+            prefs,
+            dm.id,
+            users[dm.userId]?.displayName ?: "",
+            onDismiss = { sheetDm = null },
+            onClose = {
+                scope.launch {
+                    try {
+                        chat.closeDm(dm.id)
+                    } catch (e: Throwable) {
+                        // A falha aparece e nada é repetido sozinho (um 429 também não); a linha fica, porque o servidor não a fechou.
+                        dmError = e.toUiError() // relança o cancelamento
+                        return@launch
+                    }
+                    onDmClosed(dm.id)
+                }
+            },
+        )
     }
     dmError?.let { error ->
         AlertDialog(
@@ -223,6 +277,70 @@ fun ChannelListPane(
             text = { Text(error.text()) },
             confirmButton = { TextButton(onClick = { dmError = null }) { Text(stringResource(Res.string.action_close)) } },
         )
+    }
+}
+
+/**
+ * As duas abas logo abaixo do usuário, cada uma com o selo de menções dela. O nome da segunda cai para a forma curta
+ * quando a versão inteira não cabe numa linha (tela estreita, letra grande, selo largo).
+ */
+@Composable
+private fun ListTabRow(selected: ListTab, badges: TabBadges, onSelect: (ListTab) -> Unit) {
+    PrimaryTabRow(selectedTabIndex = selected.ordinal, containerColor = Color.Transparent) {
+        ListTab.entries.forEach { tab ->
+            Tab(
+                selected = tab == selected,
+                onClick = { onSelect(tab) },
+                text = {
+                    when (tab) {
+                        ListTab.Channels -> TabLabel(stringResource(Res.string.channels_tab_channels), null, badges.channels)
+                        ListTab.Direct -> TabLabel(
+                            stringResource(Res.string.channels_direct),
+                            stringResource(Res.string.channels_tab_direct_short),
+                            badges.direct,
+                        )
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TabLabel(title: String, shortTitle: String?, badge: String?) {
+    // Medido na própria linha: se o nome inteiro transborda, passa para a forma curta; um selo novo mede de novo.
+    var short by remember(badge, shortTitle) { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (short && shortTitle != null) shortTitle else title,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+            onTextLayout = { if (it.hasVisualOverflow && shortTitle != null) short = true },
+        )
+        badge?.let {
+            Spacer(Modifier.width(6.dp))
+            MentionBadge(it)
+        }
+    }
+}
+
+/** A aba de conversas diretas sem nenhuma: o convite para começar uma, no centro. */
+@Composable
+private fun EmptyDirect(onNew: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text(
+            stringResource(Res.string.channels_direct_empty),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onNew) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(Res.string.channels_new_dm_button))
+        }
     }
 }
 

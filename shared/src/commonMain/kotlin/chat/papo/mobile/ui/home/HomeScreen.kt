@@ -57,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.papo.mobile.AppSession
 import chat.papo.mobile.account.Account
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.badgeText
 import chat.papo.mobile.chat.hasUnreadDot
 import chat.papo.mobile.chat.readableChannels
@@ -74,6 +75,8 @@ import chat.papo.mobile.resources.session_expired_title
 import chat.papo.mobile.ui.components.AccountAvatar
 import chat.papo.mobile.ui.notifications.ServerMuteMenu
 import chat.papo.mobile.ui.theme.LocalPapoColors
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 
@@ -212,6 +215,13 @@ private fun railBadge(account: AccountSession?): RailBadge {
     return RailBadge(unread, badgeText(counts.total, counts.capped))
 }
 
+/** O próprio usuário da conta, para o avatar do canto; só muda a composição quando o perfil dele muda, não a cada usuário que o servidor atualiza. */
+@Composable
+private fun rememberOwnUser(session: AccountSession): User? {
+    val own = remember(session) { session.chat.users.map { it[session.userId] }.distinctUntilChanged() }
+    return own.collectAsStateWithLifecycle(session.chat.users.value[session.userId]).value
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RailItem(account: Account, accountSession: AccountSession?, selected: Boolean, badge: RailBadge, onClick: () -> Unit) {
@@ -219,6 +229,7 @@ private fun RailItem(account: Account, accountSession: AccountSession?, selected
     val haptics = LocalHapticFeedback.current
     val indicator by animateDpAsState(if (selected) 32.dp else 0.dp)
     var muteMenu by remember { mutableStateOf(false) }
+    val ownUser = accountSession?.let { rememberOwnUser(it) }
     val label = account.handle + (account.label?.let { " ($it)" } ?: "") +
         (badge.mentions?.let { stringResource(Res.string.rail_mentions, it) } ?: if (badge.unread) stringResource(Res.string.rail_unread) else "")
     Box(
@@ -258,6 +269,8 @@ private fun RailItem(account: Account, accountSession: AccountSession?, selected
             unread = badge.unread,
             unreadColor = colors.accent,
             mentions = badge.mentions,
+            avatarSession = accountSession,
+            avatarUser = ownUser,
         )
         if (accountSession != null) ServerMuteMenu(accountSession.notificationPrefs, expanded = muteMenu, onDismiss = { muteMenu = false })
     }
