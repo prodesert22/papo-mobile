@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -396,9 +397,15 @@ private fun ParticipantTile(
 private fun PushToTalk(controller: CallController, state: CallState) {
     val ready = state.phase == CallPhase.Connected || state.phase == CallPhase.Reconnecting
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        // A linha inteira liga e desliga, não só a chave.
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .toggleable(value = state.pushToTalk, enabled = ready, role = Role.Switch, onValueChange = controller::setPushToTalk),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(stringResource(Res.string.call_push_to_talk), style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-            Switch(checked = state.pushToTalk, onCheckedChange = controller::setPushToTalk, enabled = ready)
+            Switch(checked = state.pushToTalk, onCheckedChange = null, enabled = ready)
         }
         if (state.pushToTalk) HoldToTalkButton(controller, state.talking)
     }

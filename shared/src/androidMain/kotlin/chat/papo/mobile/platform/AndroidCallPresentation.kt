@@ -4,7 +4,6 @@ import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.app.RemoteAction
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -84,8 +83,10 @@ class AndroidCallPresentation(context: Context, private val activities: Activity
     override fun leavePip() {
         val host = activity ?: return
         if (!host.isInPictureInPictureMode) return
-        // Trazer a própria activity à frente tira a janela flutuante e volta à tela cheia (no topo da pilha: chega a onNewIntent).
-        host.startActivity(Intent(host, host.javaClass).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        // A chamada acabou com a janela aberta (quase sempre: a pessoa desligou por ela ou pela notificação, fora do app).
+        // Fecha a janela e deixa o app em segundo plano, sem tomar a tela do que a pessoa estava fazendo; ao voltar ao app,
+        // ele abre em tela cheia e mostra o motivo, se a chamada caiu.
+        host.moveTaskToBack(false)
     }
 
     private fun applyParams() {

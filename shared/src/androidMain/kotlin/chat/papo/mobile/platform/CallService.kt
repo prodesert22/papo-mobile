@@ -91,8 +91,17 @@ class CallService : Service() {
 
     private fun notification(notice: CallNotice?): Notification {
         val appName = applicationInfo.loadLabel(packageManager).toString()
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, notice?.channelLabel ?: appName, NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) },
+        val manager = getSystemService(NotificationManager::class.java)
+        // O canal antigo tinha importância baixa, e o Android esconde notificações silenciosas na tela de bloqueio, onde
+        // ficam Silenciar e Desligar. Um app não sobe a importância de um canal que já existe: este é novo, com a importância
+        // padrão (aparece na tela de bloqueio, sem surgir por cima) e sem som nem vibração.
+        manager.deleteNotificationChannel(OLD_CHANNEL_ID)
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, notice?.channelLabel ?: appName, NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
+            },
         )
         val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
             PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -141,7 +150,8 @@ class CallService : Service() {
         NotificationCompat.Action.Builder(icon, label, intent).setAuthenticationRequired(false).build()
 
     companion object {
-        private const val CHANNEL_ID = "papo.calls"
+        private const val CHANNEL_ID = "papo.calls.ongoing"
+        private const val OLD_CHANNEL_ID = "papo.calls"
         private const val NOTIFICATION_ID = 4201
         private const val ACTION_HANGUP = "chat.papo.mobile.call.HANGUP"
         private const val ACTION_MUTE = "chat.papo.mobile.call.MUTE"
