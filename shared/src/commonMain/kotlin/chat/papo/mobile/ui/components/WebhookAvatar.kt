@@ -80,8 +80,10 @@ fun WebhookAvatar(
         value = decodeAvatar { session.webhookAvatars.cached(avatarId) }
         value = decodeAvatar { session.webhookAvatars.get(avatarId) }
     }
-    Box(modifier.size(size).clip(CircleShape).background(colorFor(name).copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
-        val bitmap = image.value
+    val bitmap = image.value
+    // A cor de fundo é só das iniciais: uma imagem com transparência mostra o que está atrás dela.
+    val circle = modifier.size(size).clip(CircleShape)
+    Box(if (bitmap == null) circle.background(colorFor(name).copy(alpha = 0.35f)) else circle, contentAlignment = Alignment.Center) {
         if (bitmap != null) {
             Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {

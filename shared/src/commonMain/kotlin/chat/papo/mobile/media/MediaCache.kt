@@ -6,8 +6,10 @@ import chat.papo.mobile.core.crypto.toHex
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -152,6 +154,66 @@ class MediaCache(
         withContext(io) { runCatching { SystemFileSystem.delete(fileFor(name), mustExist = false) } }
     }
 
+    /**
+     * Apaga do disco, e da memória, a mídia de mensagem cujo nome não está em [keep]: o que sobrou de mensagens que
+     * saíram do aparelho, e arquivos temporários esquecidos por uma gravação interrompida. Só mexe na área das
+     * mensagens ([MESSAGE_MEDIA_PREFIX]); avatares, emojis e o resto ficam como estão.
+     *
+     * Não trava as buscas: uma que grava um arquivo agora, para um nome fora de [keep], pode perdê-lo, e então a mídia
+     * é buscada de novo na próxima vez. Nunca fica um arquivo corrompido: a gravação é um temporário movido de uma vez,
+     * e quem lê trata o arquivo que sumiu como ausente. Os nomes que têm uma busca em andamento são poupados.
+     */
+    suspend fun sweepMessageMedia(keep: Set<String>) {
+        val writing = forgetFromMemory(keep) { it.startsWith(MESSAGE_MEDIA_PREFIX) }
+        withContext(io) { deleteFilesExcept(Path(directory, MESSAGE_AREA), keep, writing) }
+    }
+
+    /**
+     * Apaga os arquivos que estão fora da área das mensagens e cujo nome não está em [keep]. É a migração do
+     * cache que guardava tudo numa pasta só, onde a mídia de mensagem não se distingue das outras (os nomes são HMAC):
+     * [keep] diz o que se quer manter e o resto sai. Mesmas garantias de [sweepMessageMedia].
+     */
+    suspend fun sweepOutsideMessageArea(keep: Set<String>) {
+        val writing = forgetFromMemory(keep) { !it.startsWith(MESSAGE_MEDIA_PREFIX) }
+        withContext(io) { deleteFilesExcept(Path(directory), keep, writing) }
+    }
+
+    /**
+     * Tira da memória os nomes de [area] que não estão em [keep] nem têm busca em andamento; devolve os que têm, que a
+     * varredura do disco também poupa.
+     */
+    private suspend fun forgetFromMemory(keep: Set<String>, area: (String) -> Boolean): Set<String> = mutex.withLock {
+        val writing = inFlight.keys.filterTo(HashSet(), area)
+        val iterator = memory.entries.iterator()
+        while (iterator.hasNext()) {
+            val (name, bytes) = iterator.next()
+            if (area(name) && name !in keep && name !in writing) {
+                memoryUsed -= bytes.size
+                iterator.remove()
+            }
+        }
+        writing
+    }
+
+    /**
+     * Apaga os arquivos de [folder] (não as subpastas) que não são os de [keep]. Os de [writing] têm uma gravação em
+     * andamento, então o temporário deles também fica; o de qualquer outro nome é resto de gravação interrompida.
+     */
+    private fun CoroutineScope.deleteFilesExcept(folder: Path, keep: Set<String>, writing: Set<String>) {
+        if (!SystemFileSystem.exists(folder)) return
+        val keepFiles = HashSet<String>()
+        for (name in keep) keepFiles += hashOf(name)
+        for (name in writing) hashOf(name).let { keepFiles += it; keepFiles += "$it.tmp" }
+        val children = runCatching { SystemFileSystem.list(folder) }.getOrElse { return }
+        for (child in children) {
+            ensureActive()
+            if (child.name in keepFiles) continue
+            runCatching {
+                if (SystemFileSystem.metadataOrNull(child)?.isDirectory != true) SystemFileSystem.delete(child, mustExist = false)
+            }
+        }
+    }
+
     /** Esquece o que está na memória, inclusive o que se lembrava de ausente ou falho; o disco fica. */
     suspend fun clearMemory() {
         mutex.withLock {
@@ -199,8 +261,14 @@ class MediaCache(
         }
     }
 
+    /**
+     * Mídia de mensagem fica na subpasta [MESSAGE_AREA], à parte do resto (avatares, emojis, banners): a retenção
+     * varre só ela. O nome do arquivo continua sendo o HMAC do nome, então a área não revela a que mensagem pertence.
+     */
     private fun fileFor(name: String): Path =
-        Path(directory, crypto.hmacSha256(key, name.encodeToByteArray()).toHex())
+        if (name.startsWith(MESSAGE_MEDIA_PREFIX)) Path(directory, MESSAGE_AREA, hashOf(name)) else Path(directory, hashOf(name))
+
+    private fun hashOf(name: String): String = crypto.hmacSha256(key, name.encodeToByteArray()).toHex()
 
     private suspend fun readDisk(name: String): ByteArray? = withContext(io) {
         val path = fileFor(name)
@@ -220,9 +288,10 @@ class MediaCache(
     private suspend fun writeDisk(name: String, bytes: ByteArray) = withContext(io) {
         if (bytes.size > maxDiskEntry) return@withContext
         runCatching {
-            SystemFileSystem.createDirectories(Path(directory))
             val target = fileFor(name)
-            val temp = Path(directory, target.name + ".tmp")
+            val folder = target.parent ?: Path(directory)
+            SystemFileSystem.createDirectories(folder)
+            val temp = Path(folder.toString(), target.name + ".tmp")
             SystemFileSystem.sink(temp).buffered().use { it.write(crypto.seal(key, bytes, aad = name.encodeToByteArray())) }
             SystemFileSystem.atomicMove(temp, target)
         }
@@ -231,6 +300,9 @@ class MediaCache(
     companion object {
         /** Quanto tempo uma busca que falhou não é tentada de novo. */
         internal val FAILURE_WINDOW = 30.seconds
+
+        /** Subpasta, dentro da pasta da conta, da mídia de mensagem (nomes com [MESSAGE_MEDIA_PREFIX]). */
+        internal const val MESSAGE_AREA = "msg"
 
         /** Limite de nomes lembrados como ausentes ou falhos; passando dele, esquece os mais antigos. */
         internal const val MAX_MISSES = 1024

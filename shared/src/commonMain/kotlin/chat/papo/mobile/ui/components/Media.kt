@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.avatarMediaName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -88,15 +89,24 @@ fun rememberMediaPainter(
     return image
 }
 
+/**
+ * A imagem do avatar de [user], pelo cache de mídia da conta de [session] (nula sem usuário, sem avatar ou enquanto carrega).
+ * Avatares aparecem às dezenas (conversa, lista de membros): a falha de um não é repetida a cada exibição.
+ */
 @Composable
-fun UserAvatar(session: AccountSession, user: User?, modifier: Modifier = Modifier, size: Dp = 40.dp, fallbackName: String = "?") {
-    // Avatares aparecem às dezenas (conversa, lista de membros): a falha de um não é repetida a cada exibição.
-    val image = rememberMediaImage(session, user?.let { "avatar/${it.id}/${it.avatarVersion}" }, holdFailures = true) {
+fun rememberUserAvatarImage(session: AccountSession, user: User?): State<ImageBitmap?> =
+    rememberMediaImage(session, user?.let { avatarMediaName(it.id, it.avatarVersion) }, holdFailures = true) {
         user?.let { session.api.avatar(it.id) }
     }
+
+@Composable
+fun UserAvatar(session: AccountSession, user: User?, modifier: Modifier = Modifier, size: Dp = 40.dp, fallbackName: String = "?") {
+    val image = rememberUserAvatarImage(session, user)
     val color = colorFor(user?.id ?: fallbackName)
-    Box(modifier.size(size).clip(CircleShape).background(color.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
-        val bitmap = image.value
+    val bitmap = image.value
+    // A cor de fundo é só das iniciais: uma foto com transparência mostra o que está atrás dela, não um círculo colorido.
+    val circle = modifier.size(size).clip(CircleShape)
+    Box(if (bitmap == null) circle.background(color.copy(alpha = 0.35f)) else circle, contentAlignment = Alignment.Center) {
         if (bitmap != null) {
             Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {

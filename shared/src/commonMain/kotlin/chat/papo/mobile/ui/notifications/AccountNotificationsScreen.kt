@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -26,6 +25,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.papo.mobile.ui.components.PapoDropdownMenu
 import chat.papo.mobile.chat.NotificationLevel
 import chat.papo.mobile.chat.NotificationPrefs
 import chat.papo.mobile.chat.MuteDuration
@@ -137,7 +137,7 @@ fun ServerMuteMenu(prefs: NotificationPrefs, expanded: Boolean, onDismiss: () ->
     val edits = remember(prefs) { NotificationEdits(prefs) }
     val state = serverNotificationsState(server, Clock.System.now())
 
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+    PapoDropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         Text(
             stringResource(Res.string.notif_mute_server),
             style = MaterialTheme.typography.titleSmall,

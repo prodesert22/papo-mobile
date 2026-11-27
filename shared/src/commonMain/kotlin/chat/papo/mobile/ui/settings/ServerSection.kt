@@ -40,7 +40,6 @@ import chat.papo.mobile.resources.server_owner
 import chat.papo.mobile.resources.server_public
 import chat.papo.mobile.resources.server_roles
 import chat.papo.mobile.resources.server_stale
-import chat.papo.mobile.resources.server_title
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.accentColor
 import chat.papo.mobile.ui.components.initials
@@ -68,8 +67,6 @@ internal fun ServerSection(accounts: AccountManager, account: Account) {
         }
     }
 
-    Text(stringResource(Res.string.server_title), style = MaterialTheme.typography.titleMedium)
-    Spacer(Modifier.height(8.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         val icon = rememberImage(account.serverIcon)
         Box(

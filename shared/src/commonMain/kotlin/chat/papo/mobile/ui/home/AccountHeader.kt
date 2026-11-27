@@ -37,7 +37,9 @@ import chat.papo.mobile.resources.inbox_bell_unread
 import chat.papo.mobile.resources.profile_edit_action
 import chat.papo.mobile.resources.search_title
 import chat.papo.mobile.resources.switcher_title
+import chat.papo.mobile.ui.components.OfflineIcon
 import chat.papo.mobile.ui.components.StatusDisc
+import chat.papo.mobile.ui.components.rememberOffline
 import chat.papo.mobile.ui.components.UserAvatar
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import org.jetbrains.compose.resources.stringResource
@@ -63,13 +65,20 @@ fun AccountHeader(
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Dois botões a menos de largura que antes e duas linhas de nome: um servidor de nome comprido não é mais cortado.
-            Text(
-                account.title,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    account.title,
+                    modifier = Modifier.weight(1f, fill = false),
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // Sem conexão com o servidor: o ícone fica logo depois do nome.
+                if (rememberOffline(accountSession) && !account.sessionExpired) {
+                    Spacer(Modifier.width(6.dp))
+                    OfflineIcon(size = 20.dp)
+                }
+            }
             IconButton(onClick = onSwitch, modifier = Modifier.size(HeaderButton)) {
                 Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(Res.string.switcher_title))
             }

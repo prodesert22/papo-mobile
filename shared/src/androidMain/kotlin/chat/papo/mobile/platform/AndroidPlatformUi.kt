@@ -39,6 +39,7 @@ import chat.papo.mobile.voice.VideoTrackHandle
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
+import chat.papo.mobile.core.safeExternalUrl
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.ui.components.PlatformImage
 import chat.papo.mobile.ui.components.PlatformUi
@@ -64,6 +65,19 @@ class AndroidPlatformUi(context: Context) : PlatformUi {
     private val glyphPaint = Paint()
 
     override fun supportsEmoji(emoji: String): Boolean = synchronized(glyphPaint) { glyphPaint.hasGlyph(emoji) }
+
+    override fun openExternalUrl(url: String): Boolean {
+        val safe = safeExternalUrl(url) ?: return false
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(safe)).addCategory(Intent.CATEGORY_BROWSABLE)
+        // Fora de uma atividade o Android pede uma pilha nova para o app que abre o link.
+        if (host !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            host.startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        }
+    }
 
     @Composable
     override fun rememberFilePicker(onPicked: (List<OutgoingFile>) -> Unit): () -> Unit {

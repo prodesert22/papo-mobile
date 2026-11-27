@@ -53,11 +53,11 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -117,6 +117,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
+import chat.papo.mobile.ui.components.PapoDropdownMenu
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.ChannelType
 import chat.papo.mobile.chat.EVERYONE_MENTION
@@ -135,6 +136,7 @@ import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.UnicodeEmojis
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.authorCanEveryone
+import chat.papo.mobile.chat.canManageChannels
 import chat.papo.mobile.chat.authorsByRecency
 import chat.papo.mobile.chat.completeMention
 import chat.papo.mobile.chat.continuesGroup
@@ -150,10 +152,16 @@ import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.ReactionSummaryDto
 import chat.papo.mobile.media.AudioTrack
+import chat.papo.mobile.media.VoiceProblem
+import chat.papo.mobile.media.VoiceRecording
+import chat.papo.mobile.media.owner
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
 import chat.papo.mobile.resources.action_close
+import chat.papo.mobile.resources.channel_settings
+import chat.papo.mobile.resources.channel_topic_open
+import chat.papo.mobile.resources.voice_open_settings
 import chat.papo.mobile.resources.channels_join_call
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_emoji
@@ -205,6 +213,7 @@ import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.profile_open
 import chat.papo.mobile.resources.switcher_title
+import chat.papo.mobile.ui.channel.ChannelTopicSheet
 import chat.papo.mobile.ui.components.AppBadge
 import chat.papo.mobile.ui.components.AuthorAvatar
 import chat.papo.mobile.ui.components.AudioBar
@@ -228,6 +237,7 @@ import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.pluralStringResource
@@ -253,6 +263,8 @@ fun ChatScreen(
     onOpenProfile: (String) -> Unit,
     /** Abre a lista de membros do servidor. Só é oferecida em canal: numa conversa direta o título já leva ao perfil. */
     onOpenMembers: () -> Unit,
+    /** Abre as configurações do canal (nome e descrição). Só se oferece a quem tem `manage_channels` ([canManageChannels]). */
+    onOpenChannelSettings: () -> Unit = {},
     /**
      * A conversa está à vista. Com o painel dela fechado (a lista de canais por cima), ela segue montada mas não é lida:
      * mensagens novas contam como não lidas, nada é marcado como lido e o vídeo que tocava para.
@@ -289,17 +301,31 @@ fun ChatScreen(
     LaunchedEffect(session) { session.emojis.start() }
 
     val channel = channels.firstOrNull { it.id == viewModel.channelId }
+    // Sai do campo de mensagem antes de abrir qualquer coisa por cima da conversa (menu, folha, gaveta, outra tela). Sem
+    // isso o foco volta ao campo quando o menu ou a folha fecha, e o teclado aparece por um instante antes da tela nova.
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val leaveComposer = {
+        keyboard?.hide()
+        focusManager.clearFocus(force = true)
+    }
     val dmUser = dms.firstOrNull { it.id == viewModel.channelId }?.let { users[it.userId] }
     val title = channel?.name ?: dmUser?.displayName ?: ""
     val profileLabel = stringResource(Res.string.profile_open)
     // Numa conversa direta o título (avatar e nome) leva ao perfil da outra pessoa.
-    val openDmProfile = if (dmUser == null) Modifier else Modifier.clickable(onClickLabel = profileLabel) { onOpenProfile(dmUser.id) }
+    val openDmProfile = if (dmUser == null) Modifier else Modifier.clickable(onClickLabel = profileLabel) {
+        leaveComposer()
+        onOpenProfile(dmUser.id)
+    }
 
     val isVoice = channel?.type == ChannelType.Voice
     val isDm = dms.any { it.id == viewModel.channelId }
     // O menu ⋮ e a folha de notificações da conversa (canal ou DM).
     var moreMenu by remember { mutableStateOf(false) }
     var notificationsOpen by rememberSaveable { mutableStateOf(false) }
+    // A descrição completa do canal e o atalho de editá-lo, que só existe com `manage_channels` confirmado.
+    var topicOpen by rememberSaveable { mutableStateOf(false) }
+    val canEditChannel = channel != null && channel.type != ChannelType.Category && canManageChannels(permissions, session.userId)
     val draft = viewModel.draft
     // O rascunho vai para o banco quando a tela sai de cena: outra tela por cima, app em segundo plano ou fim da conversa.
     // O compositor avisa as mudanças do campo no quadro seguinte; a última tecla antes de sair não pode ficar de fora.
@@ -327,6 +353,8 @@ fun ChatScreen(
     val videoHost = remember(videosState) { VideoHost(videosState) }
     // Só a tela cheia importa aqui: o vídeo que toca no cartão recompõe o cartão, não a conversa.
     val playing by remember(videosState) { derivedStateOf { videosState.value.fullscreen } }
+    // A tela cheia do vídeo também fica por cima da conversa: o campo de mensagem sai dela.
+    LaunchedEffect(playing != null) { if (playing != null) leaveComposer() }
     // Perder a leitura com uma folha ou diálogo aberto: eles agiriam sobre uma conversa que a pessoa já não vê.
     LaunchedEffect(access.readDenied) {
         if (access.readDenied) {
@@ -423,6 +451,15 @@ fun ChatScreen(
         onPauseOrDispose {}
     }
     DisposableEffect(viewModel) { onDispose { viewModel.onHidden() } }
+    // A gravação de voz é desta conversa: se ela sair da tela e não voltar logo (girar o aparelho a recria), a gravação é descartada.
+    val voice = LocalVoiceRecording.current
+    if (voice != null) {
+        DisposableEffect(voice, viewModel, active) {
+            if (active) voice.hostShown(viewModel.voiceOwner)
+            onDispose { voice.hostHidden(viewModel.voiceOwner) }
+        }
+    }
+    val voiceProblem by (voice?.problem ?: NO_VOICE_PROBLEM).collectAsStateWithLifecycle()
     // O vídeo que tocava no cartão não segue tocando atrás da lista de canais.
     LaunchedEffect(active) { if (!active) videos = InlineVideos() }
     // Mensagem pedida ao abrir: rola até ela quando entra na lista e a destaca por alguns segundos.
@@ -461,8 +498,19 @@ fun ChatScreen(
                             Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             val subtitle = if (dmUser != null) presenceLabel(presence[dmUser.id]?.status) else channel?.topic
                             subtitle?.takeIf { it.isNotBlank() }?.let {
+                                // Num canal, tocar na descrição cortada abre o texto inteiro.
+                                val topicLabel = stringResource(Res.string.channel_topic_open)
+                                val openTopic = if (dmUser == null && channel != null) {
+                                    Modifier.clickable(onClickLabel = topicLabel) {
+                                        leaveComposer()
+                                        topicOpen = true
+                                    }
+                                } else {
+                                    Modifier
+                                }
                                 Text(
                                     it,
+                                    modifier = openTopic,
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -479,24 +527,36 @@ fun ChatScreen(
                 },
                 actions = {
                     if (isVoice && onJoinCall != null && access.joinVoice) {
-                        IconButton(onClick = onJoinCall) {
+                        IconButton(onClick = {
+                            leaveComposer()
+                            onJoinCall()
+                        }) {
                             Icon(Icons.Filled.Call, contentDescription = stringResource(Res.string.channels_join_call))
                         }
                     }
-                    IconButton(onClick = onSwitch) {
+                    IconButton(onClick = {
+                        leaveComposer()
+                        onSwitch()
+                    }) {
                         Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(Res.string.switcher_title))
                     }
                     if (!isDm) {
-                        IconButton(onClick = onOpenMembers) {
+                        IconButton(onClick = {
+                            leaveComposer()
+                            onOpenMembers()
+                        }) {
                             Icon(Icons.Filled.Group, contentDescription = stringResource(Res.string.members_open))
                         }
                     }
                     // Busca, fixadas e notificações ficam no menu: com tudo solto na barra, o título some em 360 dp.
                     Box {
-                        IconButton(onClick = { moreMenu = true }) {
+                        IconButton(onClick = {
+                            leaveComposer()
+                            moreMenu = true
+                        }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(Res.string.notif_more_options))
                         }
-                        DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                        PapoDropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(Res.string.chat_search)) },
                                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
@@ -523,6 +583,17 @@ fun ChatScreen(
                                     onClick = {
                                         moreMenu = false
                                         notificationsOpen = true
+                                    },
+                                )
+                            }
+                            // Só quem tem `manage_channels` com certeza: sem a permissão, o menu não mostra nada de administração.
+                            if (canEditChannel) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.channel_settings)) },
+                                    leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                                    onClick = {
+                                        moreMenu = false
+                                        onOpenChannelSettings()
                                     },
                                 )
                             }
@@ -604,13 +675,32 @@ fun ChatScreen(
                                 onReply = { viewModel.startReply(message) }.takeIf { access.send },
                                 onQuickReact = { viewModel.quickReact(message) }.takeIf { access.react },
                                 // A folha só abre se tiver o que oferecer (copiar não existe numa mensagem só de anexo).
-                                onLongPress = { if (messageActionOffer(access, message, session.userId).any) actionsFor = message },
+                                onLongPress = {
+                                    if (messageActionOffer(access, message, session.userId).any) {
+                                        leaveComposer()
+                                        actionsFor = message
+                                    }
+                                },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
-                                onOpenImage = { viewing = ViewingMedia.image(message.id, it) },
-                                onOpenEmbedImage = { viewing = ViewingMedia.embedImage(message.id, it.id) },
-                                onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
+                                onOpenImage = {
+                                    leaveComposer()
+                                    viewing = ViewingMedia.image(message.id, it)
+                                },
+                                onOpenEmbedImage = {
+                                    leaveComposer()
+                                    viewing = ViewingMedia.embedImage(message.id, it.id)
+                                },
+                                onShowReactors = {
+                                    leaveComposer()
+                                    reactorsOf = ReactorsRequest(message.id, it)
+                                },
                                 videos = videoHost,
-                                onOpenAuthor = profileId?.let { id -> { onOpenProfile(id) } },
+                                onOpenAuthor = profileId?.let { id ->
+                                    {
+                                        leaveComposer()
+                                        onOpenProfile(id)
+                                    }
+                                },
                             )
                         }
                     }
@@ -661,6 +751,14 @@ fun ChatScreen(
                         )
                     }
                     state.attachProblem?.let { problem -> NoticeBar(problem.text(), viewModel::dismissAttachProblem) }
+                    voiceProblem?.let { problem ->
+                        if (voice != null && problem == VoiceProblem.MicrophoneBlocked) {
+                            // Negado de vez: só as configurações do aparelho liberam o microfone.
+                            ActionNoticeBar(problem.text(), stringResource(Res.string.voice_open_settings), onAction = voice::openSettings, onClose = voice::dismissProblem)
+                        } else if (voice != null) {
+                            NoticeBar(problem.text(), voice::dismissProblem)
+                        }
+                    }
                     state.error?.let { error -> NoticeBar(error.text(), viewModel::dismissError) }
                 }
                 // Num trecho antigo quem leva de volta ao fim é a `OlderHistoryBar`.
@@ -691,6 +789,8 @@ fun ChatScreen(
                 users = users,
                 presence = presence,
                 recentAuthors = recentAuthors,
+                // Numa conversa direta só se menciona quem está nela: as duas pessoas.
+                mentionParticipants = dms.firstOrNull { it.id == viewModel.channelId }?.let { setOf(session.userId, it.userId) },
                 mentionEveryone = access.mentionEveryone,
                 canAttach = access.attach,
                 serverEmojis = serverEmojis,
@@ -709,6 +809,9 @@ fun ChatScreen(
                 onPreviewFile = { previewing = it },
                 onCancelContext = viewModel::cancelContext,
                 onSubmit = viewModel::submit,
+                voice = voice,
+                voiceOwner = viewModel.voiceOwner,
+                onSendVoice = viewModel::sendVoice,
             )
         }
     }
@@ -802,6 +905,15 @@ fun ChatScreen(
         }
     }
     state.pinnedList?.takeUnless { access.readDenied }?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
+    val fullTopic = channel?.topic?.takeIf { it.isNotBlank() }
+    if (topicOpen && channel != null && fullTopic != null) {
+        ChannelTopicSheet(
+            name = channel.name,
+            topic = fullTopic,
+            onEdit = if (canEditChannel) ({ topicOpen = false; onOpenChannelSettings() }) else null,
+            onDismiss = { topicOpen = false },
+        )
+    }
     if (notificationsOpen) {
         val closeNotifications = { notificationsOpen = false }
         when {
@@ -1017,6 +1129,8 @@ private fun Composer(
     users: Map<String, User>,
     presence: Map<String, Presence>,
     recentAuthors: List<String>,
+    /** Os dois membros de uma conversa direta, os únicos que se pode mencionar nela; nulo num canal. */
+    mentionParticipants: Set<String>?,
     mentionEveryone: Boolean,
     canAttach: Boolean,
     serverEmojis: ServerEmojis,
@@ -1031,6 +1145,9 @@ private fun Composer(
     onPreviewFile: (OutgoingFile) -> Unit,
     onCancelContext: () -> Unit,
     onSubmit: () -> Unit,
+    voice: VoiceRecording?,
+    voiceOwner: String,
+    onSendVoice: () -> Unit,
 ) {
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -1141,11 +1258,11 @@ private fun Composer(
         } ?: return
         onDraftChange(insertAtCursor(draft, text))
     }
-    val suggestions = remember(mention, users, presence, recentAuthors) {
+    val suggestions = remember(mention, users, presence, recentAuthors, mentionParticipants) {
         if (mention == null) {
             emptyList()
         } else {
-            suggestMentions(mention.text, users.values, session.userId, recentAuthors, presence)
+            suggestMentions(mention.text, users.values, session.userId, recentAuthors, presence, mentionParticipants)
         }
     }
     // `@everyone` vem na frente da lista, quando o autor pode usá-lo e o que foi digitado é o começo de `everyone`.
@@ -1230,9 +1347,30 @@ private fun Composer(
 
             AttachmentTray(state.files, onRemoveFile, onPreviewFile)
 
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
+            // Com uma gravação de voz desta conversa, a barra dela toma o lugar do campo de texto.
+            // Só o fato de haver gravação aqui recompõe o compositor; o tempo que corre fica dentro da barra.
+            val voiceHere by remember(voice, voiceOwner) {
+                (voice?.state ?: IDLE_VOICE).map { it.owner == voiceOwner }.distinctUntilChanged()
+            }.collectAsStateWithLifecycle(false)
+            val callActive by (voice?.callActive ?: NO_CALL).collectAsStateWithLifecycle()
+            if (voice != null && voiceHere) {
+                VoiceRecorderBar(voice, onSendVoice)
+            } else Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
                 if (canAttach) {
-                    AttachButton(enabled = state.editing == null, freeSlots = MAX_ATTACHMENTS - state.files.size, onFiles = onAddFiles)
+                    AttachButton(
+                        enabled = state.editing == null,
+                        freeSlots = MAX_ATTACHMENTS - state.files.size,
+                        onFiles = onAddFiles,
+                        onRecordVoice = voice?.let {
+                            {
+                                // O teclado cede o lugar à barra de gravação.
+                                keyboard?.hide()
+                                focusManager.clearFocus()
+                                it.start(voiceOwner)
+                            }
+                        },
+                        voiceAvailable = !callActive,
+                    )
                 } else {
                     // O campo ocuparia o lugar do clipe: a folga mantém o recuo de quando ele existe.
                     Spacer(Modifier.width(8.dp))

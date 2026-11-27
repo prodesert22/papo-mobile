@@ -50,9 +50,6 @@ private const val POSTER_RETRY_TIME_US = 1_000_000L
 /** Brilho (0 a 255) até o qual um ponto do quadro conta como preto. */
 private const val POSTER_BLACK_LUMA = 20
 
-/** Onde a capa de [attachmentId] fica no cache cifrado da conta [accountId]: nunca é buscada nem extraída duas vezes. */
-fun posterKey(accountId: String, attachmentId: String): String = "att-poster/$accountId/$attachmentId"
-
 /** De onde vem a capa do cartão de um vídeo. */
 enum class PosterSource {
     /** Sem capa: o cartão simples. */

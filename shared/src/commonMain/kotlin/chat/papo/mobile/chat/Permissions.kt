@@ -239,6 +239,14 @@ fun conversationAccess(snapshot: PermissionSnapshot, me: String, channelId: Stri
     )
 }
 
+/**
+ * Se [me] vê as configurações de um canal (editar nome e descrição): só com `manage_channels` [Decision.Allowed], dono
+ * incluso. Ao contrário do resto da conversa, o desconhecido esconde: o que é de administração só aparece para quem tem
+ * a permissão, nunca como uma tentativa que volta 403.
+ */
+fun canManageChannels(snapshot: PermissionSnapshot, me: String): Boolean =
+    snapshot.role(me, RoleFlag.ManageChannels) == Decision.Allowed
+
 /** O que só o [Decision.Denied] tira da tela: o desconhecido se oferece e o servidor decide. */
 private val Decision.offered: Boolean get() = this != Decision.Denied
 

@@ -54,6 +54,9 @@ kotlin {
             implementation(libs.ktor.serialization.json)
             implementation(libs.sqldelight.coroutines)
             implementation(libs.zoomable)
+            implementation(libs.material.color.utilities)
+            implementation(libs.colorpicker.compose)
+            implementation(libs.aboutlibraries.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -94,6 +97,7 @@ kotlin {
         }
         getByName("androidHostTest").dependencies {
             implementation(libs.sqldelight.jvm.driver)
+            implementation(libs.org.json)
         }
     }
 }

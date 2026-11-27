@@ -21,6 +21,12 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   eles diferem.
 - Troca rápida que acha qualquer conversa de qualquer uma das suas contas, com
   menções e conversas não lidas primeiro.
+- Configurações em listas com um resumo curto de cada item, como as do próprio
+  Android: a engrenagem no pé da barra de servidores abre as configurações do
+  app e o menu no topo da lista de canais abre as configurações do servidor da
+  conta. A barra de servidores mostra o seu avatar em cada conta e um ícone de
+  desconectado no servidor sem conexão, que também aparece ao lado do nome dele
+  acima da lista de canais.
 
 ## Privacidade no aparelho
 
@@ -28,18 +34,56 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   abre os dados guardados fica no hardware seguro do celular.
 - Contas, sessões, mensagens, rascunhos e mídia em cache ficam cifrados e fora
   dos backups do aparelho.
-- Opcionalmente, bloqueie capturas de tela e esconda as conversas na lista de
-  apps recentes.
+- Bloqueio na hora ou 1, 5 ou 15 minutos ou uma hora depois de sair do app.
+- Permita ou bloqueie capturas e gravação de tela, o que também esconde as
+  conversas na lista de apps recentes, com ou sem o bloqueio do app.
+- Escolha o que as notificações do próprio app mostram: tudo, nada na tela de
+  bloqueio do celular, ou só "Nova mensagem" em todo lugar. As notificações
+  push que o Android mostra seguem a prévia do servidor.
+- O celular guarda só as 120 mensagens mais novas das 3 conversas, canais ou
+  mensagens diretas, que você abriu por último em cada conta, com as imagens,
+  os GIFs e as capas de vídeo delas. Vídeos nunca são guardados. O resto do
+  histórico sai do celular e vem do servidor quando você abre a conversa.
 - O player do YouTube dentro do app é a única exceção: enquanto ele está aberto,
   o componente web do celular guarda cookies e cache sem cifrar na pasta do app.
   Eles são apagados quando o player fecha e quando o app trava; algumas bases
   vazias com o nome do YouTube ficam até a próxima vez que o app abrir.
+
+## Aparência
+
+- Um tema para o app inteiro: seguir o sistema, claro, escuro ou OLED, com
+  fundo e áreas da lista em preto para economizar energia em telas OLED. Seis
+  predefinições (Papo, Oceano, Floresta, Ametista, Âmbar e Rosa) e uma prévia
+  ao vivo da lista de canais e de uma conversa.
+- Mude cada cor de um tema (destaque, fundo, áreas da lista, barra de
+  servidores, texto, texto secundário, menções e o destaque da menção) com uma
+  roda de cores, um código `#RRGGBB` ou amostras rápidas, com um aviso quando o
+  texto fica difícil de ler.
+- Um servidor pode ter o próprio tema, usado enquanto aquela conta está
+  selecionada; a tela de bloqueio e a de adicionar servidor usam sempre o
+  tema do app.
+
+## Sobre o app
+
+- "Sobre o Papo Mobile", nas configurações do app, mostra a versão e o build,
+  links do projeto e a licença do app, a GNU AGPL v3.0, para ler no app.
+  "Licenças de terceiros" lista as bibliotecas e os dados de fonte e de emoji
+  que o app inclui, com as licenças.
+- Links só abrem fora do app quando usam `http` ou `https`.
 
 ## Mensagens
 
 - Canais de texto agrupados por categoria e mensagens diretas, em tempo real,
   com marcação de não lidas e a contagem das mensagens novas que chegaram
   enquanto você lia mais acima.
+- A lista de canais tem duas abas, "Canais" e "Conversas diretas", cada uma
+  com a sua contagem de menções; sem conversas diretas, um botão no meio
+  começa uma. Segure uma conversa direta para fechá-la: ela sai da lista e
+  guarda o histórico, e uma mensagem nova ou começá-la de novo a traz de volta.
+- Toque na descrição abaixo do nome de um canal para lê-la inteira. Quem pode
+  gerenciar canais muda o nome e a descrição de um canal pelo menu da
+  conversa, pela descrição ou segurando o canal na lista; ninguém mais vê a
+  opção.
 - As mensagens aparecem assim que você as envia e saem uma de cada vez; a que
   falha fica com o motivo e um botão para reenviar, e nunca é reenviada sozinha.
 - Um rascunho para cada conversa, com a mensagem que você estava respondendo.
@@ -48,9 +92,16 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   anexo. Até 10 arquivos, 100 MB cada e 105 MB somados; os arquivos sobem em
   fluxo, com progresso e botão de cancelar, e uma foto JPEG que leva a sua
   localização avisa antes de enviar.
+- Grave uma mensagem de voz no menu do clipe: o app pede o microfone, grava até
+  30 minutos e, depois de parar, você pode ouvir, descartar ou enviar. Ela sai
+  como uma mensagem só dela, respondendo à mensagem que você estava
+  respondendo, e o que você digitou e os arquivos que anexou ficam no
+  compositor. É enviada como um arquivo de áudio que toca na mensagem aqui e no
+  web, e fica só na memória: nunca é gravada no armazenamento do celular.
 - Respostas, edição e exclusão, reações, mensagens fixadas e menções. As
   menções acham as pessoas por qualquer parte do nome, sem se importar com
-  acentos, e as mensagens que mencionam você ou respondem a você ficam destacadas.
+  acentos (numa conversa direta, só as duas pessoas dela), e as mensagens que
+  mencionam você ou respondem a você ficam destacadas.
 - Toque numa resposta para ir à mensagem original, deslize uma mensagem para
   respondê-la e toque duas vezes para reagir com 👍. Copie uma mensagem ou
   selecione parte do texto.
@@ -196,7 +247,11 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   de push que já está na barra fica lá até você abrir ou dispensar. Um canal em
   "nada" no servidor não recebe
   notificações dele, então fica sem número.
-- Sem administração do servidor.
+- Sem administração do servidor além de mudar o nome e a descrição de um
+  canal.
+- Fechar uma conversa direta só chega aos seus outros aparelhos quando eles
+  carregam a lista de novo, porque o servidor não avisa.
+- O tema próprio de um servidor fica só neste celular.
 - O avatar não pode ser removido depois de definido, só trocado, e avatar ou banner
   animado não é recortado: vai como está quando cabe nos limites de tamanho e é
   recusado quando não cabe; não há status
@@ -229,4 +284,8 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   o app não tira a localização. O que vem do teclado tem limite de 20 MB por item.
 - Mensagens que esperam para sair e arquivos anexados a um rascunho se perdem
   quando o app trava ou fecha.
+- Não dá para gravar uma mensagem de voz durante uma chamada de voz, e sair do
+  app para a gravação: ela fica guardada para você ouvir e enviar quando voltar.
+  Ela é descartada quando você sai da conversa ou o app trava. A permissão do
+  microfone recusada de vez precisa ser dada nas configurações do celular.
 - A interface está em português.

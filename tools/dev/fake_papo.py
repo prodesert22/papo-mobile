@@ -35,6 +35,7 @@ Para mudar ao vivo, entre como o dono e use as rotas da OpenAPI (com cookie), qu
 `POST /roles`, `PUT`/`DELETE /roles/{id}` (estes dois, como no servidor, **não** mandam evento),
 `POST /users/{id}/roles` e `DELETE /users/{id}/roles/{role_id}` (`role_add`/`role_remove`),
 `PUT /channels/{id}/permissions/{role_id}` e `DELETE /channels/{id}/role/{role_id}` (`channel_update`).
+`PUT /channels/{id}` edita nome e descrição de um canal (`manage_channels`, 409 se o nome já existe, `channel_update`).
 Os ids dos cargos são fixos (derivados do nome) e saem na linha de partida, junto com os dos usuários.
 
 Vídeos anexados (tudo desligado por padrão; sem estas variáveis o fake responde como sempre). `GET /attachments/{id}`
@@ -182,6 +183,7 @@ PAPO = CHANNELS[1]["id"]
 MESSAGES = {}    # channel_id -> [message]
 READS = {}       # (user_id, channel_id) -> message_id
 DMS = {}         # dm_id -> (user_a, user_b)
+CLOSED_DMS = set()  # (user_id, dm_id): a DM que o usuário fechou; sai só da lista dele, e uma mensagem nova ou POST /dms a reabre
 PINS = {}        # channel_id -> [message_id]
 FILES = {}       # attachment_id -> (mime, bytes)
 THUMBS = {}      # attachment_id -> (mime, bytes): miniatura de um anexo que não é imagem (o servidor real só gera para imagem)
@@ -1151,6 +1153,60 @@ def update_profile_text(name, data):
     return None
 
 
+# ── Editar canal ─────────────────────────────────────────────────────────────────────────────────
+
+CHANNEL_NAME_MAX = 32
+CHANNEL_TOPIC_MAX = 512
+
+
+def serve_channel_edit(handler, method, path, me):
+    """`PUT /channels/{id}` como o servidor (`handlers/channels.go`, `services/channels.go`), lido no código e não
+    observado em execução. Devolve False se a rota não é esta.
+
+    Exige `manage_channels` (o dono passa; sem FAKE_PERMISSIONS todos passam). Valida antes de procurar o canal: `name` de 1 a
+    32 caracteres (o servidor não apara espaços) e `topic`, se vier, até 512 caracteres e só vazio em categoria. `topic`
+    ausente ou nulo mantém a descrição, `""` a apaga (o servidor guarda nulo). Nome de outro canal: 409, e o nome é único no
+    servidor inteiro. Responde 200 com o canal como em `GET /channels` e manda `channel_update` a todos, com `parent_id`.
+    """
+    found = re.fullmatch(r"/channels/([^/]+)", path)
+    if method != "PUT" or not found:
+        return False
+    data = handler.body()
+    if not has_role_flag(me, "manage_channels"):
+        handler.forbidden("usuário não possui a permissão necessária para esta operação")
+        return True
+    data = data if isinstance(data, dict) else {}
+    name, topic = data.get("name"), data.get("topic")
+    if not isinstance(name, str) or not name or len(name) > CHANNEL_NAME_MAX or not (topic is None or isinstance(topic, str)):
+        handler.problem(400, "Parâmetro inválido", "name é obrigatório e deve ter no máximo 32 caracteres; "
+                        "topic tem no máximo 512 caracteres e é válido apenas para canais de texto")
+        return True
+    channel = next((c for c in CHANNELS if c["id"] == found.group(1)), None)
+    if channel is None:
+        handler.problem(404, "Recurso não encontrado", "canal não encontrado")
+        return True
+    if topic is not None and (len(topic) > CHANNEL_TOPIC_MAX or (channel["type"] == "category" and topic != "")):
+        handler.problem(400, "Parâmetro inválido", "name é obrigatório e deve ter no máximo 32 caracteres; "
+                        "topic tem no máximo 512 caracteres e é válido apenas para canais de texto")
+        return True
+    if any(c["name"] == name and c is not channel for c in CHANNELS):
+        handler.problem(409, "Nome de canal já existe", "o nome informado já está em uso")
+        return True
+    channel["name"] = name
+    if topic is not None:
+        channel["topic"] = topic or None
+    emit({"type": "channel_update", "channel_id": channel["id"], "name": name, "position": channel["position"],
+          "topic": channel.get("topic"), "parent_id": channel.get("parent_id")})
+    item = dict(channel, topic=channel.get("topic"), parent_id=channel.get("parent_id"))
+    item["last_message"] = last_message(channel["id"])
+    item["last_read_message"] = READS.get((me, channel["id"]))
+    item["notification_settings"] = notify_setting(me, channel["id"])
+    if ACCESS["on"]:
+        item["permissions"] = entry_views(channel["id"])
+    handler.send(200, item)
+    return True
+
+
 def serve_profile_writes(handler, method, path, me):
     """Responde os PUT do próprio perfil; devolve False se `path` não é um deles."""
     found = re.fullmatch(r"/users/([^/]+)(|/avatar|/banner|/status)", path)
@@ -1433,7 +1489,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, {"channels": out})
         elif path == "/dms":
             # Uma DM com bloqueio, em qualquer sentido, não sai da lista (o servidor a esconde; desbloquear não a reabre).
-            self.send(200, {"dms": [dm_view(d, me) for d, pair in DMS.items() if me in pair and not blocked_between(*pair)]})
+            self.send(200, {"dms": [dm_view(d, me) for d, pair in DMS.items()
+                                    if me in pair and (me, d) not in CLOSED_DMS and not blocked_between(*pair)]})
         elif path == "/users":
             self.send(200, {"users": [summary(n) for n in USERS], "has_more": False})
         elif path == "/roles" and ACCESS["on"]:
@@ -1515,6 +1572,8 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if serve_profile_writes(self, method, path, me):
             return
+        if serve_channel_edit(self, method, path, me):
+            return
         if method == "POST" and path == "/messages":
             ctype = self.headers.get("Content-Type", "")
             control = send_control()
@@ -1555,6 +1614,7 @@ class Handler(BaseHTTPRequestHandler):
             crawl_links(m)
             if m["channel_id"] in DMS:
                 for u in set(DMS[m["channel_id"]]):
+                    CLOSED_DMS.discard((u, m["channel_id"]))
                     emit({"type": "dm_update", "dm": dm_view(m["channel_id"], u)}, only={u})
             if control["status"] >= 400:
                 return self.problem(control["status"], "Erro simulado", "Mensagem criada, mas a resposta foi simulada como erro")
@@ -1575,7 +1635,15 @@ class Handler(BaseHTTPRequestHandler):
             if dm_id is None:
                 dm_id = str(uuid.uuid4())
                 DMS[dm_id] = (me, other)
+            CLOSED_DMS.discard((me, dm_id))
             return self.send(200, dm_view(dm_id, me))
+        m = re.fullmatch(r"/dms/([^/]+)", path)
+        if method == "DELETE" and m:
+            # Fecha só para quem pediu e não apaga o histórico; sem evento, e quem não é da conversa recebe 404.
+            if me not in DMS.get(m.group(1), ()):
+                return self.problem(404, "Recurso não encontrado", "conversa não encontrada")
+            CLOSED_DMS.add((me, m.group(1)))
+            return self.send(204, None)
         m = re.fullmatch(r"/messages/([^/]+)", path)
         if m:
             msg = self.find(m.group(1))

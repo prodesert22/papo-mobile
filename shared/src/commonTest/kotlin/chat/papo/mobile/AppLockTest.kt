@@ -24,7 +24,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -288,5 +291,101 @@ class AppLockTest {
         f.onClose = { throw CancellationException("cancelado") }
 
         assertFailsWith<CancellationException> { f.lock.lockNow() }
+    }
+
+    @Test
+    fun osTempoDeBloqueioAntigosContinuamComOsMesmosIds() {
+        assertEquals(LockTimeout.Immediately, LockTimeout.fromId("immediately"))
+        assertEquals(LockTimeout.OneMinute, LockTimeout.fromId("1m"))
+        assertEquals(LockTimeout.FiveMinutes, LockTimeout.fromId("5m"))
+        assertEquals(LockTimeout.FifteenMinutes, LockTimeout.fromId("15m"))
+        assertEquals(LockTimeout.OneHour, LockTimeout.fromId("1h"))
+        assertEquals(LockTimeout.Immediately, LockTimeout.fromId(null))
+        assertEquals(LockTimeout.Immediately, LockTimeout.fromId("2h"))
+        assertEquals(15.minutes, LockTimeout.FifteenMinutes.duration)
+        assertEquals(1.hours, LockTimeout.OneHour.duration)
+    }
+
+    @Test
+    fun otempoDe15MinutosEDe1HoraFicamGravadosELidosNaProximaAbertura() = runTest {
+        val f = Fixture(this)
+        f.lock.setTimeout(LockTimeout.FifteenMinutes)
+        assertEquals("15m", f.prefs.map["lock.timeout"])
+        f.lock.setTimeout(LockTimeout.OneHour)
+        assertEquals("1h", f.prefs.map["lock.timeout"])
+
+        val restarted = AppLock(f.keyStore, NoCrypto, f.prefs, { }, backgroundScope, { FakeSession() }, testScheduler.timeSource)
+        assertEquals(LockTimeout.OneHour, restarted.timeout.value)
+    }
+
+    @Test
+    fun bloqueiaSoDepoisDe15MinutosQuandoEsseEOTempo() = runTest {
+        val f = Fixture(this)
+        f.lock.start()
+        f.lock.setLockEnabled(true, f.prompt)
+        f.lock.setTimeout(LockTimeout.FifteenMinutes)
+
+        f.lock.onBackground()
+        advanceTimeBy(14.minutes)
+        runCurrent()
+        assertIs<LockState.Unlocked>(f.lock.state.value)
+
+        advanceTimeBy(2.minutes)
+        runCurrent()
+        assertIs<LockState.Locked>(f.lock.state.value)
+    }
+
+    @Test
+    fun bloqueiaSoDepoisDe1HoraQuandoEsseEOTempo() = runTest {
+        val f = Fixture(this)
+        f.lock.start()
+        f.lock.setLockEnabled(true, f.prompt)
+        f.lock.setTimeout(LockTimeout.OneHour)
+
+        f.lock.onBackground()
+        advanceTimeBy(59.minutes)
+        runCurrent()
+        assertIs<LockState.Unlocked>(f.lock.state.value)
+
+        advanceTimeBy(2.minutes)
+        runCurrent()
+        assertIs<LockState.Locked>(f.lock.state.value)
+    }
+
+    @Test
+    fun semEscolhaGravadaASelecaoDeCapturaFicaNula() = runTest {
+        val f = Fixture(this)
+        assertNull(f.lock.secureScreen.value)
+    }
+
+    @Test
+    fun escolhaGravadaComoTrueOuFalseEReaproveitada() = runTest {
+        val f = Fixture(this)
+        f.prefs.map["lock.secure_screen"] = "false"
+        val permitindo = AppLock(f.keyStore, NoCrypto, f.prefs, { }, backgroundScope, { FakeSession() }, testScheduler.timeSource)
+        assertEquals(false, permitindo.secureScreen.value)
+
+        f.prefs.map["lock.secure_screen"] = "true"
+        val bloqueando = AppLock(f.keyStore, NoCrypto, f.prefs, { }, backgroundScope, { FakeSession() }, testScheduler.timeSource)
+        assertEquals(true, bloqueando.secureScreen.value)
+    }
+
+    @Test
+    fun valorGravadoQueNaoEBooleanoContaComoSemEscolha() = runTest {
+        val f = Fixture(this)
+        f.prefs.map["lock.secure_screen"] = "talvez"
+        val restarted = AppLock(f.keyStore, NoCrypto, f.prefs, { }, backgroundScope, { FakeSession() }, testScheduler.timeSource)
+        assertNull(restarted.secureScreen.value)
+    }
+
+    @Test
+    fun escolherCapturaGravaOValorEAtualizaOFluxo() = runTest {
+        val f = Fixture(this)
+        f.lock.setSecureScreen(false)
+        assertEquals("false", f.prefs.map["lock.secure_screen"])
+        assertEquals(false, f.lock.secureScreen.value)
+        f.lock.setSecureScreen(true)
+        assertEquals("true", f.prefs.map["lock.secure_screen"])
+        assertEquals(true, f.lock.secureScreen.value)
     }
 }

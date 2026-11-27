@@ -44,6 +44,13 @@ data class UpdateProfileRequest(
     val typing: String? = null,
 )
 
+/**
+ * Corpo de `PUT /channels/{id}` (exige `manage_channels`): [name] é obrigatório, de 1 a 32 caracteres; [topic] nulo fica
+ * fora do corpo e mantém a descrição atual, `""` a apaga (até 512 caracteres; categoria não tem descrição).
+ */
+@Serializable
+data class UpdateChannelRequest(val name: String, val topic: String? = null)
+
 @Serializable
 data class UpdateAvatarRequest(val avatar: String, @SerialName("avatar_format") val avatarFormat: String)
 

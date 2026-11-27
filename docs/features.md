@@ -20,6 +20,12 @@ release notes in [releases/](../releases/) describe each version's changes.
   differ.
 - A quick switcher that finds any conversation of any of your accounts, with
   mentions and unread conversations first.
+- Settings as lists with a short summary of every item, as in Android's own
+  settings: the gear at the bottom of the server bar opens the app settings and
+  the menu at the top of the channel list opens the server settings of the
+  account. The server bar shows your avatar on each account, and a
+  disconnected icon on a server without a connection, also next to its name
+  above the channel list.
 
 ## Privacy on the device
 
@@ -27,17 +33,56 @@ release notes in [releases/](../releases/) describe each version's changes.
   opens the stored data stays in the phone's secure hardware.
 - Accounts, sessions, messages, drafts and cached media are stored encrypted and
   are left out of device backups.
-- Optionally block screenshots and hide conversations in the recent apps list.
+- Lock right away or 1, 5 or 15 minutes or an hour after you leave the app.
+- Allow or block screenshots and screen recording, which also hides the
+  conversations in the recent apps list, with or without the app lock.
+- Choose what the app's own notifications show: everything, nothing on the
+  phone's lock screen, or only "Nova mensagem" everywhere. Push notifications
+  shown by Android follow the server's preview instead.
+- The phone keeps only the 120 newest messages of the 3 conversations, channels
+  or direct messages, you opened last on each account, with their images, GIFs
+  and video posters. Videos are never stored. The rest of the history is
+  removed from the phone and fetched from the server when you open the
+  conversation.
 - The in-app YouTube player is the one exception: while it is open, the phone's
   web component keeps its cookies and cache unencrypted in the app's folder.
   They are deleted when the player closes and when the app locks; a few empty
   databases named after YouTube stay until the app is next opened.
+
+## Appearance
+
+- A theme for the whole app: follow the system, light, dark or OLED, with a
+  black background and black list areas to save energy on OLED screens. Six
+  presets (Papo, Oceano, Floresta, Ametista, Âmbar and Rosa) and a live
+  preview of the channel list and a conversation.
+- Change each color of a theme (accent, background, list areas, server bar,
+  text, secondary text, mentions and the mention highlight) with a color
+  wheel, a `#RRGGBB` code or quick swatches, with a warning when the text gets
+  hard to read.
+- A server can have its own theme, used while that account is selected; the
+  lock screen and adding a server always use the app's theme.
+
+## About the app
+
+- "Sobre o Papo Mobile", in the app settings, shows the version and build,
+  links to the project and the app's license, the GNU AGPL v3.0, to read in
+  the app. "Licenças de terceiros" lists the libraries and the font and emoji
+  data the app includes, with their licenses.
+- Links open outside the app only when they use `http` or `https`.
 
 ## Messages
 
 - Text channels grouped by category and direct messages, in real time, with
   unread markers and a count of the new messages that arrived while you read
   further up.
+- The channel list has two tabs, "Canais" and "Conversas diretas", each with
+  its mention count; without direct conversations, a button in the middle
+  starts one. Hold a direct conversation to close it: it leaves the list and
+  keeps its history, and a new message or starting it again brings it back.
+- Tap the description under a channel's name to read it in full. People
+  allowed to manage channels can rename a channel and change its
+  description, from the conversation menu, from the description or by
+  holding the channel in the list; nobody else sees the option.
 - Messages show as soon as you send them and go out one at a time; one that
   fails stays with the reason and a button to send it again, and is never sent
   again on its own.
@@ -47,9 +92,16 @@ release notes in [releases/](../releases/) describe each version's changes.
   attachments too. Up to 10 files, 100 MB each and 105 MB together; files upload
   as a stream, with progress and a cancel button, and a JPEG that carries its
   location warns you before sending.
+- Record a voice message from the clip menu: the app asks for the microphone,
+  records up to 30 minutes, and after you stop you can listen, discard or send
+  it. It goes out as its own message, answering the message you were replying
+  to, and what you typed and the files you attached stay in the composer. It
+  is sent as an audio file that plays in the message here and on the web, and
+  it is kept only in memory: never written to the phone's storage.
 - Replies, editing and deleting, reactions, pinned messages and
   mentions. Mentions find people by any part of their name, without caring about
-  accents, and messages that mention you or reply to you are highlighted.
+  accents (in a direct conversation, only its two people), and messages that
+  mention you or reply to you are highlighted.
 - Tap a reply to go to the original message, swipe a message to reply to it and
   double tap it to react with 👍. Copy a message or select part of its text.
 - The conversation is a panel over the channel list, as in Discord. Swipe it to
@@ -194,7 +246,11 @@ release notes in [releases/](../releases/) describe each version's changes.
   it; a push notification already in the shade stays until you open or dismiss
   it. A channel set to "nothing" on the server
   gets no notifications from it, so it shows no count.
-- No server administration.
+- No server administration beyond renaming a channel and changing its
+  description.
+- Closing a direct conversation reaches your other devices only when they
+  load the list again, because the server does not announce it.
+- A server's own theme stays on this phone.
 - Your avatar cannot be removed once set, only replaced, and an animated avatar or
   banner is not cropped: it goes as it is when it fits the size limits and is
   refused otherwise; there is no "invisible"
@@ -229,4 +285,8 @@ release notes in [releases/](../releases/) describe each version's changes.
   to 20 MB each.
 - Messages waiting to be sent, and files attached to a draft, are lost when the
   app locks or closes.
+- A voice message cannot be recorded during a voice call, and leaving the app
+  stops the recording: it is kept to listen to and send when you come back. It
+  is discarded when you leave the conversation or the app locks. The microphone
+  permission you refuse for good has to be given in the phone's settings.
 - The interface is in Portuguese.

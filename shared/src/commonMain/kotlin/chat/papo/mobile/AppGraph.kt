@@ -1,5 +1,6 @@
 package chat.papo.mobile
 
+import chat.papo.mobile.core.BuildInfo
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.account.AccountManager
 import chat.papo.mobile.account.AccountResources
@@ -21,6 +22,9 @@ import chat.papo.mobile.media.AudioEngineFactory
 import chat.papo.mobile.media.AudioPlayback
 import chat.papo.mobile.media.MediaCache
 import chat.papo.mobile.media.VideoPosterExtractor
+import chat.papo.mobile.media.VoiceClipPlayerFactory
+import chat.papo.mobile.media.VoiceRecorder
+import chat.papo.mobile.media.VoiceRecording
 import chat.papo.mobile.push.PushTokens
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.notif_system_attachment
@@ -30,8 +34,10 @@ import chat.papo.mobile.security.AppLock
 import chat.papo.mobile.security.AppPrefs
 import chat.papo.mobile.security.LockState
 import chat.papo.mobile.security.MasterKeyStore
+import chat.papo.mobile.security.NotificationPrivacy
 import chat.papo.mobile.security.UnlockedSession
 import chat.papo.mobile.security.WebPlayerData
+import chat.papo.mobile.ui.theme.AppThemeStore
 import chat.papo.mobile.voice.CallManager
 import chat.papo.mobile.voice.VoiceEngineFactory
 import io.ktor.client.engine.HttpClientEngine
@@ -42,6 +48,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
+import kotlin.time.Clock
 import org.jetbrains.compose.resources.getString
 
 /** O que cada plataforma precisa fornecer ao código comum. */
@@ -58,8 +65,8 @@ class PlatformDeps(
     val voice: VoiceEngineFactory? = null,
     /** Tira o quadro da capa dos vídeos; null onde a plataforma ainda não sabe, e então os cartões ficam sem capa. */
     val videoPosters: VideoPosterExtractor? = null,
-    /** Versão instalada do app, como mostrada ao usuário. */
-    val appVersion: String = "",
+    /** A compilação instalada: versão mostrada ao usuário, número da versão e se é de desenvolvimento. */
+    val build: BuildInfo = BuildInfo(),
     /** Apaga o que o player web do YouTube deixou em claro; null onde a plataforma não tem um. Roda quando a sessão fecha. */
     val webPlayerData: WebPlayerData? = null,
     /** Motor do player de áudio; null onde a plataforma ainda não tem um, e então os áudios aparecem como arquivos. */
@@ -70,6 +77,18 @@ class PlatformDeps(
     val notificationPermission: NotificationPermission? = null,
     /** O token de push do aparelho; null onde a plataforma não tem push, e então nenhuma conta registra o aparelho. */
     val pushTokens: PushTokens? = null,
+    /** O conteúdo que as notificações montadas pelo app mostram; o [notifier] lê o mesmo objeto que a tela de segurança muda. */
+    val notificationPrivacy: NotificationPrivacy = NotificationPrivacy(prefs),
+    /**
+     * O JSON das bibliotecas de terceiros e das suas licenças (o que o plugin do AboutLibraries gerou na compilação); null
+     * onde a plataforma não o tem ou não o conseguiu ler. Lê do recurso a cada chamada: bloqueia, por isso o código comum
+     * só o chama por [AppGraph.readLibraryDefinitions].
+     */
+    val libraryDefinitions: () -> String? = { null },
+    /** O gravador de mensagens de voz; null onde a plataforma não tem um, e então o clipe não oferece gravar. Vale junto com [voiceClipPlayers]. */
+    val voiceRecorder: VoiceRecorder? = null,
+    /** O player da revisão de uma gravação; null junto com [voiceRecorder]. */
+    val voiceClipPlayers: VoiceClipPlayerFactory? = null,
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -81,12 +100,16 @@ class AppSession internal constructor(
     private val scope: CoroutineScope,
     /** O player de áudio de todas as contas (um áudio por vez); null sem motor na plataforma. */
     val audio: AudioPlayback? = null,
+    /** A gravação de mensagens de voz (uma por vez no app); null sem gravador na plataforma. */
+    val voiceRecording: VoiceRecording? = null,
 ) : UnlockedSession {
     /** Em chamada o app não bloqueia sozinho nem desliga o tempo real. */
     override val busy: StateFlow<Boolean> get() = calls.active
 
     override suspend fun close() {
         calls.leave()
+        // A gravação que ficou na memória não sobrevive à sessão (nem ao bloqueio, que a fecha).
+        voiceRecording?.release()
         audio?.release()
         // Um rótulo ou cor escolhido há instantes ainda pode esperar o escritor; falhar aqui não pode deixar o registro aberto.
         try {
@@ -106,10 +129,18 @@ class AppSession internal constructor(
 class AppGraph(private val platform: PlatformDeps) {
     val scope = CoroutineScope(SupervisorJob() + platform.dispatchers.main)
 
-    val appVersion: String get() = platform.appVersion
+    val build: BuildInfo get() = platform.build
+
+    val appVersion: String get() = platform.build.versionName
+
+    /** O JSON das bibliotecas de terceiros, lido sob demanda fora da thread principal; o chamador não o guarda depois de usar. */
+    suspend fun readLibraryDefinitions(): String? = withContext(platform.dispatchers.io) { platform.libraryDefinitions() }
 
     /** A permissão de notificar do sistema; null onde a plataforma não tem notificações. */
     val notificationPermission: NotificationPermission? get() = platform.notificationPermission
+
+    /** O que as notificações do app mostram de uma mensagem; a tela de segurança muda, o notificador lê. */
+    val notificationPrivacy: NotificationPrivacy get() = platform.notificationPrivacy
 
     /** A explicação única que antecede o pedido da permissão; null onde não há permissão a pedir. */
     val notificationPrompt: NotificationPermissionPrompt? =
@@ -117,6 +148,9 @@ class AppGraph(private val platform: PlatformDeps) {
 
     /** O que tocar numa notificação pede à tela: abrir uma conversa de uma conta. */
     val notificationOpens = NotificationOpenRequests()
+
+    /** O tema global; nas preferências, para a tela de bloqueio já usá-lo. */
+    val theme = AppThemeStore(platform.prefs)
 
     val lock = AppLock(
         keyStore = platform.keyStore,
@@ -145,6 +179,8 @@ class AppGraph(private val platform: PlatformDeps) {
     fun onBackground() {
         // Tocar em segundo plano exigiria um serviço de mídia, que o app não tem: o áudio pausa, mesmo com uma chamada aberta.
         currentSession()?.audio?.pause()
+        // O Android não deixa capturar o microfone em segundo plano sem um serviço, que o app não tem: a gravação para e fica para a revisão.
+        currentSession()?.voiceRecording?.onBackground()
         currentSession()?.takeIf { !it.busy.value }?.accounts?.setForeground(false)
         lock.onBackground()
     }
@@ -203,6 +239,22 @@ class AppGraph(private val platform: PlatformDeps) {
             }
             AudioPlayback(engines, sessionScope, live)
         }
-        AppSession(accounts, keys, CallManager(platform.voice, sessionScope), driver, sessionScope, audio)
+        val calls = CallManager(platform.voice, sessionScope)
+        val recorder = platform.voiceRecorder
+        val clipPlayers = platform.voiceClipPlayers
+        val voiceRecording = if (recorder != null && clipPlayers != null) {
+            VoiceRecording(
+                recorder = recorder,
+                players = clipPlayers,
+                scope = sessionScope,
+                io = platform.dispatchers.io,
+                callActive = calls.active,
+                pauseOtherAudio = { audio?.pause() },
+                wallClockMs = { Clock.System.now().toEpochMilliseconds() },
+            )
+        } else {
+            null
+        }
+        AppSession(accounts, keys, calls, driver, sessionScope, audio, voiceRecording)
     }
 }

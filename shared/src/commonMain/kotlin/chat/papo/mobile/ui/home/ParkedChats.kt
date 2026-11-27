@@ -18,6 +18,10 @@ class ParkedChats private constructor(private val byAccount: Map<String, ParkedC
     fun opened(accountId: String, chat: ParkedChat): ParkedChats =
         if (byAccount[accountId] == chat) this else ParkedChats(byAccount + (accountId to chat))
 
+    /** A conversa [channelId] sai de [accountId] se for a última dela (uma conversa direta fechada); qualquer outra fica. */
+    fun without(accountId: String, channelId: String): ParkedChats =
+        if (byAccount[accountId]?.channelId == channelId) ParkedChats(byAccount - accountId) else this
+
     /** Só as contas de [accountIds] ficam: a conta removida leva a conversa dela. */
     fun retaining(accountIds: Set<String>): ParkedChats {
         val kept = byAccount.filterKeys { it in accountIds }

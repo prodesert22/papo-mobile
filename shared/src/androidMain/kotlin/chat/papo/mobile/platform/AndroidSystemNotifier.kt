@@ -19,11 +19,14 @@ import chat.papo.mobile.chat.ConversationNotification
 import chat.papo.mobile.chat.NotificationLine
 import chat.papo.mobile.chat.SystemNotifier
 import chat.papo.mobile.resources.Res
+import chat.papo.mobile.resources.app_name
+import chat.papo.mobile.resources.notif_hidden_text
 import chat.papo.mobile.resources.notif_system_channel_dms
 import chat.papo.mobile.resources.notif_system_channel_mentions
 import chat.papo.mobile.resources.notif_system_channel_messages
 import chat.papo.mobile.resources.notif_system_channel_push
 import chat.papo.mobile.resources.notif_system_summary
+import chat.papo.mobile.security.NotificationContent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
@@ -44,8 +47,16 @@ const val PUSH_CHANNEL_ID = "papo.push"
  * Tudo se chama pela conta e pela conversa: a etiqueta de cada notificação é `papo.<conta>/c:<conversa>`, então nada de
  * uma conta cancela ou troca o de outra (regra 4), nem de duas contas do mesmo servidor. O som e a vibração ficam nas
  * configurações de cada canal do Android. [smallIcon] é o ícone de uma cor da barra de status.
+ *
+ * [content] diz o que a notificação mostra da mensagem, e é lido a cada uma: "ocultar na tela de bloqueio" deixa a versão
+ * pública (a que aparece com o aparelho bloqueado) genérica, e "ocultar sempre" faz da notificação inteira um aviso
+ * genérico, sem autor, texto nem foto.
  */
-class AndroidSystemNotifier(context: Context, @param:DrawableRes private val smallIcon: Int) : SystemNotifier {
+class AndroidSystemNotifier(
+    context: Context,
+    @param:DrawableRes private val smallIcon: Int,
+    private val content: () -> NotificationContent = { NotificationContent.Show },
+) : SystemNotifier {
     private val app = context.applicationContext
     private val manager = NotificationManagerCompat.from(app)
 
@@ -64,9 +75,15 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
             notification.kind == ConversationKind.Dm -> channelId(notification.accountId, DMS)
             else -> channelId(notification.accountId, MENTIONS)
         }
-        val people = withContext(Dispatchers.Default) { peopleOf(notification) }
-        manager.notify(tag(notification.accountId, notification.conversationId), NOTIFICATION_ID, conversation(notification, channel, people))
-        postSummaryIfAbsent(notification)
+        val visible = content()
+        // Sem conteúdo a mostrar não há o que decodificar: as fotos dos autores nem chegam a ser lidas.
+        val people = if (visible.genericAlways) emptyMap() else withContext(Dispatchers.Default) { peopleOf(notification) }
+        manager.notify(
+            tag(notification.accountId, notification.conversationId),
+            NOTIFICATION_ID,
+            conversation(notification, channel, people, visible),
+        )
+        postSummaryIfAbsent(notification, visible)
     }
 
     /**
@@ -115,8 +132,14 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
         return people
     }
 
-    private fun conversation(n: ConversationNotification, channel: String, people: Map<String, Person>): android.app.Notification {
+    private suspend fun conversation(
+        n: ConversationNotification,
+        channel: String,
+        people: Map<String, Person>,
+        visible: NotificationContent,
+    ): android.app.Notification {
         val now = System.currentTimeMillis()
+        if (visible.genericAlways) return genericConversation(n, channel, now)
         // O "eu" do estilo só precisa de um nome; as mensagens aqui são sempre de outras pessoas.
         val style = NotificationCompat.MessagingStyle(Person.Builder().setName(n.accountLabel).build())
         if (n.kind == ConversationKind.Channel) {
@@ -140,12 +163,38 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
             .setAutoCancel(true)
             .setContentIntent(NotificationIntents.open(app, n))
         if (n.mentionCount > 0) builder.setNumber(n.mentionCount)
+        if (visible.genericOnLockScreen) builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicVersion(channel))
         return builder.build()
     }
 
+    /** A notificação de uma conversa sem nada dela: nem autor, nem texto, nem foto, nem o nome do canal ou da conta. */
+    private suspend fun genericConversation(n: ConversationNotification, channel: String, now: Long): android.app.Notification {
+        val builder = NotificationCompat.Builder(app, channel)
+            .setSmallIcon(smallIcon)
+            .setContentTitle(getString(Res.string.app_name))
+            .setContentText(getString(Res.string.notif_hidden_text))
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setGroup(groupKey(n.accountId))
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setWhen(now)
+            .setShowWhen(true)
+            .setAutoCancel(true)
+            .setContentIntent(NotificationIntents.open(app, n))
+        if (n.mentionCount > 0) builder.setNumber(n.mentionCount)
+        return builder.build()
+    }
+
+    /** O que a tela de bloqueio mostra no lugar da notificação com o conteúdo privado: só que há uma mensagem nova. */
+    private suspend fun publicVersion(channel: String): android.app.Notification =
+        NotificationCompat.Builder(app, channel)
+            .setSmallIcon(smallIcon)
+            .setContentTitle(getString(Res.string.app_name))
+            .setContentText(getString(Res.string.notif_hidden_text))
+            .build()
+
     /** O resumo do grupo da conta; o sistema só mostra o grupo recolhido com ele. Fica enquanto houver conversa. */
     @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
-    private suspend fun postSummaryIfAbsent(n: ConversationNotification) {
+    private suspend fun postSummaryIfAbsent(n: ConversationNotification, visible: NotificationContent) {
         val tag = summaryTag(n.accountId)
         if (activeOf(n.accountId).any { it.tag == tag }) return
         val open = app.packageManager.getLaunchIntentForPackage(app.packageName)?.let {
@@ -153,15 +202,17 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
         }
         val summary = NotificationCompat.Builder(app, channelId(n.accountId, MESSAGES))
             .setSmallIcon(smallIcon)
-            .setContentTitle(n.accountLabel)
+            .setContentTitle(if (visible.genericAlways) getString(Res.string.app_name) else n.accountLabel)
             .setContentText(getString(Res.string.notif_system_summary))
             .setGroup(groupKey(n.accountId))
             .setGroupSummary(true)
             .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
             .setAutoCancel(true)
             .setContentIntent(open)
-            .build()
-        manager.notify(tag, NOTIFICATION_ID, summary)
+        if (visible.genericOnLockScreen) {
+            summary.setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicVersion(channelId(n.accountId, MESSAGES)))
+        }
+        manager.notify(tag, NOTIFICATION_ID, summary.build())
     }
 
     /** Saiu a última conversa da conta: o resumo sozinho não diz nada. */

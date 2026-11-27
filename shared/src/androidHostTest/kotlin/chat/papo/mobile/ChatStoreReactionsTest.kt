@@ -125,7 +125,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun tirarAUltimaReacaoComOEventoAntesDaRespostaZeraAContagem() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1, mine = true)
 
         val job = toggleInFlight(chat, "👍")
@@ -138,7 +138,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun tirarAUltimaReacaoComOEventoDepoisDaRespostaZeraAContagem() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1, mine = true)
 
         val job = toggleInFlight(chat, "👍")
@@ -151,7 +151,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun tirarAReacaoSemEventoNaoInventaAContagem() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1, mine = true)
 
         chat.toggleReaction(assertNotNull(chat.storedMessage("c1", "m1")), null, "👍")
@@ -161,7 +161,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun tirarAReacaoQuandoOutrosTambemReagiramFicaComAContagemDoEventoAntesDaResposta() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 2, mine = true)
 
         val job = toggleInFlight(chat, "👍")
@@ -174,7 +174,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun tirarAReacaoQuandoOutrosTambemReagiramFicaComAContagemDoEventoDepoisDaResposta() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 2, mine = true)
 
         val job = toggleInFlight(chat, "👍")
@@ -188,7 +188,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun reagirComOEventoAntesDaRespostaMostraAContagemEMarcaComoMinha() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed()
 
         val job = toggleInFlight(chat, "👍")
@@ -202,7 +202,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun reagirComOEventoDepoisDaRespostaMostraAContagemEMarcaComoMinha() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed()
 
         val job = toggleInFlight(chat, "👍")
@@ -215,7 +215,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun reagirSemEventoMarcaComoMinhaSemInventarAContagem() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1)
 
         chat.toggleReaction(assertNotNull(chat.storedMessage("c1", "m1")), null, "👍")
@@ -225,7 +225,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun reagirPorCimaDeOutrosComOEventoNaOrdemQueChegar() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1)
 
         val before = toggleInFlight(chat, "👍")
@@ -242,7 +242,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun reagirDeNovoQuandoOServidorJaTemAReacaoNaoDuplicaOEuReagi() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1, mine = true)
         val stale = assertNotNull(chat.storedMessage("c1", "m1")).copy(userReactions = emptyList()) // a tela ainda não sabia
 
@@ -256,7 +256,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun falhaAoTirarAReacaoDeixaTudoComoEstavaESemNovaTentativa() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1, mine = true)
         failWith = HttpStatusCode.InternalServerError
 
@@ -269,7 +269,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun falhaAoReagirDeixaTudoComoEstavaESemNovaTentativa() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1)
         failWith = HttpStatusCode.NotFound
 
@@ -282,7 +282,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun cancelarEnquantoOPedidoEstaEmVooNaoMexeNoQueEstaGuardado() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1, mine = true)
 
         val job = toggleInFlight(chat, "👍")
@@ -297,7 +297,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun duasReacoesEmVooAoMesmoTempoFicamAsDuasMarcadasComAsSuasContagens() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed()
 
         val thumbs = toggleInFlight(chat, "👍")
@@ -313,7 +313,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun trocarDeIdaEVoltaEmSequenciaTerminaMarcadoComAContagemDoServidor() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed()
         suspend fun toggle() = chat.toggleReaction(assertNotNull(chat.storedMessage("c1", "m1")), null, "👍")
 
@@ -330,7 +330,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun reacoesDiferentesNaoSeMisturam() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1, mine = true)
         suspend fun toggle(emojiId: String?, unicode: String?) =
             chat.toggleReaction(assertNotNull(chat.storedMessage("c1", "m1")), emojiId, unicode)
@@ -354,7 +354,7 @@ class ChatStoreReactionsTest {
 
     @Test
     fun mensagemQueSumiuNaoQuebraNemReaparece() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.seed(count = 1, mine = true)
         val stored = assertNotNull(chat.storedMessage("c1", "m1"))
         chat.handle(WsEvent.MessageDeleted("m1", "c1"))
@@ -410,7 +410,9 @@ class ChatStoreReactionsTest {
         val crypto = JcaCrypto()
         val resources = AccountResources(driver, MediaCache(TestResources.tempDir(), crypto.randomBytes(32), crypto, Dispatchers.IO))
         val client = PapoClient(engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt"))
-        return AccountSession("conta", "u1", client, backgroundScope, resources, Dispatchers.IO).chat to driver
+        val chat = AccountSession("conta", "u1", client, backgroundScope, resources, Dispatchers.IO).chat
+        chat.conversationOpened("c1") // só conversa aberta guarda mensagens do tempo real
+        return chat to driver
     }
 
     @Test

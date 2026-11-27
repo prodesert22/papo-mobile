@@ -12,6 +12,7 @@ import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
 import chat.papo.mobile.chat.MentionBadges
+import chat.papo.mobile.chat.MessageRetention
 import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.chat.NotificationDispatcher
 import chat.papo.mobile.chat.NotificationInbox
@@ -73,11 +74,13 @@ class AccountSession(
     val recentEmojis = RecentEmojis(db.metaQueries, scope, io)
     val drafts = Drafts(db.metaQueries, scope, io)
     val recentSearches = RecentSearchFilters()
+    /** O tema só deste servidor, se a conta tiver um; no banco cifrado dela. */
+    val theme = ServerThemeStore(db.metaQueries, scope, io)
 
     val ws = WsClient(client, scope, sessionStillValid = ::sessionStillValid)
     /** Dono do servidor, cargos e entradas por canal desta conta; o `ChatStore` o lê e o atualiza. */
     val permissions = AccessStore(db.metaQueries, api, scope, io, server = auth::server)
-    val chat = ChatStore(userId, db, api, ws, scope, io, permissions)
+    val chat = ChatStore(userId, db, api, ws, scope, io, permissions, retention = MessageRetention(db, io, media))
     /** O nível de notificação que o servidor guarda por canal; é o que vale nos canais sincronizados. */
     private val channelLevels = ChannelNotificationLevels(api, db.chatQueries, userId, chat.channels, chat::reloadChannels, scope, io, chat::requestRefresh)
     /** Silêncio, supressão e nível das notificações desta conta; ficam no banco cifrado dela (o nível sincronizado, no servidor). */

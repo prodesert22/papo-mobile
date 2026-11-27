@@ -2,7 +2,9 @@ package chat.papo.mobile.chat
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
+import chat.papo.mobile.core.MutationResult
 import chat.papo.mobile.core.parseInstant
+import chat.papo.mobile.core.runMutation
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.ChannelDto
@@ -16,6 +18,7 @@ import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.PapoJson
 import chat.papo.mobile.data.api.ReactionRequest
 import chat.papo.mobile.data.api.ReactionSummaryDto
+import chat.papo.mobile.data.api.UpdateChannelRequest
 import chat.papo.mobile.data.api.UserReactionDto
 import chat.papo.mobile.data.api.UserSummaryDto
 import chat.papo.mobile.data.db.account.AccountDb
@@ -70,6 +73,8 @@ class ChatStore(
     private val io: CoroutineDispatcher,
     /** Fonte das permissões da conta. O padrão não conhece o dono do servidor e, sem ele, nada é negado. */
     private val permissions: AccessStore = AccessStore(db.metaQueries, api, scope, io),
+    /** Decide o que fica guardado no aparelho; o padrão só poda as linhas, sem cache de mídia. */
+    private val retention: MessageRetention = MessageRetention(db, io),
 ) {
     private val q = db.chatQueries
     private val meta = db.metaQueries
@@ -170,6 +175,8 @@ class ChatStore(
     private val typingMarks = HashMap<Pair<String, String>, TimeMark>()
 
     fun start() {
+        // O que as versões antigas e um processo morto deixaram para trás; antes do tempo real, para não podar o que ele grava.
+        scope.launch { applyRetention { retention.startup() } }
         scope.launch { ws.events.collect { runCatching { handle(it) } } }
         scope.launch {
             ws.state.collect { state -> if (state == WsState.Connected) onConnected() }
@@ -200,6 +207,35 @@ class ChatStore(
     /** [channelId] deixou de estar na tela. Só vale se ele ainda é o que está: outro, já marcado depois, fica. */
     fun clearViewing(channelId: String) {
         if (_viewing.value == channelId) _viewing.value = null
+    }
+
+    /**
+     * Uma tela de [channelId] passou a existir (a do canal ou da conversa direta): ela vira a conversa mais recente da
+     * conta e a que saiu das [MessageRetention.MAX_CONVERSATIONS] perde as mensagens guardadas. Enquanto houver tela
+     * viva, a conversa não é podada. Cada chamada precisa do seu [conversationClosed].
+     */
+    fun conversationOpened(channelId: String) {
+        retention.markOpen(channelId)
+        scope.launch {
+            applyRetention {
+                retention.noteOpened(channelId)
+                retention.prune()
+            }
+        }
+    }
+
+    /** A tela de [channelId] que [conversationOpened] contou deixou de existir: sem outra viva, a conversa pode ser podada. */
+    fun conversationClosed(channelId: String) {
+        retention.markClosed(channelId)
+        scope.launch { applyRetention { retention.prune() } }
+    }
+
+    /**
+     * Roda [block], que poda e devolve as conversas que perderam mensagens. O que se guardava de cada uma já não vale: o
+     * histórico antes do que sobrou não está mais no aparelho, então [hasOlder] não pode dizer que o começo foi alcançado.
+     */
+    private suspend fun applyRetention(block: suspend () -> Set<String>) = quietly {
+        block().forEach { hasOlder.remove(it) }
     }
 
     suspend fun runSync() {
@@ -288,6 +324,53 @@ class ChatStore(
 
     /** Relê os canais para conferir uma mudança que pode ter chegado ao servidor. Falha como qualquer leitura; nada é reenviado. */
     suspend fun reloadChannels() = refreshChannels()
+
+    /** Uma edição de canal por vez: a resposta de uma nunca passa por cima da outra no banco. */
+    private val channelEditLock = Mutex()
+
+    /**
+     * Edita o nome e a descrição de um canal em `PUT /channels/{id}`. [topic] nulo mantém a descrição, `""` a apaga.
+     * Com [ChannelEditResult.Saved] o canal local ganha o que o servidor devolveu, sem sair da categoria: o
+     * `parent_id` guardado vale se a resposta não o trouxer. Nada é repetido sozinho (regra 15): um 403 pede a
+     * releitura das permissões, um 404 tira o canal do aparelho e um resultado incerto relê os canais para conferir.
+     */
+    suspend fun updateChannel(channelId: String, name: String, topic: String?): ChannelEditResult = channelEditLock.withLock {
+        var status: Int? = null
+        var saved: ChannelDto? = null
+        val result = runMutation {
+            try {
+                saved = api.updateChannel(channelId, UpdateChannelRequest(name, topic))
+            } catch (e: ApiException) {
+                status = e.status
+                throw e
+            }
+        }
+        val outcome = channelEditResult(result, status)
+        when (outcome) {
+            ChannelEditResult.Saved -> saved?.let { dto -> withContext(io) { storeEdited(channelId, dto) } }
+            ChannelEditResult.Forbidden -> requestRefresh()
+            ChannelEditResult.NotFound -> {
+                withContext(io) { forgetChannel(channelId) }
+                quietly { refreshChannels() }
+            }
+            // O servidor pode ter gravado: conferir é uma leitura, e o pedido não é reenviado.
+            is ChannelEditResult.Failed -> if (result == MutationResult.Uncertain) quietly { refreshChannels() }
+            ChannelEditResult.NameTaken -> Unit
+        }
+        outcome
+    }
+
+    private fun storeEdited(channelId: String, dto: ChannelDto) {
+        val parent = dto.parentId ?: q.selectChannel(channelId).executeAsOneOrNull()?.parent_id
+        q.updateChannelInfo(dto.name, dto.position.toLong(), dto.topic, parent, channelId)
+    }
+
+    /** Tira do aparelho o canal que não existe mais: a linha, as mensagens e a marca de trecho antigo. */
+    private fun forgetChannel(channelId: String) = q.transaction {
+        q.deleteChannel(channelId)
+        q.deleteChannelMessages(channelId)
+        meta.remove(DETACHED + channelId)
+    }
 
     /**
      * Pede a releitura das permissões depois de um 403: o que o app sabia ficou velho (um `PUT /roles` não
@@ -575,10 +658,11 @@ class ChatStore(
         val sent = reportingForbidden {
             api.sendMessage(message.channelId, message.content, message.replyToId, message.files, onProgress)
         }
+        retention.recentConversations()
         val away = withContext(io) {
             q.transactionWithResult {
                 val away = detachedNow(sent.channelId)
-                if (!away) upsert(sent)
+                if (!away && retention.keeps(sent.channelId)) upsert(sent)
                 noteLastMessage(sent.channelId, sent.id, sent.createdAt, preview(sent.content, sent.attachments), sent.authorId)
                 away
             }
@@ -772,10 +856,13 @@ class ChatStore(
     internal suspend fun handle(event: WsEvent) {
         when (event) {
             is WsEvent.MessageCreated -> {
+                retention.recentConversations() // carrega as recentes; abaixo a conversa é conferida já dentro da transação
+                var trimmed = false
                 val fresh = withContext(io) {
                     val fresh = q.transactionWithResult {
                         // Num trecho antigo a mensagem nova não entra: ficaria um buraco entre ela e o que está guardado.
-                        val insert = !detachedNow(event.channelId)
+                        // Conversa fora das mais recentes e sem tela não guarda mensagem (a prévia e o não lido seguem abaixo).
+                        val insert = retention.keeps(event.channelId) && !detachedNow(event.channelId)
                         val fresh = insert && q.selectMessage(event.id).executeAsOneOrNull() == null
                         if (insert) {
                             q.insertMessageIfAbsent(
@@ -790,6 +877,7 @@ class ChatStore(
                                 external_author = event.externalAuthor?.let { PapoJson.encodeToString(ExternalAuthorDto.serializer(), it) },
                                 attachments = encodeList(AttachmentDto.serializer(), event.attachments),
                             )
+                            trimmed = retention.trimIfClosed(event.channelId)
                         }
                         noteLastMessage(event.channelId, event.id, event.createdAt, preview(event.content, event.attachments), event.authorId)
                         fresh
@@ -798,6 +886,7 @@ class ChatStore(
                     publishTyping()
                     fresh
                 }
+                if (trimmed) hasOlder.remove(event.channelId)
                 // Mensagem minha que chegou antes da resposta do POST: sai da fila de envio, senão apareceria duas vezes.
                 // Se ela já estava guardada (a resposta chegou antes), a entrada não existe mais, e uma igual que
                 // ainda esteja saindo é outra mensagem: não se mexe nela.
@@ -848,13 +937,7 @@ class ChatStore(
                 // (o canal sairia da categoria): a releitura traz as entradas e devolve a categoria.
                 channelRefreshRequests.trySend(Unit)
             }
-            is WsEvent.ChannelDeleted -> withContext(io) {
-                q.transaction {
-                    q.deleteChannel(event.channelId)
-                    q.deleteChannelMessages(event.channelId)
-                    meta.remove(DETACHED + event.channelId)
-                }
-            }
+            is WsEvent.ChannelDeleted -> withContext(io) { forgetChannel(event.channelId) }
             is WsEvent.Typing -> {
                 if (event.userId.isEmpty() || event.userId == myUserId) return
                 val key = event.channelId to event.userId
@@ -1080,7 +1163,7 @@ class ChatStore(
         // Procura da mensagem respondida: páginas do tamanho máximo do servidor, e quantas ler antes de desistir.
         const val ORIGINAL_PAGE_SIZE = 100
         const val ORIGINAL_MAX_PAGES = 5
-        const val DETACHED = "detached:"
+        const val DETACHED = MessageRetention.DETACHED_KEY
         const val BLOCKED = "blocked"
         const val MAX_USER_PAGES = 50
         // Mudar permissões de canal manda um channel_update por cargo; uma releitura basta para a rajada.

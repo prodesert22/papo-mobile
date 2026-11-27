@@ -110,8 +110,30 @@ class MentionSearchTest {
         recent: List<String> = emptyList(),
         online: Set<String> = emptySet(),
         me: String = "eu",
-    ) = suggestMentions(query, users, me, recent, online.associateWith { Presence("online", null) })
+        participants: Set<String>? = null,
+    ) = suggestMentions(query, users, me, recent, online.associateWith { Presence("online", null) }, participants)
         .map { it.id }
+
+    @Test
+    fun conversaDiretaSoSugereAsDuasPessoasDela() {
+        val users = listOf(user("eu", "ana"), user("bia", "bia"), user("caio", "caio"), user("dani", "dani"))
+        // Consulta vazia: só os dois membros, o próprio usuário incluso; quem é do servidor e não está nela fica de fora.
+        assertEquals(setOf("eu", "bia"), suggest("", users, participants = setOf("eu", "bia")).toSet())
+        assertEquals(listOf("bia"), suggest("bi", users, participants = setOf("eu", "bia")))
+        assertEquals(emptyList(), suggest("caio", users, participants = setOf("eu", "bia")))
+    }
+
+    @Test
+    fun conversaDiretaComOOutroBanidoSoSugereVoce() {
+        val users = listOf(user("eu", "ana"), user("bia", "bia", banned = true))
+        assertEquals(listOf("eu"), suggest("", users, participants = setOf("eu", "bia")))
+    }
+
+    @Test
+    fun canalSemParticipantesSegueSugerindoTodosMenosVoce() {
+        val users = listOf(user("eu", "ana"), user("bia", "bia"), user("caio", "caio"))
+        assertEquals(setOf("bia", "caio"), suggest("", users, participants = null).toSet())
+    }
 
     @Test
     fun tiraVoceEOsBanidos() {

@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import chat.papo.mobile.account.Account
 import chat.papo.mobile.account.AccountColors
+import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.chat.User
 import org.jetbrains.compose.resources.decodeToImageBitmap
 
 /** Cor estável para um identificador, tirada da paleta de contas. */
@@ -54,7 +56,9 @@ fun rememberImage(bytes: ByteArray?): ImageBitmap? = remember(bytes) {
 
 /**
  * Ícone de uma conta: o servidor no centro, um aro na cor da conta e, no canto,
- * a inicial do usuário. É o aro e o selo que separam duas contas do mesmo servidor.
+ * o avatar do usuário, ou a inicial dele enquanto a imagem não está lá. É o aro e o selo que separam duas contas do
+ * mesmo servidor. [avatarSession] e [avatarUser] são a sessão da conta e o próprio usuário dela; sem sessão (conta que
+ * saiu) o canto fica com a inicial, porque o cache de imagens é da sessão.
  */
 @Composable
 fun AccountAvatar(
@@ -67,11 +71,19 @@ fun AccountAvatar(
     unreadColor: Color = Color.Unspecified,
     /** O número vermelho de menções da conta (`badgeText`); no lugar do ponto de não lida. */
     mentions: String? = null,
+    avatarSession: AccountSession? = null,
+    avatarUser: User? = null,
+    /** Sem conexão com o servidor ([rememberOffline]): o ícone toma o canto de cima à direita. */
+    offline: Boolean = false,
 ) {
     val accent = account.accentColor()
+    // Sessão que acabou já tem o ponto vermelho; o ícone de desconectado é para a sessão viva sem conexão.
+    val offlineShown = offline && !account.sessionExpired
     val corner by animateDpAsState(if (selected) size * 0.3f else size / 2)
     val shape = RoundedCornerShape(corner)
     val icon = rememberImage(account.serverIcon)
+    // Com a sessão caída não se busca nada: um pedido sem cookie só falharia e deixaria a falha guardada no cache.
+    val avatar = if (account.sessionExpired) null else rememberCornerAvatar(avatarSession, avatarUser)
 
     Box(modifier.size(size + 6.dp), contentAlignment = Alignment.Center) {
         Box(
@@ -104,27 +116,45 @@ fun AccountAvatar(
                 .background(accent, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                account.username.take(1).uppercase(),
-                fontSize = (size.value * 0.2f).sp,
-                lineHeight = (size.value * 0.2f).sp,
-                fontWeight = FontWeight.Bold,
-                color = accent.readableOn(),
-            )
+            if (avatar != null) {
+                Image(avatar, contentDescription = null, modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+            } else {
+                Text(
+                    account.username.take(1).uppercase(),
+                    fontSize = (size.value * 0.2f).sp,
+                    lineHeight = (size.value * 0.2f).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = accent.readableOn(),
+                )
+            }
         }
         // Um ponto no canto: vermelho se a sessão caiu, na cor de destaque se há algo não lido.
         val dot = when {
             account.sessionExpired -> MaterialTheme.colorScheme.error
             mentions != null -> null
+            // O ícone de desconectado ocupa o canto do ponto de não lida.
+            offline -> null
             unread -> unreadColor
             else -> null
         }
         if (mentions != null && !account.sessionExpired) {
             MentionBadge(
                 mentions,
-                Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp).background(ringBackground, RoundedCornerShape(10.dp)).padding(2.dp),
+                // Com o ícone de desconectado no canto direito, o número passa para o esquerdo.
+                if (offlineShown) {
+                    Modifier.align(Alignment.TopStart).offset(x = (-6).dp, y = (-4).dp)
+                } else {
+                    Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp)
+                }.background(ringBackground, RoundedCornerShape(10.dp)).padding(2.dp),
                 minHeight = 18.dp,
             )
+        }
+        if (offlineShown) {
+            Box(
+                Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp).background(ringBackground, CircleShape).padding(2.dp),
+            ) {
+                OfflineIcon(size = 16.dp)
+            }
         }
         if (dot != null) {
             Box(
@@ -138,3 +168,7 @@ fun AccountAvatar(
         }
     }
 }
+
+@Composable
+private fun rememberCornerAvatar(session: AccountSession?, user: User?): ImageBitmap? =
+    if (session == null || user == null) null else rememberUserAvatarImage(session, user).value

@@ -79,7 +79,6 @@
     <!-- Editar perfil -->
     <string name="profile_edit_action">Editar perfil</string>
     <string name="profile_edit_title">Editar perfil</string>
-    <string name="profile_edit_row_title">Perfil e status</string>
     <string name="profile_edit_row_body">Apelido, frase de status, descrição, avatar e banner.</string>
     <string name="profile_edit_nickname">Apelido</string>
     <string name="profile_edit_status_message">Frase de status</string>
@@ -138,7 +137,6 @@
     <string name="account_remove_confirm">Sair</string>
 
     <!-- Membros, bloqueios e senha -->
-    <string name="server_title">Servidor</string>
     <string name="server_public">Público</string>
     <string name="server_closed">Fechado: pede a senha do servidor</string>
     <string name="server_owner">Dono: %1$s</string>
@@ -161,7 +159,6 @@
     <string name="mutation_rejected">O servidor recusou o pedido.</string>
 
     <!-- Segurança e bloqueios -->
-    <string name="account_security">Segurança</string>
     <string name="account_blocked_users">Usuários bloqueados</string>
     <string name="account_change_password">Trocar a senha</string>
     <string name="blocked_title">Usuários bloqueados</string>
@@ -206,8 +203,6 @@
     <string name="reset_done">Senha redefinida. Entre com a senha nova.</string>
 
     <!-- Configurações do app -->
-    <string name="settings_title">Configurações</string>
-    <string name="settings_security">Segurança</string>
     <string name="settings_lock">Bloquear com digital</string>
     <string name="settings_lock_body">Pede sua digital (ou a senha do aparelho) para abrir o Papo. Sem ela, os dados guardados aqui não podem ser lidos.</string>
     <string name="settings_lock_not_enrolled">Cadastre uma digital nas configurações do aparelho para usar o bloqueio.</string>
@@ -217,8 +212,6 @@
     <string name="settings_lock_timeout_immediately">Na hora</string>
     <string name="settings_lock_timeout_1m">Depois de 1 minuto</string>
     <string name="settings_lock_timeout_5m">Depois de 5 minutos</string>
-    <string name="settings_secure_screen">Esconder conteúdo fora do app</string>
-    <string name="settings_secure_screen_body">Bloqueia capturas de tela e esconde as conversas na lista de apps recentes.</string>
     <string name="settings_storage">Dados neste aparelho</string>
     <string name="settings_version">Papo Mobile %1$s</string>
     <string name="settings_storage_body">Contas, sessões e mensagens ficam em bancos cifrados. A chave fica no chip de segurança do aparelho e não sai dele.</string>
@@ -477,6 +470,19 @@
     <string name="attach_problem_too_many">Uma mensagem leva até %1$s arquivos. O que passou disso não foi adicionado.</string>
     <string name="attach_problem_file_too_large">“%1$s” passa de %2$s MB, o limite de cada arquivo, e não foi adicionado.</string>
     <string name="attach_problem_total_too_large">Os arquivos passam de %1$s MB juntos. O que não coube não foi adicionado: mande o resto em outra mensagem.</string>
+    <string name="attach_voice">Gravar áudio</string>
+    <string name="attach_voice_in_call">Gravar áudio (indisponível em chamada)</string>
+    <string name="voice_recording">Gravando</string>
+    <string name="voice_stop">Parar a gravação</string>
+    <string name="voice_discard">Descartar a gravação</string>
+    <string name="voice_send">Enviar o áudio</string>
+    <string name="voice_review_position">Posição da gravação</string>
+    <string name="voice_open_settings">Configurações</string>
+    <string name="voice_problem_denied">O Papo precisa do microfone para gravar. Toque em Gravar áudio de novo para permitir.</string>
+    <string name="voice_problem_blocked">O microfone está bloqueado para o Papo. Libere a permissão nas configurações do aparelho.</string>
+    <string name="voice_problem_in_call">Não dá para gravar durante uma chamada de voz.</string>
+    <string name="voice_problem_failed">Não foi possível gravar o áudio. Tente de novo.</string>
+    <string name="voice_problem_playback">Não foi possível tocar a gravação. Você ainda pode enviá-la.</string>
     <string name="outbox_failed_too_large">Não enviada: os arquivos passam do limite de tamanho do servidor. Tire alguns e reenvie.</string>
     <string name="outbox_failed_file_unavailable">Não enviada: “%1$s” não está mais disponível.</string>
     <!-- 02 · trilha B · onda 1 (embed completo, GIF, moderação) -->
@@ -536,8 +542,8 @@
     <!-- Notificações: configurações -->
     <string name="notif_open">Notificações</string>
     <string name="notif_more_options">Mais opções</string>
-    <string name="notif_channel_title">Notificações de #%1$s</string>
-    <string name="notif_dm_title">Notificações de %1$s</string>
+    <string name="notif_channel_title">#%1$s</string>
+    <string name="notif_dm_title">%1$s</string>
     <string name="notif_account_section">Notificações</string>
     <string name="notif_account_open">Nível, silêncio e menções</string>
     <string name="notif_account_title">Notificações da conta</string>
@@ -639,4 +645,167 @@
     <string name="crop_zoom">Zoom</string>
     <string name="crop_zoom_percent">%1$d%</string>
     <string name="crop_area">Área de recorte. Arraste para mover a imagem e use dois dedos para ampliar.</string>
+
+    <!-- 0.9.0 · comum (onda 0): nomes que mais de uma trilha usa -->
+    <string name="settings_server_title">Configurações do servidor</string>
+    <string name="settings_appearance">Aparência</string>
+    <string name="settings_server_theme">Aparência deste servidor</string>
+    <string name="settings_privacy">Segurança e privacidade</string>
+    <string name="settings_account_local">Esta conta no aparelho</string>
+    <string name="settings_server_info">Informações do servidor</string>
+    <string name="channel_settings">Configurações do canal</string>
+    <string name="about_title">Sobre o Papo Mobile</string>
+    <string name="licenses_title">Licenças de terceiros</string>
+
+    <!-- 0.9.0 · trilha A: configurações e segurança -->
+    <string name="settings_android_notifications">Notificações do Android</string>
+    <string name="settings_android_notifications_summary">Som, vibração e canais no sistema</string>
+    <string name="settings_privacy_summary">Bloqueio, capturas de tela e notificações</string>
+    <string name="settings_storage_summary">Como o Papo guarda os seus dados</string>
+    <string name="settings_about">Sobre o Papo Mobile</string>
+    <string name="settings_profile">Perfil</string>
+    <string name="settings_account_local_summary">Apelido e cor na lista de servidores</string>
+    <string name="settings_server_theme_summary">As cores do app ou as deste servidor</string>
+    <string name="settings_blocked_summary">Quem você bloqueou neste servidor</string>
+    <string name="settings_password_summary">A senha desta conta no servidor</string>
+    <string name="settings_devices_summary">Aparelhos com sessão aberta</string>
+    <string name="settings_remove_summary">Apaga as mensagens guardadas neste aparelho</string>
+    <string name="settings_section_lock">Bloqueio do app</string>
+    <string name="settings_lock_timeout_15m">Depois de 15 minutos</string>
+    <string name="settings_lock_timeout_1h">Depois de 1 hora</string>
+    <string name="settings_capture">Capturas e gravação de tela</string>
+    <string name="settings_capture_body">Bloquear impede capturas de tela e gravações e esconde as conversas na lista de apps recentes. Vale com ou sem o bloqueio por digital.</string>
+    <string name="settings_capture_allow">Permitir</string>
+    <string name="settings_capture_block">Bloquear</string>
+    <string name="settings_notif_content">Conteúdo nas notificações</string>
+    <string name="settings_notif_content_show">Mostrar</string>
+    <string name="settings_notif_content_lock_screen">Ocultar na tela de bloqueio do aparelho</string>
+    <string name="settings_notif_content_always">Ocultar sempre</string>
+    <string name="settings_notif_content_note">Vale para as notificações que o próprio Papo monta. As notificações push, que o Android mostra sozinho, seguem a prévia que o servidor envia e não mudam com esta opção.</string>
+    <string name="notif_hidden_text">Nova mensagem</string>
+    <string name="about_name">Papo Mobile</string>
+    <string name="about_version">Versão %1$s</string>
+    <string name="about_beta">Beta %1$d</string>
+    <string name="about_build">Build %1$d</string>
+    <string name="about_debug">Compilação de desenvolvimento</string>
+    <string name="about_copy_version">Copiar versão</string>
+    <string name="about_version_copied">Versão copiada</string>
+    <string name="about_section_project">Projeto</string>
+    <string name="about_link_source">Código-fonte</string>
+    <string name="about_link_releases">Versões e notas</string>
+    <string name="about_link_server">Servidor Papo</string>
+    <string name="about_link_web">Cliente web</string>
+    <string name="about_link_terminal">Cliente de terminal</string>
+    <string name="about_link_failed">Não há um aplicativo neste aparelho que abra o link.</string>
+    <string name="about_link_copied">Link copiado</string>
+    <string name="about_section_developer">Desenvolvedor</string>
+    <string name="about_developer">Desenvolvido por %1$s</string>
+    <string name="about_section_license">Licença</string>
+    <string name="about_license_notice">O Papo Mobile é software livre, distribuído sob a GNU Affero General Public License v3.0, sem nenhuma garantia.</string>
+    <string name="about_license_read">Ler a licença</string>
+    <string name="about_license_title">GNU AGPL v3.0</string>
+    <string name="about_license_failed">Não foi possível ler o texto da licença.</string>
+    <!-- fim da trilha A -->
+
+    <!-- 0.9.0 · trilha B: tema -->
+    <string name="theme_mode_title">Modo</string>
+    <string name="theme_mode_system">Sistema</string>
+    <string name="theme_mode_light">Claro</string>
+    <string name="theme_mode_dark">Escuro</string>
+    <string name="theme_mode_oled">OLED</string>
+    <string name="theme_mode_oled_hint">Fundo e áreas de itens pretos: em telas OLED os pontos pretos ficam apagados e gastam menos bateria.</string>
+    <string name="theme_presets_title">Predefinições</string>
+    <string name="theme_preset_papo">Papo</string>
+    <string name="theme_preset_ocean">Oceano</string>
+    <string name="theme_preset_forest">Floresta</string>
+    <string name="theme_preset_amethyst">Ametista</string>
+    <string name="theme_preset_amber">Âmbar</string>
+    <string name="theme_preset_rose">Rosa</string>
+    <string name="theme_summary">%1$s · %2$s</string>
+    <string name="theme_preview_title">Prévia</string>
+    <string name="theme_preview_description">Prévia da interface com o tema escolhido</string>
+    <string name="theme_preview_tab_channels">Canais</string>
+    <string name="theme_preview_tab_dms">Conversas diretas</string>
+    <string name="theme_preview_channel_general">geral</string>
+    <string name="theme_preview_channel_news">avisos</string>
+    <string name="theme_preview_author_1">Ana</string>
+    <string name="theme_preview_message_1">Bom dia! Viu o aviso?</string>
+    <string name="theme_preview_author_2">Beto</string>
+    <string name="theme_preview_message_2">@você pode confirmar?</string>
+    <string name="theme_preview_input">Mensagem em #geral</string>
+    <string name="theme_server_use_app">Usar o tema do app</string>
+    <string name="theme_server_use_app_hint">Este servidor segue a aparência definida em Aplicativo.</string>
+    <string name="theme_server_own">Tema próprio</string>
+    <string name="theme_server_own_hint">Só este servidor usa estas cores, neste aparelho.</string>
+    <string name="theme_appearance_app_note">Este é o tema do app. Servidores com tema próprio, escolhido em Aparência deste servidor, usam o deles.</string>
+    <string name="theme_items_title">Cores</string>
+    <string name="theme_items_hint">Toque num item para trocar a cor. A prévia acompanha.</string>
+    <string name="theme_item_changed">Alterada</string>
+    <string name="theme_item_accent">Destaque</string>
+    <string name="theme_item_accent_hint">Botões, abas e o marcador de não lido</string>
+    <string name="theme_item_background">Fundo</string>
+    <string name="theme_item_background_hint">O fundo das telas</string>
+    <string name="theme_item_surface">Superfícies e áreas de itens</string>
+    <string name="theme_item_surface_hint">Cartões, campos, menus e folhas</string>
+    <string name="theme_item_rail">Faixa de servidores</string>
+    <string name="theme_item_rail_hint">A coluna com os ícones dos servidores</string>
+    <string name="theme_item_text">Texto</string>
+    <string name="theme_item_text_hint">Nomes e mensagens</string>
+    <string name="theme_item_text_muted">Texto secundário</string>
+    <string name="theme_item_text_muted_hint">Horários, legendas e dicas</string>
+    <string name="theme_item_mention">Menção</string>
+    <string name="theme_item_mention_hint">O número de menções não lidas</string>
+    <string name="theme_item_mention_background">Fundo da menção</string>
+    <string name="theme_item_mention_background_hint">Mensagens que mencionam você</string>
+    <string name="theme_color_editing_variant">Editando no modo %1$s</string>
+    <string name="theme_color_picker_description">Seletor de cor. Arraste para escolher o matiz e a saturação.</string>
+    <string name="theme_color_brightness">Brilho</string>
+    <string name="theme_color_hex_label">Código da cor</string>
+    <string name="theme_color_hex_hint">Use o formato #RRGGBB, como #1E78C8.</string>
+    <string name="theme_color_swatches">Amostras</string>
+    <string name="theme_color_swatch_description">Usar a cor %1$s</string>
+    <string name="theme_color_restore">Restaurar</string>
+    <string name="theme_color_contrast_warning">O texto fica com pouco contraste e pode ser difícil de ler.</string>
+    <!-- fim da trilha B -->
+
+    <!-- 0.9.0 · trilha C: lista de canais e conversas diretas -->
+    <string name="channels_tab_channels">Canais</string>
+    <string name="channels_tab_direct_short">Diretas</string>
+    <string name="channels_direct_empty">Nenhuma conversa direta</string>
+    <string name="channels_new_dm_button">Nova conversa</string>
+    <!-- fim da trilha C -->
+
+    <!-- 0.9.0 · trilha D: descrição e edição do canal -->
+    <string name="channel_topic_open">Ver a descrição completa</string>
+    <string name="channel_topic_edit">Editar canal</string>
+    <string name="channel_edit_name">Nome do canal</string>
+    <string name="channel_edit_topic">Descrição</string>
+    <string name="channel_edit_counter">%1$d/%2$d</string>
+    <string name="channel_edit_name_empty">Escreva um nome para o canal.</string>
+    <string name="channel_edit_no_permission">Você não tem permissão para editar este canal.</string>
+    <string name="channel_edit_name_taken">Já existe um canal com esse nome. Escolha outro.</string>
+    <string name="channel_edit_forbidden">O servidor recusou: sua conta não pode editar canais.</string>
+    <string name="channel_edit_gone">Este canal não existe mais.</string>
+    <string name="channel_edit_uncertain">Não deu para confirmar se a mudança foi salva. Confira o canal antes de tentar de novo.</string>
+    <!-- item 14 · licenças de terceiros -->
+    <string name="licenses_resources">Recursos incluídos</string>
+    <string name="licenses_libraries">Bibliotecas</string>
+    <string name="licenses_resource_font">Fonte Bricolage Grotesque</string>
+    <string name="licenses_resource_font_license">SIL Open Font License 1.1</string>
+    <string name="licenses_resource_emoji">Dados de emoji do Emojibase</string>
+    <string name="licenses_resource_emoji_license">Licença MIT</string>
+    <string name="licenses_resource_unicode">Dados do Unicode</string>
+    <string name="licenses_resource_unicode_license">Unicode License v3</string>
+    <string name="licenses_version_and_licenses">%1$s · %2$s</string>
+    <string name="licenses_unknown">Licença não informada</string>
+    <string name="licenses_text_missing">O texto desta licença não vem no aplicativo.</string>
+    <string name="licenses_unavailable">A lista de bibliotecas não está disponível nesta versão.</string>
+    <string name="licenses_text_unavailable">Não foi possível ler o texto da licença.</string>
+    <string name="licenses_open_page">Abrir página</string>
+    <string name="licenses_open_license">Abrir a licença</string>
+    <string name="licenses_open_failed">Não foi possível abrir o link.</string>
+    <!-- fim da trilha D -->
+
+    <!-- 0.9.0 · conexão -->
+    <string name="connection_offline">Sem conexão com o servidor</string>
 </resources>

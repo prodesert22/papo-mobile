@@ -105,6 +105,10 @@ class ChatStoreTest {
             io = dispatcher,
         )
 
+        init {
+            listOf("c1", "d1").forEach(store::conversationOpened) // só conversa aberta guarda mensagens do tempo real
+        }
+
         suspend fun ids(limit: Long = 500) = store.messages("c1", limit).first().map { it.id }
     }
 

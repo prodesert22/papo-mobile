@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import chat.papo.mobile.ui.components.PapoDropdownMenu
 import chat.papo.mobile.resources.profile_edit_discard_all
 import chat.papo.mobile.resources.profile_edit_unsaved
 import androidx.compose.material3.Surface
@@ -59,7 +60,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.clickable
@@ -312,7 +312,7 @@ private fun PencilButton(modifier: Modifier, pickLabel: String, enabled: Boolean
         ) {
             Icon(Icons.Filled.Edit, contentDescription = pickLabel, tint = Color.White, modifier = Modifier.size(18.dp))
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        PapoDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text(pickLabel) }, onClick = { open = false; onPick() })
             extras.forEach { (label, action) -> DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() }) }
         }
