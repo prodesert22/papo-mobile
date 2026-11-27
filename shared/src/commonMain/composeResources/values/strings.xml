@@ -726,6 +726,35 @@
     <string name="theme_server_use_app_hint">Este servidor segue a aparência definida em Aplicativo.</string>
     <string name="theme_server_own">Tema próprio</string>
     <string name="theme_server_own_hint">Só este servidor usa estas cores, neste aparelho.</string>
+    <string name="theme_appearance_app_note">Este é o tema do app. Servidores com tema próprio, escolhido em Aparência deste servidor, usam o deles.</string>
+    <string name="theme_items_title">Cores</string>
+    <string name="theme_items_hint">Toque num item para trocar a cor. A prévia acompanha.</string>
+    <string name="theme_item_changed">Alterada</string>
+    <string name="theme_item_accent">Destaque</string>
+    <string name="theme_item_accent_hint">Botões, abas e o marcador de não lido</string>
+    <string name="theme_item_background">Fundo</string>
+    <string name="theme_item_background_hint">O fundo das telas</string>
+    <string name="theme_item_surface">Superfícies e áreas de itens</string>
+    <string name="theme_item_surface_hint">Cartões, campos, menus e folhas</string>
+    <string name="theme_item_rail">Faixa de servidores</string>
+    <string name="theme_item_rail_hint">A coluna com os ícones dos servidores</string>
+    <string name="theme_item_text">Texto</string>
+    <string name="theme_item_text_hint">Nomes e mensagens</string>
+    <string name="theme_item_text_muted">Texto secundário</string>
+    <string name="theme_item_text_muted_hint">Horários, legendas e dicas</string>
+    <string name="theme_item_mention">Menção</string>
+    <string name="theme_item_mention_hint">O número de menções não lidas</string>
+    <string name="theme_item_mention_background">Fundo da menção</string>
+    <string name="theme_item_mention_background_hint">Mensagens que mencionam você</string>
+    <string name="theme_color_editing_variant">Editando no modo %1$s</string>
+    <string name="theme_color_picker_description">Seletor de cor. Arraste para escolher o matiz e a saturação.</string>
+    <string name="theme_color_brightness">Brilho</string>
+    <string name="theme_color_hex_label">Código da cor</string>
+    <string name="theme_color_hex_hint">Use o formato #RRGGBB, como #1E78C8.</string>
+    <string name="theme_color_swatches">Amostras</string>
+    <string name="theme_color_swatch_description">Usar a cor %1$s</string>
+    <string name="theme_color_restore">Restaurar</string>
+    <string name="theme_color_contrast_warning">O texto fica com pouco contraste e pode ser difícil de ler.</string>
     <!-- fim da trilha B -->
 
     <!-- 0.9.0 · trilha C: lista de canais e conversas diretas -->

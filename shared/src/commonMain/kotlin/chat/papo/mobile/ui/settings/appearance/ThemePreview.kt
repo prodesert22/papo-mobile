@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import chat.papo.mobile.resources.Res
@@ -45,13 +46,16 @@ import org.jetbrains.compose.resources.stringResource
 
 private val PreviewHeight = 224.dp
 
+/** A altura da prévia enquanto se edita uma cor: o teclado e o seletor dividem a tela com ela. */
+internal val CompactPreviewHeight = 168.dp
+
 /**
  * Uma miniatura da interface com as cores de [spec]: a faixa de servidores, a lista com as abas, duas mensagens (uma com
  * menção) e o campo de texto. É desenhada sob um [PapoTheme] aninhado, então reflete cada mudança sem tocar na tela de
  * cima. [systemDark] decide o modo quando o de [spec] é Sistema.
  */
 @Composable
-fun ThemePreview(spec: ThemeSpec, systemDark: Boolean, modifier: Modifier = Modifier) {
+fun ThemePreview(spec: ThemeSpec, systemDark: Boolean, modifier: Modifier = Modifier, height: Dp = PreviewHeight) {
     val description = stringResource(Res.string.theme_preview_description)
     PapoTheme(spec, systemDark) {
         val scheme = MaterialTheme.colorScheme
@@ -59,7 +63,7 @@ fun ThemePreview(spec: ThemeSpec, systemDark: Boolean, modifier: Modifier = Modi
         Row(
             modifier
                 .fillMaxWidth()
-                .height(PreviewHeight)
+                .height(height)
                 .clip(shape)
                 .background(scheme.background)
                 .border(1.dp, scheme.outlineVariant, shape)

@@ -51,9 +51,23 @@ object ThemePresets {
 private val OledOutline = Color(0xFF6B6B6B)
 private val OledOutlineVariant = Color(0xFF2C2C2C)
 
+// O que flutua por cima do fundo preto precisa se separar dele. O Material 3 usa surfaceContainerHigh nos diálogos e
+// surfaceContainerHighest nos campos preenchidos e cartões; um quase-preto, que num painel OLED gasta quase nada.
+private val OledFloating = Color(0xFF141414)
+private val OledFloatingHighest = Color(0xFF1E1E1E)
+
+// O Material 3 pinta a cortina atrás de folhas e diálogos com o scrim a 32% de opacidade. Preto sobre o fundo preto não
+// aparece, e a folha (que usa surfaceContainerLow, preto aqui) se confundiria com a tela. Um cinza escuro levanta a tela
+// por trás a cerca de #141414 só enquanto a folha está aberta, e a folha, preta, se destaca.
+private val OledScrim = Color(0xFF404040)
+
 /**
  * O escuro com fundo, superfícies, áreas de itens e faixa de servidores em `#000000`, que num painel OLED apagam os pontos.
- * Sem tons de fundo para separar as áreas, quem separa são os contornos, por isso são mais claros que no escuro comum.
+ * Quem flutua (diálogos e campos preenchidos) usa um quase-preto e a cortina das folhas é cinza, para não sumir no fundo;
+ * as áreas comuns se separam pelos contornos, mais claros que no escuro comum.
+ *
+ * Limite conhecido: os menus (surfaceContainer) e as folhas (surfaceContainerLow) usam os mesmos papéis das áreas de
+ * itens e ficam pretos; a folha se separa pela cortina, o menu só pelo texto e pela sombra.
  */
 private fun oled(dark: ResolvedTheme): ResolvedTheme {
     val black = Color.Black
@@ -65,8 +79,9 @@ private fun oled(dark: ResolvedTheme): ResolvedTheme {
         surfaceContainerLowest = black,
         surfaceContainerLow = black,
         surfaceContainer = black,
-        surfaceContainerHigh = black,
-        surfaceContainerHighest = black,
+        surfaceContainerHigh = OledFloating,
+        surfaceContainerHighest = OledFloatingHighest,
+        scrim = OledScrim,
         outline = OledOutline,
         outlineVariant = OledOutlineVariant,
     )
