@@ -102,8 +102,10 @@ fun rememberUserAvatarImage(session: AccountSession, user: User?): State<ImageBi
 fun UserAvatar(session: AccountSession, user: User?, modifier: Modifier = Modifier, size: Dp = 40.dp, fallbackName: String = "?") {
     val image = rememberUserAvatarImage(session, user)
     val color = colorFor(user?.id ?: fallbackName)
-    Box(modifier.size(size).clip(CircleShape).background(color.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
-        val bitmap = image.value
+    val bitmap = image.value
+    // A cor de fundo é só das iniciais: uma foto com transparência mostra o que está atrás dela, não um círculo colorido.
+    val circle = modifier.size(size).clip(CircleShape)
+    Box(if (bitmap == null) circle.background(color.copy(alpha = 0.35f)) else circle, contentAlignment = Alignment.Center) {
         if (bitmap != null) {
             Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
