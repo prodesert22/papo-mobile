@@ -459,6 +459,8 @@
     <string name="call_end_room_closed">O canal de voz foi encerrado.</string>
     <string name="call_end_failed">Não foi possível entrar na chamada.</string>
     <string name="call_unsupported">Chamadas ainda não estão disponíveis neste aparelho.</string>
+    <string name="call_screen_audio_on">Ouvindo o áudio da tela</string>
+    <string name="call_screen_audio_overflow">Áudio da tela não coube (máximo 2)</string>
 
     <!-- Embeds e mídia (0.6.0): cada trilha e onda escreve só no seu bloco, para os ramos mesclarem sem conflito. -->
     <!-- 02 · trilha A · onda 1 (galeria e envio) -->

@@ -81,6 +81,8 @@ import chat.papo.mobile.resources.call_joining
 import chat.papo.mobile.resources.call_mute
 import chat.papo.mobile.resources.call_muted
 import chat.papo.mobile.resources.call_reconnecting
+import chat.papo.mobile.resources.call_screen_audio_on
+import chat.papo.mobile.resources.call_screen_audio_overflow
 import chat.papo.mobile.resources.call_screen_of
 import chat.papo.mobile.resources.call_screen_off
 import chat.papo.mobile.resources.call_screen_on
@@ -220,6 +222,14 @@ private fun Participants(session: AccountSession, controller: CallController, st
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
+        if (state.screenAudioOverflow.isNotEmpty()) {
+            Text(
+                stringResource(Res.string.call_screen_audio_overflow),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
         LazyVerticalGrid(
             columns = GridCells.Fixed(if (tiles.size <= 2) 1 else 2),
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -277,6 +287,15 @@ private fun ParticipantTile(session: AccountSession, tile: Tile, user: User?, st
                 Icon(
                     Icons.Filled.MicOff,
                     contentDescription = stringResource(Res.string.call_muted),
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+            if (tile.isScreen && tile.userId in state.screenAudioSubs) {
+                Icon(
+                    Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = stringResource(Res.string.call_screen_audio_on),
                     tint = Color.White,
                     modifier = Modifier.size(14.dp),
                 )

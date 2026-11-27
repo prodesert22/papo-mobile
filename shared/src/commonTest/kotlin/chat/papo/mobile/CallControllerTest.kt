@@ -4,6 +4,7 @@ import chat.papo.mobile.data.ws.WsCommand
 import chat.papo.mobile.data.ws.WsEvent
 import chat.papo.mobile.data.ws.WsState
 import chat.papo.mobile.voice.AudioOutput
+import chat.papo.mobile.voice.AudioRoute
 import chat.papo.mobile.voice.CallController
 import chat.papo.mobile.voice.CallEnd
 import chat.papo.mobile.voice.CallPhase
@@ -23,6 +24,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.testTimeSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -38,11 +40,13 @@ class CallControllerTest {
         val sent = mutableListOf<WsCommand>()
         var answerOffers = true
         var rejectNextOffer = false
+        var failSubscribe = false
+        var answerJoin = true
 
         override suspend fun send(command: WsCommand): Boolean {
             sent += command
             when (command) {
-                is WsCommand.VoiceJoin -> events.emit(
+                is WsCommand.VoiceJoin -> if (answerJoin) events.emit(
                     WsEvent.VoiceJoined(command.channelId, listOf(WsEvent.VoiceMember("eu"), WsEvent.VoiceMember("bia", muted = false))),
                 )
                 is WsCommand.VoiceOffer -> when {
@@ -54,7 +58,7 @@ class CallControllerTest {
                 }
                 else -> Unit
             }
-            return true
+            return !(failSubscribe && command is WsCommand.TrackSubscribe)
         }
 
         val kinds get() = sent.map { it::class.simpleName }
@@ -127,6 +131,7 @@ class CallControllerTest {
             ws = signal,
             engine = engine,
             parentScope = scope.backgroundScope,
+            timeSource = scope.testTimeSource,
         )
     }
 
@@ -301,5 +306,247 @@ class CallControllerTest {
         advanceTimeBy(13.seconds)
         assertEquals(CallEnd.Failed, f.call.state.value.end)
         assertEquals(WsCommand.VoiceLeave("v1"), f.signal.sent.last())
+    }
+
+    // Áudio de tela e erros de assinatura
+
+    private suspend fun TestScope.connected(): Fixture {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.signal.sent.clear()
+        return f
+    }
+
+    private suspend fun TestScope.screenAudio(f: Fixture, userId: String, on: Boolean = true) {
+        f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", userId, muted = false, screenAudio = on))
+        runCurrent()
+    }
+
+    private fun sub(user: String) = WsCommand.TrackSubscribe("v1", user, "screen_audio")
+    private fun unsub(user: String) = WsCommand.TrackUnsubscribe("v1", user, "screen_audio")
+
+    private fun Fixture.audioCommands() = signal.sent.filter {
+        (it is WsCommand.TrackSubscribe && it.kind == "screen_audio") || (it is WsCommand.TrackUnsubscribe && it.kind == "screen_audio")
+    }
+
+    @Test
+    fun assinaOAudioDeTelaDeQuemTemAFlagEMaisNada() = runTest {
+        val f = connected()
+
+        // Sem a flag (só vídeo de tela) e a própria transmissão não geram assinatura de áudio.
+        f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", "bia", muted = false, screenSharing = true, screenAudio = false))
+        runCurrent()
+        f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", "eu", muted = false, screenSharing = true, screenAudio = true))
+        runCurrent()
+        assertTrue(f.audioCommands().isEmpty())
+        assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
+
+        screenAudio(f, "bia")
+        assertEquals<List<WsCommand>>(listOf(sub("bia")), f.audioCommands())
+        assertEquals(setOf("bia"), f.call.state.value.screenAudioSubs)
+        assertEquals(emptySet(), f.call.state.value.screenAudioOverflow)
+
+        // Outra atualização da mesma pessoa não repete o comando.
+        f.signal.sent.clear()
+        screenAudio(f, "bia")
+        assertTrue(f.audioCommands().isEmpty())
+    }
+
+    @Test
+    fun naoAssinaNadaAntesDeAsAssinaturasEstaremProntas() = runTest {
+        val f = Fixture(this)
+        f.signal.answerOffers = false
+        f.call.start()
+        runCurrent()
+        screenAudio(f, "bia")
+        assertTrue(f.audioCommands().isEmpty())
+
+        f.signal.events.emit(WsEvent.VoiceAnswer("v1", "resposta"))
+        advanceTimeBy(1.seconds)
+        assertTrue(sub("bia") in f.signal.sent)
+        assertEquals(setOf("bia"), f.call.state.value.screenAudioSubs)
+    }
+
+    @Test
+    fun noMaximoDoisAudiosDeTelaEQuemSobraFicaNoAviso() = runTest {
+        val f = connected()
+        screenAudio(f, "bia")
+        screenAudio(f, "caio")
+        f.signal.sent.clear()
+
+        screenAudio(f, "dani")
+        // As assinaturas atuais têm preferência: nada é enviado e a terceira pessoa vira aviso.
+        assertTrue(f.audioCommands().isEmpty())
+        assertEquals(setOf("bia", "caio"), f.call.state.value.screenAudioSubs)
+        assertEquals(setOf("dani"), f.call.state.value.screenAudioOverflow)
+
+        // Caio para: o lugar dele vai para Dani, com um cancelamento e uma assinatura, nessa ordem.
+        screenAudio(f, "caio", on = false)
+        assertEquals<List<WsCommand>>(listOf(unsub("caio"), sub("dani")), f.audioCommands())
+        assertEquals(setOf("bia", "dani"), f.call.state.value.screenAudioSubs)
+        assertEquals(emptySet(), f.call.state.value.screenAudioOverflow)
+    }
+
+    @Test
+    fun quemSaiDaChamadaTemOAudioCancelado() = runTest {
+        val f = connected()
+        screenAudio(f, "bia")
+        f.signal.sent.clear()
+
+        f.signal.events.emit(WsEvent.VoiceLeft("v1", "bia"))
+        runCurrent()
+        assertEquals<List<WsCommand>>(listOf(unsub("bia")), f.audioCommands())
+        assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
+    }
+
+    @Test
+    fun pedidoQueNaoSaiuNaoContaComoAssinadoNemComoLimite() = runTest {
+        val f = connected()
+        f.signal.failSubscribe = true
+        screenAudio(f, "bia")
+        assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
+        assertEquals(emptySet(), f.call.state.value.screenAudioOverflow)
+    }
+
+    @Test
+    fun salaCheiaTiraAAssinaturaEMostraOAvisoSemRepetir() = runTest {
+        val f = connected()
+        screenAudio(f, "bia")
+        f.signal.events.emit(WsEvent.ServerError("sem slot livre", "voice-room-full"))
+        runCurrent()
+        assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
+        assertEquals(setOf("bia"), f.call.state.value.screenAudioOverflow)
+
+        // Outras mudanças na sala não reenviam o pedido recusado.
+        f.signal.sent.clear()
+        screenAudio(f, "caio")
+        assertEquals<List<WsCommand>>(listOf(sub("caio")), f.audioCommands())
+
+        // Bia desliga e liga de novo: a situação mudou, então tenta outra vez.
+        f.signal.sent.clear()
+        screenAudio(f, "bia", on = false)
+        assertEquals(emptySet(), f.call.state.value.screenAudioOverflow)
+        screenAudio(f, "bia", on = true)
+        assertEquals<List<WsCommand>>(listOf(sub("bia")), f.audioCommands())
+        assertEquals(setOf("caio", "bia"), f.call.state.value.screenAudioSubs)
+    }
+
+    @Test
+    fun faixaNaoEncontradaTiraAAssinaturaSemDizerQueNaoCouber() = runTest {
+        val f = connected()
+        screenAudio(f, "bia")
+        f.signal.events.emit(WsEvent.ServerError("faixa não encontrada", "voice-not-found"))
+        runCurrent()
+        assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
+        assertEquals(emptySet(), f.call.state.value.screenAudioOverflow)
+        assertEquals(CallPhase.Connected, f.call.state.value.phase)
+    }
+
+    @Test
+    fun limiteDeTaxaTiraOVideoDoSlotENaoReenvia() = runTest {
+        val f = connected()
+        f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", "bia", muted = false, cameraOn = true))
+        runCurrent()
+        assertEquals(mapOf(0 to VideoKey("bia", "video")), f.call.state.value.videoSlots)
+
+        f.signal.events.emit(WsEvent.ServerError("muitas assinaturas", "voice-rate-limited"))
+        runCurrent()
+        assertTrue(f.call.state.value.videoSlots.isEmpty())
+        assertEquals("muitas assinaturas", f.call.state.value.errorDetail)
+
+        // Outra mudança de Bia com a câmera ainda ligada não reenvia o pedido recusado.
+        f.signal.sent.clear()
+        f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", "bia", muted = true, cameraOn = true))
+        runCurrent()
+        assertTrue(f.signal.sent.isEmpty())
+
+        // Desligar e ligar a câmera é outra situação.
+        f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", "bia", muted = true, cameraOn = false))
+        runCurrent()
+        f.signal.sent.clear()
+        f.signal.events.emit(WsEvent.VoiceStateUpdated("v1", "bia", muted = true, cameraOn = true))
+        runCurrent()
+        assertEquals<List<WsCommand>>(listOf(WsCommand.TrackSubscribe("v1", "bia", "video")), f.signal.sent)
+        assertEquals(mapOf(0 to VideoKey("bia", "video")), f.call.state.value.videoSlots)
+    }
+
+    @Test
+    fun erroSemPedidoRecenteNaoMexeNasAssinaturas() = runTest {
+        val f = connected()
+        screenAudio(f, "bia")
+        advanceTimeBy(4.seconds)
+        f.signal.events.emit(WsEvent.ServerError("muitas mensagens", "voice-rate-limited"))
+        runCurrent()
+        assertEquals(setOf("bia"), f.call.state.value.screenAudioSubs)
+    }
+
+    @Test
+    fun erroSemNenhumPedidoNaoMexeEmNada() = runTest {
+        val f = connected()
+        f.signal.events.emit(WsEvent.ServerError("sem slot", "voice-room-full"))
+        runCurrent()
+        assertEquals(CallPhase.Connected, f.call.state.value.phase)
+        assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
+        assertEquals(emptySet(), f.call.state.value.screenAudioOverflow)
+    }
+
+    @Test
+    fun erroDepoisDeUmCancelamentoNaoDerrubaAAssinaturaAnterior() = runTest {
+        val f = connected()
+        screenAudio(f, "bia")
+        screenAudio(f, "caio")
+        screenAudio(f, "bia", on = false) // o último pedido é o cancelamento de Bia
+        f.signal.events.emit(WsEvent.ServerError("muitas assinaturas", "voice-rate-limited"))
+        runCurrent()
+        assertEquals(setOf("caio"), f.call.state.value.screenAudioSubs)
+    }
+
+    @Test
+    fun cadaErroTiraSoUmaAssinatura() = runTest {
+        val f = connected()
+        screenAudio(f, "bia")
+        screenAudio(f, "caio")
+        f.signal.events.emit(WsEvent.ServerError("muitas assinaturas", "voice-rate-limited"))
+        runCurrent()
+        assertEquals(setOf("bia"), f.call.state.value.screenAudioSubs)
+        f.signal.events.emit(WsEvent.ServerError("muitas assinaturas", "voice-rate-limited"))
+        runCurrent()
+        assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
+    }
+
+    @Test
+    fun salaCheiaNaEntradaContinuaEncerrandoAChamada() = runTest {
+        val f = Fixture(this)
+        f.signal.answerJoin = false
+        f.call.start()
+        runCurrent()
+        f.signal.events.emit(WsEvent.ServerError("sala cheia", "voice-room-full"))
+        advanceTimeBy(1.seconds)
+        assertEquals(CallEnd.Full, f.call.state.value.end)
+    }
+
+    @Test
+    fun rotasDeAudioDoServidorViramEstado() = runTest {
+        val f = connected()
+        f.signal.events.emit(
+            WsEvent.VoiceAudioRoutes(
+                "v1",
+                listOf(WsEvent.AudioRoute("papo-audio-0", "bia"), WsEvent.AudioRoute("papo-screen-audio-0", "bia", "screen_audio")),
+            ),
+        )
+        runCurrent()
+        assertEquals(
+            mapOf("papo-audio-0" to AudioRoute("bia", "audio"), "papo-screen-audio-0" to AudioRoute("bia", "screen_audio")),
+            f.call.state.value.audioRoutes,
+        )
+
+        // Rotas de outro canal não valem aqui; um snapshot vazio limpa.
+        f.signal.events.emit(WsEvent.VoiceAudioRoutes("outro", listOf(WsEvent.AudioRoute("papo-audio-3", "caio"))))
+        runCurrent()
+        assertEquals(2, f.call.state.value.audioRoutes.size)
+        f.signal.events.emit(WsEvent.VoiceAudioRoutes("v1", emptyList()))
+        runCurrent()
+        assertTrue(f.call.state.value.audioRoutes.isEmpty())
     }
 }
