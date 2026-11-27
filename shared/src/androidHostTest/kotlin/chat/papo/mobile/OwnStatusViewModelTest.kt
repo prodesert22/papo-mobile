@@ -118,7 +118,9 @@ class OwnStatusViewModelTest {
 
     @Test
     fun semPresencaEComPerfilQueFalhaNadaFicaMarcadoMasEscolherContinuaPossivel() = runTest {
-        val server = Server().also { it.profileResponse = HttpStatusCode.InternalServerError }
+        // O pedido fica preso até o fim: a resposta do servidor falso chega numa thread de verdade, e sem isso o "salvando" podia
+        // já ter acabado quando o teste o confere.
+        val server = Server().also { it.profileResponse = HttpStatusCode.InternalServerError; it.gate = CompletableDeferred() }
         val vm = OwnStatusViewModel(session(server))
         TestResources.waitUntil { server.requests.isNotEmpty() }
         runCurrent()
@@ -127,6 +129,7 @@ class OwnStatusViewModelTest {
         choose(vm, OwnStatus.Busy)
         assertEquals(OwnStatus.Busy, vm.state.value.selected)
         assertTrue(vm.state.value.saving)
+        server.gate!!.complete(Unit)
         vm.state.first { !it.saving }
         assertEquals(1, server.bodies.size)
     }
