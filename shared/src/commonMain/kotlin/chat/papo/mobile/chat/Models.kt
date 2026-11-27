@@ -175,6 +175,8 @@ private val codeFence = Regex("""```[^\n`]*\n?([\s\S]*?)```""")
  * [users] tem aquele username (sem diferenciar maiúsculas; com dois, fica texto). O `@` tem de poder
  * abrir uma menção (ver [mentionMayStartAt]), então `a@b.com` não muda, e nada muda dentro de código
  * em linha ou em bloco. Um ponto no fim do nome é pontuação da frase: `@ana.` é a menção `@ana`.
+ * Um username com espaço (`@yog Sothoth`) vale inteiro quando o texto depois do `@` começa com ele e o
+ * nome acaba ali (sem letra, dígito ou `_` logo depois); entre vários, o mais longo.
  *
  * `@everyone` fica como texto: o servidor o lê literal. Só vira menção o usuário de nome `everyone` que foi
  * escolhido na lista ([picked]); digitado à mão, o nome nunca troca o aviso a todos por um usuário.
@@ -184,6 +186,13 @@ fun encodeMentions(text: String, picked: Map<String, String>, users: Collection<
     val byUsername = users.groupBy { it.username.lowercase() }
     fun idOf(name: String): String? =
         picked[name] ?: if (name.equals(EVERYONE_NAME, ignoreCase = true)) null else byUsername[name.lowercase()]?.singleOrNull()?.id
+    // Os nomes com espaço não cabem no corte por palavra de [mentionAt]: são procurados inteiros, do mais longo ao mais curto.
+    val spaced = buildMap {
+        for ((name, ids) in byUsername) {
+            if (name.any(Char::isWhitespace)) ids.singleOrNull()?.let { put(name, it.id) }
+        }
+        for ((name, id) in picked) if (name.any(Char::isWhitespace)) put(name.lowercase(), id)
+    }.entries.sortedByDescending { it.key.length }
     val code = codeRanges(text)
     val out = StringBuilder(text.length + 40)
     var nextCode = 0
@@ -196,7 +205,7 @@ fun encodeMentions(text: String, picked: Map<String, String>, users: Collection<
             nextCode++
             continue
         }
-        val mention = if (text[i] == '@' && mentionMayStartAt(text, i)) mentionAt(text, i, ::idOf) else null
+        val mention = if (text[i] == '@' && mentionMayStartAt(text, i)) spacedMentionAt(text, i, spaced) ?: mentionAt(text, i, ::idOf) else null
         if (mention == null) {
             out.append(text[i])
             i++
@@ -209,6 +218,17 @@ fun encodeMentions(text: String, picked: Map<String, String>, users: Collection<
 }
 
 private class FoundMention(val id: String, val end: Int)
+
+/** O nome de [spaced] (minúsculo para id, do mais longo ao mais curto) que começa depois do `@` em [at] e acaba ali. */
+private fun spacedMentionAt(text: String, at: Int, spaced: List<Map.Entry<String, String>>): FoundMention? {
+    for ((name, id) in spaced) {
+        val end = at + 1 + name.length
+        if (end > text.length || !text.regionMatches(at + 1, name, 0, name.length, ignoreCase = true)) continue
+        if (end < text.length && (text[end].isLetterOrDigit() || text[end] == '_')) continue
+        return FoundMention(id, end)
+    }
+    return null
+}
 
 /** O nome que começa depois do `@` em [at], se for de alguém; o fim dele é onde a menção termina. */
 private fun mentionAt(text: String, at: Int, idOf: (String) -> String?): FoundMention? {

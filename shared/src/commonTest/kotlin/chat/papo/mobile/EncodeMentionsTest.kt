@@ -210,4 +210,43 @@ class EncodeMentionsTest {
         val who = users + user("0b0e7c1e-0000-4000-8000-0000000000ef", "everyone.silva")
         assertEquals(mention("0b0e7c1e-0000-4000-8000-0000000000ef"), encode("@everyone.silva", who = who))
     }
+
+    // Username com espaço
+
+    private val yog = "0b0e7c1e-0000-4000-8000-00000000000d"
+    private val yogUser = "0b0e7c1e-0000-4000-8000-00000000000e"
+
+    @Test
+    fun usernameComEspacoEscolhidoNaListaViraMencaoInteira() {
+        val who = users + user(yog, "yog Sothoth")
+        assertEquals("oi ${mention(yog)} tudo bem?", encode("oi @yog Sothoth tudo bem?", picked = mapOf("yog Sothoth" to yog), who = who))
+    }
+
+    @Test
+    fun usernameComEspacoDigitadoAMaoViraMencaoSemDiferenciarMaiusculas() {
+        val who = users + user(yog, "yog Sothoth")
+        assertEquals("${mention(yog)}, oi", encode("@yog Sothoth, oi", who = who))
+        assertEquals("${mention(yog)}.", encode("@YOG sothoth.", who = who))
+        assertEquals(mention(yog), encode("@yog Sothoth", who = who))
+    }
+
+    @Test
+    fun usernameComEspacoGanhaDoUsernameQueEComecoDele() {
+        val who = users + user(yogUser, "yog") + user(yog, "yog Sothoth")
+        assertEquals("${mention(yog)} e ${mention(yogUser)} sozinho", encode("@yog Sothoth e @yog sozinho", who = who))
+    }
+
+    @Test
+    fun usernameComEspacoSoValeQuandoONomeAcabaAli() {
+        val who = users + user(yogUser, "yog") + user(yog, "yog Sothoth")
+        // "Sothothx" não é o nome: fica a menção do "yog".
+        assertEquals("${mention(yogUser)} Sothothx", encode("@yog Sothothx", who = who))
+        assertEquals("@yog Soth", encode("@yog Soth", who = listOf(user(yog, "yog Sothoth"))))
+    }
+
+    @Test
+    fun usernameComEspacoDentroDeCodigoOuDepoisDeLetraFicaComoTexto() {
+        val who = users + user(yog, "yog Sothoth")
+        assertEquals("`@yog Sothoth` a@yog Sothoth", encode("`@yog Sothoth` a@yog Sothoth", who = who))
+    }
 }
