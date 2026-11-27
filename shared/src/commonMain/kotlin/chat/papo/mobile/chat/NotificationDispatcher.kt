@@ -137,6 +137,7 @@ class NotificationDispatcher(
 
     private suspend fun process(event: WsEvent.MessageCreated, entry: Pending) {
         val dm = directory.dm(event.channelId)
+            ?: if (directory.channel(event.channelId) == null) awaitDm(event.channelId) else null
         if (dm != null) {
             val effective = prefs.effectiveForDm(dm.id)
             if (!shouldNotifyDm(effective, conversationOpen = isOpen(dm.id), permissionGranted = notifier.isPermissionGranted())) return
@@ -152,6 +153,20 @@ class NotificationDispatcher(
         val allowed = shouldNotify(kind, effective, conversationOpen = isOpen(channel.id), permissionGranted = notifier.isPermissionGranted())
         if (!allowed) return
         track(channel.id, ConversationKind.Channel, notificationName(channel.name, ""), event, row, counted = countsAsMention(kind, effective))
+    }
+
+    /**
+     * Uma conversa direta fechada (ou nova) só volta a existir no app com o `dm_update`, que o servidor manda logo depois
+     * do `message`. Para uma conversa que o app ainda não conhece, espera até [ANNOUNCE_WINDOW] que ela apareça como
+     * conversa direta; olha só a memória, sem pedir nada à rede. Devolve nulo se ela virou canal ou não apareceu.
+     */
+    private suspend fun awaitDm(conversationId: String): Dm? = withTimeoutOrNull(ANNOUNCE_WINDOW) {
+        var dm = directory.dm(conversationId)
+        while (dm == null && directory.channel(conversationId) == null) {
+            delay(DIRECTORY_POLL)
+            dm = directory.dm(conversationId)
+        }
+        dm
     }
 
     /** Alguma mensagem deste canal notificaria, qualquer que seja o tipo dela? Senão, não adianta esperar para saber o tipo. */
@@ -283,6 +298,9 @@ class NotificationDispatcher(
     companion object {
         /** Quanto se espera o `new_notification` de uma mensagem antes de dá-la por comum. */
         val ANNOUNCE_WINDOW = 1500.milliseconds
+
+        /** De quanto em quanto se olha se uma conversa direta ainda desconhecida já apareceu. */
+        val DIRECTORY_POLL = 100.milliseconds
 
         /** Quanto se espera a leitura da caixa que vem depois do `new_notification` (ela começa cerca de 1 s depois dele). */
         val INBOX_READ_WAIT = 3.seconds

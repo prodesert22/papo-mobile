@@ -529,6 +529,34 @@ class NotificationDispatcherTest {
     }
 
     @Test
+    fun conversaDiretaQueSoApareceDepoisDaMensagemNotifica() = runTest {
+        // Uma conversa direta fechada volta com o `dm_update`, que o servidor manda depois do `message`.
+        val f = fixture()
+
+        f.send(message("m1", channel = "d3"))
+        runCurrent()
+        assertTrue(f.notifier.posts.isEmpty())
+
+        advanceTimeBy(300)
+        f.directory.dms["d3"] = Dm("d3", ANA, null, null, null, 0)
+        advanceTimeBy(200)
+        runCurrent()
+
+        assertEquals(ConversationKind.Dm, f.notifier.posts.single().kind)
+    }
+
+    @Test
+    fun conversaQueNuncaApareceNaoNotifica() = runTest {
+        val f = fixture()
+
+        f.send(message("m1", channel = "x9"))
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        assertTrue(f.notifier.posts.isEmpty())
+    }
+
+    @Test
     fun conversaDiretaDeUsuarioDesconhecidoUsaONomeGenerico() = runTest {
         val f = fixture()
         f.directory.dms["d2"] = Dm("d2", "u-novo", null, null, null, 0)
