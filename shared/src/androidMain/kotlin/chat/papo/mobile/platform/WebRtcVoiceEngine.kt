@@ -136,7 +136,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     override suspend fun open(iceServers: List<IceServer>, slots: VoiceSlots, onCandidate: (LocalCandidate) -> Unit) {
         withContext(Dispatchers.Default) {
             WebRtcRuntime.initialize(context)
-            CallService.ensure(context, serviceTypes, "")
+            CallService.ensure(context, serviceTypes)
             startAudioSession()
 
             val adm = JavaAudioDeviceModule.builder(context)
@@ -234,7 +234,24 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
                 ?: enumerator.deviceNames.firstOrNull()
                 ?: return@withContext false
             frontCamera = enumerator.isFrontFacing(name)
-            val capturer = enumerator.createCapturer(name, null)
+            // Câmera tomada por outro app ou que falhou: o controlador vê a faixa sumir e desfaz a publicação.
+            val capturer = enumerator.createCapturer(
+                name,
+                object : CameraVideoCapturer.CameraEventsHandler {
+                    override fun onCameraError(errorDescription: String?) {
+                        _localCamera.value = null
+                    }
+
+                    override fun onCameraDisconnected() {
+                        _localCamera.value = null
+                    }
+
+                    override fun onCameraFreezed(errorDescription: String?) = Unit
+                    override fun onCameraOpening(cameraName: String?) = Unit
+                    override fun onFirstFrameAvailable() = Unit
+                    override fun onCameraClosed() = Unit
+                },
+            )
             val helper = SurfaceTextureHelper.create("papo-camera", WebRtcRuntime.egl.eglBaseContext)
             val source = created.createVideoSource(false)
             capturer.initialize(helper, context, source.capturerObserver)
@@ -314,7 +331,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         unpublish(screenTransceiver)
         releaseScreen()
         serviceTypes = serviceTypes and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION.inv()
-        CallService.ensure(context, serviceTypes, "")
+        CallService.ensure(context, serviceTypes)
         Unit
     }
 
@@ -373,7 +390,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
 
     private suspend fun promoteService(type: Int): Boolean {
         serviceTypes = serviceTypes or type
-        return CallService.ensure(context, serviceTypes, "")
+        return CallService.ensure(context, serviceTypes)
     }
 
     private fun releaseCamera() {

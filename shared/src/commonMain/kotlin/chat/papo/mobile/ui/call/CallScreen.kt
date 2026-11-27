@@ -42,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -124,6 +125,15 @@ fun CallScreen(session: AppSession, onBack: () -> Unit, onOpenChat: (accountId: 
     }
     val state by current.state.collectAsStateWithLifecycle()
 
+    // Com a tela de chamada à frente a janela flutuante pode abrir ao sair do app; ao sair dela, o vídeo ampliado deixa de valer.
+    DisposableEffect(session.calls) {
+        session.calls.setCallScreenInFront(true)
+        onDispose {
+            session.calls.setCallScreenInFront(false)
+            session.calls.setFocus(null)
+        }
+    }
+
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Header(accountSession, state, onBack) { onOpenChat(state.accountId, state.channelId) }
@@ -133,7 +143,7 @@ fun CallScreen(session: AppSession, onBack: () -> Unit, onOpenChat: (accountId: 
                     onBack()
                 }
             } else {
-                Participants(accountSession, current, state, Modifier.weight(1f))
+                Participants(accountSession, current, state, Modifier.weight(1f), onFocusChange = session.calls::setFocus)
                 Controls(current, state)
             }
         }
@@ -173,7 +183,13 @@ private fun Header(session: AccountSession, state: CallState, onBack: () -> Unit
 }
 
 @Composable
-private fun Participants(session: AccountSession, controller: CallController, state: CallState, modifier: Modifier) {
+private fun Participants(
+    session: AccountSession,
+    controller: CallController,
+    state: CallState,
+    modifier: Modifier,
+    onFocusChange: (VideoKey?) -> Unit,
+) {
     val users by session.chat.users.collectAsStateWithLifecycle()
     val remote by controller.remoteVideo.collectAsStateWithLifecycle()
     val localCamera by controller.localCamera.collectAsStateWithLifecycle()
@@ -198,6 +214,10 @@ private fun Participants(session: AccountSession, controller: CallController, st
     // Tocar num vídeo o amplia para a área toda (inteiro, sem recorte); tocar de novo volta à grade.
     var focusedKey by remember { mutableStateOf<String?>(null) }
     val focused = tiles.firstOrNull { it.key == focusedKey && it.video != null }
+    // A janela flutuante mostra o vídeo que a pessoa ampliou.
+    LaunchedEffect(focused?.key) {
+        onFocusChange(focused?.let { VideoKey(it.userId, if (it.isScreen) VideoKey.SCREEN else VideoKey.CAMERA) })
+    }
     if (focused != null) {
         Box(
             modifier.fillMaxWidth().padding(8.dp).clip(RoundedCornerShape(18.dp)).background(Color.Black).clickable { focusedKey = null },

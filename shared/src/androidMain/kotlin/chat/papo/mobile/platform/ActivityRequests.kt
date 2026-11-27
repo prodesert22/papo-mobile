@@ -33,15 +33,20 @@ class ActivityRequests(private val context: Context, private val activities: Act
 
     private suspend fun <I, O> launch(contract: ActivityResultContract<I, O>, input: I): O? = withContext(Dispatchers.Main) {
         val activity = activities.current ?: return@withContext null
-        suspendCancellableCoroutine { continuation ->
-            val key = "papo-request-" + UUID.randomUUID()
-            var launcher: androidx.activity.result.ActivityResultLauncher<I>? = null
-            launcher = activity.activityResultRegistry.register(key, contract) { output ->
-                launcher?.unregister()
-                if (continuation.isActive) continuation.resume(output)
+        activities.requestsInFlight.incrementAndGet()
+        try {
+            suspendCancellableCoroutine { continuation ->
+                val key = "papo-request-" + UUID.randomUUID()
+                var launcher: androidx.activity.result.ActivityResultLauncher<I>? = null
+                launcher = activity.activityResultRegistry.register(key, contract) { output ->
+                    launcher?.unregister()
+                    if (continuation.isActive) continuation.resume(output)
+                }
+                continuation.invokeOnCancellation { launcher.unregister() }
+                launcher.launch(input)
             }
-            continuation.invokeOnCancellation { launcher.unregister() }
-            launcher.launch(input)
+        } finally {
+            activities.requestsInFlight.decrementAndGet()
         }
     }
 }

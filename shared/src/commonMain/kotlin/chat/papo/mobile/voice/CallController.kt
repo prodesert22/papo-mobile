@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
@@ -161,6 +162,7 @@ class CallController(
                 _state.update { it.copy(outputs = outputs, output = current) }
             }
         }
+        scope.launch { combine(engine.localCamera, engine.localScreen, _state, ::stopEndedCapture).collect() }
         scope.launch { runJoin() }
     }
 
@@ -213,10 +215,7 @@ class CallController(
 
     fun toggleCamera() = action {
         if (_state.value.cameraOn) {
-            ws.send(WsCommand.VoiceCamera(channelId, false))
-            engine.stopCamera()
-            negotiate()
-            _state.update { it.copy(cameraOn = false) }
+            dropCamera()
         } else {
             if (!engine.ensurePermission(MediaPermission.Camera) || !engine.startCamera()) return@action
             try {
@@ -237,10 +236,7 @@ class CallController(
 
     fun toggleScreen() = action {
         if (_state.value.screenOn) {
-            ws.send(WsCommand.ScreenShareStop(channelId))
-            engine.stopScreen()
-            negotiate()
-            _state.update { it.copy(screenOn = false) }
+            dropScreen()
         } else {
             if (!engine.startScreen()) return@action
             try {
@@ -251,6 +247,52 @@ class CallController(
                 ws.send(WsCommand.ScreenShareStop(channelId))
                 engine.stopScreen()
                 throw e
+            }
+        }
+    }
+
+    private suspend fun dropCamera() {
+        ws.send(WsCommand.VoiceCamera(channelId, false))
+        engine.stopCamera()
+        negotiate()
+        _state.update { it.copy(cameraOn = false) }
+    }
+
+    private suspend fun dropScreen() {
+        ws.send(WsCommand.ScreenShareStop(channelId))
+        engine.stopScreen()
+        negotiate()
+        _state.update { it.copy(screenOn = false) }
+    }
+
+    /**
+     * Uma captura que o sistema encerra por conta própria (a pessoa parou a transmissão pelo aviso do Android, o aparelho
+     * bloqueou a tela, outro app tomou a câmera) deixa o motor sem faixa. O estado e o servidor não podem seguir achando que a
+     * câmera ou a tela ainda saem: a publicação é desfeita como se a pessoa tivesse desligado. A ação confere o estado de novo,
+     * para uma chamada repetida (o estado muda várias vezes até ela começar) não rodar duas vezes; e mesmo que a renegociação
+     * falhe o estado local desliga, senão o aviso voltaria a disparar sem parar.
+     */
+    private fun stopEndedCapture(camera: VideoTrackHandle?, screen: VideoTrackHandle?, state: CallState) {
+        if (state.busy || state.phase == CallPhase.Ended) return
+        if (state.screenOn && screen == null) {
+            action {
+                if (_state.value.screenOn) {
+                    try {
+                        dropScreen()
+                    } finally {
+                        _state.update { it.copy(screenOn = false) }
+                    }
+                }
+            }
+        } else if (state.cameraOn && camera == null) {
+            action {
+                if (_state.value.cameraOn) {
+                    try {
+                        dropCamera()
+                    } finally {
+                        _state.update { it.copy(cameraOn = false) }
+                    }
+                }
             }
         }
     }

@@ -820,4 +820,13 @@
     <string name="call_output_hearing_aid">Aparelho auditivo</string>
     <string name="call_output_other">Outra saída</string>
     <string name="call_output_current">Em uso</string>
+    <string name="call_notice_channel">Chamadas</string>
+    <string name="call_notice_title_default">Chamada de voz</string>
+    <string name="call_notice_public">Chamada em andamento</string>
+    <string name="call_notice_mic_on">Microfone ligado</string>
+    <string name="call_notice_mic_off">Microfone desligado</string>
+    <string name="call_notice_camera_on">Câmera ligada</string>
+    <string name="call_notice_sharing_screen">Transmitindo a tela</string>
+    <string name="call_notice_mute">Silenciar</string>
+    <string name="call_notice_unmute">Ativar microfone</string>
 </resources>

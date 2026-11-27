@@ -27,6 +27,19 @@ import chat.papo.mobile.media.VoiceRecorder
 import chat.papo.mobile.media.VoiceRecording
 import chat.papo.mobile.push.PushTokens
 import chat.papo.mobile.resources.Res
+import chat.papo.mobile.resources.call_connecting
+import chat.papo.mobile.resources.call_hangup
+import chat.papo.mobile.resources.call_joining
+import chat.papo.mobile.resources.call_notice_camera_on
+import chat.papo.mobile.resources.call_notice_channel
+import chat.papo.mobile.resources.call_notice_mic_off
+import chat.papo.mobile.resources.call_notice_mic_on
+import chat.papo.mobile.resources.call_notice_mute
+import chat.papo.mobile.resources.call_notice_public
+import chat.papo.mobile.resources.call_notice_sharing_screen
+import chat.papo.mobile.resources.call_notice_title_default
+import chat.papo.mobile.resources.call_notice_unmute
+import chat.papo.mobile.resources.call_reconnecting
 import chat.papo.mobile.resources.notif_system_attachment
 import chat.papo.mobile.resources.notif_system_empty
 import chat.papo.mobile.resources.notif_system_unknown_user
@@ -39,12 +52,15 @@ import chat.papo.mobile.security.UnlockedSession
 import chat.papo.mobile.security.WebPlayerData
 import chat.papo.mobile.ui.theme.AppThemeStore
 import chat.papo.mobile.voice.CallManager
+import chat.papo.mobile.voice.CallNoticeTexts
+import chat.papo.mobile.voice.CallPresentation
 import chat.papo.mobile.voice.VoiceEngineFactory
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
@@ -63,6 +79,8 @@ class PlatformDeps(
     val mediaDirectory: String,
     /** Motor de chamadas; null onde a plataforma ainda não tem um. */
     val voice: VoiceEngineFactory? = null,
+    /** A janela flutuante e a notificação da chamada; null onde a plataforma não tem, e então a chamada só aparece dentro do app. */
+    val callPresentation: CallPresentation? = null,
     /** Tira o quadro da capa dos vídeos; null onde a plataforma ainda não sabe, e então os cartões ficam sem capa. */
     val videoPosters: VideoPosterExtractor? = null,
     /** A compilação instalada: versão mostrada ao usuário, número da versão e se é de desenvolvimento. */
@@ -90,6 +108,25 @@ class PlatformDeps(
     /** O player da revisão de uma gravação; null junto com [voiceRecorder]. */
     val voiceClipPlayers: VoiceClipPlayerFactory? = null,
 )
+
+/** Os textos da notificação da chamada, de `strings.xml`: o serviço da plataforma não tem texto de interface (regra 10). */
+private suspend fun callNoticeTexts() = CallNoticeTexts(
+    channelLabel = getString(Res.string.call_notice_channel),
+    defaultTitle = getString(Res.string.call_notice_title_default),
+    publicText = getString(Res.string.call_notice_public),
+    joining = getString(Res.string.call_joining),
+    connecting = getString(Res.string.call_connecting),
+    reconnecting = getString(Res.string.call_reconnecting),
+    micOn = getString(Res.string.call_notice_mic_on),
+    micOff = getString(Res.string.call_notice_mic_off),
+    cameraOn = getString(Res.string.call_notice_camera_on),
+    sharingScreen = getString(Res.string.call_notice_sharing_screen),
+    mute = getString(Res.string.call_notice_mute),
+    unmute = getString(Res.string.call_notice_unmute),
+    hangup = getString(Res.string.call_hangup),
+)
+
+private val NotInPip: StateFlow<Boolean> = MutableStateFlow(false)
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
 class AppSession internal constructor(
@@ -145,6 +182,9 @@ class AppGraph(private val platform: PlatformDeps) {
     /** A explicação única que antecede o pedido da permissão; null onde não há permissão a pedir. */
     val notificationPrompt: NotificationPermissionPrompt? =
         platform.notificationPermission?.let { NotificationPermissionPrompt(it, platform.prefs) }
+
+    /** O app está numa janela flutuante (a chamada em picture-in-picture); sempre falso sem [PlatformDeps.callPresentation]. */
+    val inPip: StateFlow<Boolean> = platform.callPresentation?.inPip ?: NotInPip
 
     /** O que tocar numa notificação pede à tela: abrir uma conversa de uma conta. */
     val notificationOpens = NotificationOpenRequests()
@@ -239,7 +279,7 @@ class AppGraph(private val platform: PlatformDeps) {
             }
             AudioPlayback(engines, sessionScope, live)
         }
-        val calls = CallManager(platform.voice, sessionScope)
+        val calls = CallManager(platform.voice, sessionScope, platform.callPresentation, platform.callPresentation?.let { callNoticeTexts() })
         val recorder = platform.voiceRecorder
         val clipPlayers = platform.voiceClipPlayers
         val voiceRecording = if (recorder != null && clipPlayers != null) {

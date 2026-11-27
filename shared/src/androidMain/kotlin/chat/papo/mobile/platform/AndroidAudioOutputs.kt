@@ -35,9 +35,10 @@ internal fun outputKindOf(type: Int): AudioOutputKind = when (type) {
 
 private fun AudioDeviceInfo.toOutput(): AudioOutput {
     val kind = outputKindOf(type)
-    // O nome dos aparelhos do próprio celular é o modelo dele; a tela usa o texto da saída em vez dele.
+    // Sem nome do aparelho o sistema devolve o modelo do celular (é o nome dos aparelhos do próprio celular também): a tela
+    // usa então o texto da saída em vez dele.
     val builtIn = kind == AudioOutputKind.Earpiece || kind == AudioOutputKind.Speaker
-    val label = if (builtIn) null else productName?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+    val label = if (builtIn) null else productName?.toString()?.trim()?.takeIf { it.isNotEmpty() && it != Build.MODEL }
     return AudioOutput(id.toString(), kind, label)
 }
 
