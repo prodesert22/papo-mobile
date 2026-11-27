@@ -11,6 +11,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.OutputTransformation
+import androidx.compose.foundation.text.input.TextFieldBuffer
 import androidx.compose.foundation.text.input.TextFieldDecorator
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
@@ -33,6 +34,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -86,9 +88,15 @@ class DraftEmojis(private val idByName: Map<String, String>) : VisualTransformat
      * trocas o mapeamento das posições (o cursor e a seleção nunca ficam dentro de um emoji). Pelo fim, para as posições
      * seguintes continuarem valendo enquanto se troca.
      */
-    val output = OutputTransformation {
-        for (emoji in find(asCharSequence().toString()).asReversed()) replace(emoji.start, emoji.end, EMOJI_SHOWN)
+    val output = OutputTransformation { showEmojis(this) }
+
+    /** A troca de [output] feita em [buffer], que ainda tem o texto do rascunho. */
+    fun showEmojis(buffer: TextFieldBuffer) {
+        for (emoji in find(buffer.asCharSequence().toString()).asReversed()) buffer.replace(emoji.start, emoji.end, EMOJI_SHOWN)
     }
+
+    /** A posição no texto mostrado de [offset] do rascunho [text]. */
+    fun shownOffset(text: String, offset: Int): Int = EmojiDraft.toShown(find(text), offset)
 
     /**
      * A edição do usuário no campo (o teclado, uma seleção, colar), acertada para o emoji ser um caractere só ([settle]):
@@ -142,7 +150,8 @@ class DraftEmojis(private val idByName: Map<String, String>) : VisualTransformat
 /**
  * O campo de texto do compositor. É o `TextField` do Material sobre um [TextFieldState], com [emojis] mostrados como
  * imagem animada no lugar do `:nome:`, no tamanho do texto. O campo cresce até [MAX_LINES] linhas e rola dali em diante,
- * e as imagens rolam junto: a posição de cada uma vem do texto medido e desconta o quanto o campo rolou.
+ * e as imagens rolam junto: a posição de cada uma vem do texto medido e desconta o quanto o campo rolou. Os trechos que
+ * [highlights] acha no rascunho (as menções) aparecem com [highlightStyle], só na tela: o texto continua o mesmo.
  */
 @Composable
 fun DraftTextField(
@@ -154,8 +163,21 @@ fun DraftTextField(
     keyboardOptions: KeyboardOptions,
     shape: Shape,
     colors: TextFieldColors,
+    highlights: (String) -> List<IntRange>,
+    highlightStyle: SpanStyle,
     modifier: Modifier = Modifier,
 ) {
+    // Os emojis primeiro e o destaque depois, no texto já trocado: as posições do rascunho passam para as do texto mostrado.
+    val output = remember(emojis, highlights, highlightStyle) {
+        OutputTransformation {
+            val draft = asCharSequence().toString()
+            val ranges = highlights(draft)
+            emojis.showEmojis(this)
+            for (range in ranges) {
+                addStyle(highlightStyle, emojis.shownOffset(draft, range.first), emojis.shownOffset(draft, range.last + 1))
+            }
+        }
+    }
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     val textColor = when {
@@ -199,7 +221,7 @@ fun DraftTextField(
             onTextLayout = { getResult -> if (textLayout.value !== getResult) textLayout.value = getResult },
             interactionSource = interactionSource,
             cursorBrush = SolidColor(colors.cursorColor),
-            outputTransformation = emojis.output,
+            outputTransformation = output,
             decorator = decorator,
             scrollState = scroll,
         )

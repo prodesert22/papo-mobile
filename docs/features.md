@@ -100,8 +100,10 @@ release notes in [releases/](../releases/) describe each version's changes.
   it is kept only in memory: never written to the phone's storage.
 - Replies, editing and deleting, reactions, pinned messages and
   mentions. Mentions find people by any part of their name, without caring about
-  accents (in a direct conversation, only its two people), and messages that
-  mention you or reply to you are highlighted.
+  accents (in a direct conversation, only its two people). While you type, a
+  mention, and `@everyone` when you may use it, shows in the mention color in
+  the message field, and messages that mention you or reply to you are
+  highlighted.
 - Tap a reply to go to the original message, swipe a message to reply to it and
   double tap it to react with 👍. Copy a message or select part of its text.
 - The conversation is a panel over the channel list, as in Discord. Swipe it to

@@ -2,6 +2,9 @@ package chat.papo.mobile
 
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.encodeMentions
+import chat.papo.mobile.chat.DraftMention
+import chat.papo.mobile.chat.findEveryone
+import chat.papo.mobile.chat.findMentions
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -248,5 +251,26 @@ class EncodeMentionsTest {
     fun usernameComEspacoDentroDeCodigoOuDepoisDeLetraFicaComoTexto() {
         val who = users + user(yog, "yog Sothoth")
         assertEquals("`@yog Sothoth` a@yog Sothoth", encode("`@yog Sothoth` a@yog Sothoth", who = who))
+    }
+
+    // O que o compositor destaca
+
+    @Test
+    fun findMentionsAchaOQueEncodeMentionsTroca() {
+        val who = users + user(yog, "yog Sothoth")
+        val text = "oi @joao e @yog Sothoth, `@bia` e @maria"
+        assertEquals(
+            listOf(DraftMention(3, 8, joao), DraftMention(11, 23, yog)),
+            findMentions(text, emptyMap(), who),
+        )
+        assertEquals(listOf(DraftMention(0, 5, bia)), findMentions("@joao!", mapOf("joao" to bia), listOf(user(joao, "Joao"), user(bia, "joao"))))
+        assertEquals(emptyList(), findMentions("sem menção", emptyMap(), who))
+    }
+
+    @Test
+    fun findEveryoneAchaOAvisoATodosForaDeCodigo() {
+        assertEquals(listOf(0 until 9, 13 until 22), findEveryone("@everyone e a@everyone"))
+        assertEquals(listOf(28 until 37), findEveryone("oi `@everyone` x @everyones @everyone."))
+        assertEquals(emptyList(), findEveryone("@everyones e `@everyone`"))
     }
 }

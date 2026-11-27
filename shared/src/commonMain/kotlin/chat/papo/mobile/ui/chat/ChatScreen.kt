@@ -103,6 +103,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -144,12 +145,15 @@ import chat.papo.mobile.chat.authorsByRecency
 import chat.papo.mobile.chat.completeMention
 import chat.papo.mobile.chat.continuesGroup
 import chat.papo.mobile.chat.filterPinned
+import chat.papo.mobile.chat.findEveryone
+import chat.papo.mobile.chat.findMentions
 import chat.papo.mobile.chat.isHighlightedFor
 import chat.papo.mobile.chat.mentionQueryAt
 import chat.papo.mobile.chat.newArrivals
 import chat.papo.mobile.chat.offersEveryone
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.suggestMentions
+import chat.papo.mobile.ui.theme.LocalPapoColors
 import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.data.api.OutgoingFile
@@ -824,6 +828,7 @@ fun ChatScreen(
                 voiceOwner = viewModel.voiceOwner,
                 onSendVoice = viewModel::sendVoice,
                 focusRequests = replyFocus,
+                pickedMentions = viewModel.picked,
             )
         }
     }
@@ -1162,6 +1167,8 @@ private fun Composer(
     onSendVoice: () -> Unit,
     /** Muda quando o campo deve receber o foco com o teclado aberto, como ao começar uma resposta. */
     focusRequests: Int,
+    /** Os nomes escolhidos no autocompletar deste rascunho (username para id). */
+    pickedMentions: Map<String, String>,
 ) {
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -1271,6 +1278,18 @@ private fun Composer(
     }
     // Os `:nome:` de emojis do servidor aparecem como imagem no campo, mas o texto do rascunho continua `:nome:`.
     val draftEmojis = remember(serverEmojis.idByName) { DraftEmojis(serverEmojis.idByName) }
+    // O que vai virar menção no envio (a regra de `encodeMentions`) e o `@everyone` de quem pode usá-lo aparecem no campo
+    // na cor das menções da conversa, sobre um fundo da mesma cor, para quem escreve ver que está marcando alguém.
+    val mentionColor = LocalPapoColors.current.accent
+    val mentionStyle = remember(mentionColor) {
+        SpanStyle(color = mentionColor, fontWeight = FontWeight.SemiBold, background = mentionColor.copy(alpha = MENTION_BACKGROUND_ALPHA))
+    }
+    val mentionHighlights = remember(users, pickedMentions, mentionEveryone) {
+        { text: String ->
+            val people = findMentions(text, pickedMentions, users.values).map { it.start until it.end }
+            if (mentionEveryone) (people + findEveryone(text)).sortedBy { it.first } else people
+        }
+    }
     // Cada mudança do campo chega aqui depois de feita: `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos
     // (nome de emoji do servidor fica como texto), e o rascunho é guardado. Uma mudança em andamento no teclado
     // (composição) espera: o atalho só vale para uma tecla `:` digitada, nunca no meio de uma sugestão.
@@ -1426,6 +1445,8 @@ private fun Composer(
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ),
+                    highlights = mentionHighlights,
+                    highlightStyle = mentionStyle,
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focus)
@@ -1566,6 +1587,9 @@ private val SUGGESTION_ROW = 48.dp
 
 /** Linhas visíveis da lista de menções: seis e meia, para a meia linha de baixo mostrar que a lista rola. */
 private const val MAX_SUGGESTION_ROWS = 6.5f
+
+/** Opacidade do fundo de uma menção no campo, na cor da menção: marca o trecho sem tirar o contraste do texto. */
+private const val MENTION_BACKGROUND_ALPHA = 0.18f
 
 /** Última altura do teclado vista neste processo, para a gaveta já abrir certa em outra conversa. Só em memória. */
 private object KeyboardMemory {

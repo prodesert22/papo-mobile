@@ -182,7 +182,26 @@ private val codeFence = Regex("""```[^\n`]*\n?([\s\S]*?)```""")
  * escolhido na lista ([picked]); digitado à mão, o nome nunca troca o aviso a todos por um usuário.
  */
 fun encodeMentions(text: String, picked: Map<String, String>, users: Collection<User>): String {
-    if ('@' !in text) return text
+    val found = findMentions(text, picked, users)
+    if (found.isEmpty()) return text
+    val out = StringBuilder(text.length + 40 * found.size)
+    var last = 0
+    for (mention in found) {
+        out.append(text, last, mention.start).append("@mention(<@").append(mention.id).append(">)")
+        last = mention.end
+    }
+    return out.append(text, last, text.length).toString()
+}
+
+/** Uma menção de usuário no rascunho: o `@nome` vai de [start] até antes de [end] e é de [id]. */
+data class DraftMention(val start: Int, val end: Int, val id: String)
+
+/**
+ * As menções de usuário de [text], na ordem, com a mesma regra de [encodeMentions]: é o que ela troca por
+ * `@mention(<@id>)`, e o compositor destaca exatamente isso.
+ */
+fun findMentions(text: String, picked: Map<String, String>, users: Collection<User>): List<DraftMention> {
+    if ('@' !in text) return emptyList()
     val byUsername = users.groupBy { it.username.lowercase() }
     fun idOf(name: String): String? =
         picked[name] ?: if (name.equals(EVERYONE_NAME, ignoreCase = true)) null else byUsername[name.lowercase()]?.singleOrNull()?.id
@@ -194,27 +213,43 @@ fun encodeMentions(text: String, picked: Map<String, String>, users: Collection<
         for ((name, id) in picked) if (name.any(Char::isWhitespace)) put(name.lowercase(), id)
     }.entries.sortedByDescending { it.key.length }
     val code = codeRanges(text)
-    val out = StringBuilder(text.length + 40)
+    val found = ArrayList<DraftMention>()
     var nextCode = 0
     var i = 0
     while (i < text.length) {
         val codeRange = code.getOrNull(nextCode)
         if (codeRange != null && i == codeRange.first) {
-            out.append(text, codeRange.first, codeRange.last + 1)
             i = codeRange.last + 1
             nextCode++
             continue
         }
         val mention = if (text[i] == '@' && mentionMayStartAt(text, i)) spacedMentionAt(text, i, spaced) ?: mentionAt(text, i, ::idOf) else null
         if (mention == null) {
-            out.append(text[i])
             i++
         } else {
-            out.append("@mention(<@").append(mention.id).append(">)")
+            found += DraftMention(i, mention.end, mention.id)
             i = mention.end
         }
     }
-    return out.toString()
+    return found
+}
+
+/**
+ * Onde [text] tem um `@everyone` que a mensagem mostra como aviso a todos: terminando ali ([everyoneAt]), em qualquer
+ * lugar como o servidor o lê, menos dentro de código, que o Markdown mostra como código. Cada trecho vai do `@` ao fim.
+ */
+fun findEveryone(text: String): List<IntRange> {
+    if ('@' !in text) return emptyList()
+    val code = codeRanges(text)
+    val found = ArrayList<IntRange>()
+    var at = text.indexOf('@')
+    while (at >= 0) {
+        if (everyoneAt(text, at) && code.none { at in it }) {
+            found += at until at + EVERYONE_MENTION.length
+        }
+        at = text.indexOf('@', at + 1)
+    }
+    return found
 }
 
 private class FoundMention(val id: String, val end: Int)
