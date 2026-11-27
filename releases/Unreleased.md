@@ -50,6 +50,8 @@
   list starts one.
 - Close a direct conversation by holding it in the list. It leaves the list but
   keeps its history: a new message, or starting it again, brings it back.
+- In a direct conversation, typing `@` suggests only its two people, you and
+  the other person, instead of everyone on the server.
 - Tap the description under a channel's name to read it in full.
 - People allowed to manage channels can rename a channel and change its
   description, from the conversation menu, from the description or by holding

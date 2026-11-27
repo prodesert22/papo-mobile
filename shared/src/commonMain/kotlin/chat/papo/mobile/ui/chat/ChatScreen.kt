@@ -720,6 +720,8 @@ fun ChatScreen(
                 users = users,
                 presence = presence,
                 recentAuthors = recentAuthors,
+                // Numa conversa direta só se menciona quem está nela: as duas pessoas.
+                mentionParticipants = dms.firstOrNull { it.id == viewModel.channelId }?.let { setOf(session.userId, it.userId) },
                 mentionEveryone = access.mentionEveryone,
                 canAttach = access.attach,
                 serverEmojis = serverEmojis,
@@ -1055,6 +1057,8 @@ private fun Composer(
     users: Map<String, User>,
     presence: Map<String, Presence>,
     recentAuthors: List<String>,
+    /** Os dois membros de uma conversa direta, os únicos que se pode mencionar nela; nulo num canal. */
+    mentionParticipants: Set<String>?,
     mentionEveryone: Boolean,
     canAttach: Boolean,
     serverEmojis: ServerEmojis,
@@ -1179,11 +1183,11 @@ private fun Composer(
         } ?: return
         onDraftChange(insertAtCursor(draft, text))
     }
-    val suggestions = remember(mention, users, presence, recentAuthors) {
+    val suggestions = remember(mention, users, presence, recentAuthors, mentionParticipants) {
         if (mention == null) {
             emptyList()
         } else {
-            suggestMentions(mention.text, users.values, session.userId, recentAuthors, presence)
+            suggestMentions(mention.text, users.values, session.userId, recentAuthors, presence, mentionParticipants)
         }
     }
     // `@everyone` vem na frente da lista, quando o autor pode usá-lo e o que foi digitado é o começo de `everyone`.

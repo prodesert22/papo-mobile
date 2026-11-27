@@ -56,7 +56,8 @@ fun completeMention(text: String, mention: MentionQuery, cursor: Int, name: Stri
 }
 
 /**
- * Quem pode ser mencionado com [query]: todos menos [me] e os banidos, do melhor casamento (nome igual,
+ * Quem pode ser mencionado com [query]: todos menos [me] e os banidos, ou, numa conversa direta, só os dois
+ * [participants] (o próprio usuário incluso, menos um banido), do melhor casamento (nome igual,
  * começa com, começo de palavra, contém, contém atravessando espaço, `_`, `.` ou `-`, como `lum` em
  * "Lu Moraes"; ver [searchByName]) ao pior, no username ou no nome de exibição.
  * Entre casamentos iguais vêm primeiro quem falou há pouco no canal ([recentAuthors], do mais recente ao
@@ -68,10 +69,12 @@ fun suggestMentions(
     me: String,
     recentAuthors: List<String>,
     presence: Map<String, Presence>,
+    /** Os dois membros de uma conversa direta; nulo num canal, onde todos do servidor podem ser mencionados. */
+    participants: Set<String>? = null,
 ): List<User> {
     val recency = HashMap<String, Int>()
     recentAuthors.forEachIndexed { index, id -> recency.getOrPut(id) { index } }
-    val candidates = users.filter { it.id != me && !it.banned }
+    val candidates = users.filter { !it.banned && if (participants != null) it.id in participants else it.id != me }
     val alphabetical = candidates.associate { it.id to foldForSearch(it.displayName) }
     val ordered = candidates.sortedWith(
         compareBy<User> { recency[it.id] ?: Int.MAX_VALUE }
