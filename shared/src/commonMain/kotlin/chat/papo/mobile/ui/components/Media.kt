@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.avatarMediaName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -91,7 +92,7 @@ fun rememberMediaPainter(
 @Composable
 fun UserAvatar(session: AccountSession, user: User?, modifier: Modifier = Modifier, size: Dp = 40.dp, fallbackName: String = "?") {
     // Avatares aparecem às dezenas (conversa, lista de membros): a falha de um não é repetida a cada exibição.
-    val image = rememberMediaImage(session, user?.let { "avatar/${it.id}/${it.avatarVersion}" }, holdFailures = true) {
+    val image = rememberMediaImage(session, user?.let { avatarMediaName(it.id, it.avatarVersion) }, holdFailures = true) {
         user?.let { session.api.avatar(it.id) }
     }
     val color = colorFor(user?.id ?: fallbackName)

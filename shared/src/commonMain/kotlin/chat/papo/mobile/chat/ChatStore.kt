@@ -70,6 +70,8 @@ class ChatStore(
     private val io: CoroutineDispatcher,
     /** Fonte das permissões da conta. O padrão não conhece o dono do servidor e, sem ele, nada é negado. */
     private val permissions: AccessStore = AccessStore(db.metaQueries, api, scope, io),
+    /** Decide o que fica guardado no aparelho; o padrão só poda as linhas, sem cache de mídia. */
+    private val retention: MessageRetention = MessageRetention(db, io),
 ) {
     private val q = db.chatQueries
     private val meta = db.metaQueries
@@ -170,6 +172,8 @@ class ChatStore(
     private val typingMarks = HashMap<Pair<String, String>, TimeMark>()
 
     fun start() {
+        // O que as versões antigas e um processo morto deixaram para trás; antes do tempo real, para não podar o que ele grava.
+        scope.launch { applyRetention { retention.startup() } }
         scope.launch { ws.events.collect { runCatching { handle(it) } } }
         scope.launch {
             ws.state.collect { state -> if (state == WsState.Connected) onConnected() }
@@ -200,6 +204,35 @@ class ChatStore(
     /** [channelId] deixou de estar na tela. Só vale se ele ainda é o que está: outro, já marcado depois, fica. */
     fun clearViewing(channelId: String) {
         if (_viewing.value == channelId) _viewing.value = null
+    }
+
+    /**
+     * Uma tela de [channelId] passou a existir (a do canal ou da conversa direta): ela vira a conversa mais recente da
+     * conta e a que saiu das [MessageRetention.MAX_CONVERSATIONS] perde as mensagens guardadas. Enquanto houver tela
+     * viva, a conversa não é podada. Cada chamada precisa do seu [conversationClosed].
+     */
+    fun conversationOpened(channelId: String) {
+        retention.markOpen(channelId)
+        scope.launch {
+            applyRetention {
+                retention.noteOpened(channelId)
+                retention.prune()
+            }
+        }
+    }
+
+    /** A tela de [channelId] que [conversationOpened] contou deixou de existir: sem outra viva, a conversa pode ser podada. */
+    fun conversationClosed(channelId: String) {
+        retention.markClosed(channelId)
+        scope.launch { applyRetention { retention.prune() } }
+    }
+
+    /**
+     * Roda [block], que poda e devolve as conversas que perderam mensagens. O que se guardava de cada uma já não vale: o
+     * histórico antes do que sobrou não está mais no aparelho, então [hasOlder] não pode dizer que o começo foi alcançado.
+     */
+    private suspend fun applyRetention(block: suspend () -> Set<String>) = quietly {
+        block().forEach { hasOlder.remove(it) }
     }
 
     suspend fun runSync() {
@@ -575,10 +608,11 @@ class ChatStore(
         val sent = reportingForbidden {
             api.sendMessage(message.channelId, message.content, message.replyToId, message.files, onProgress)
         }
+        retention.recentConversations()
         val away = withContext(io) {
             q.transactionWithResult {
                 val away = detachedNow(sent.channelId)
-                if (!away) upsert(sent)
+                if (!away && retention.keeps(sent.channelId)) upsert(sent)
                 noteLastMessage(sent.channelId, sent.id, sent.createdAt, preview(sent.content, sent.attachments), sent.authorId)
                 away
             }
@@ -772,10 +806,13 @@ class ChatStore(
     internal suspend fun handle(event: WsEvent) {
         when (event) {
             is WsEvent.MessageCreated -> {
+                retention.recentConversations() // carrega as recentes; abaixo a conversa é conferida já dentro da transação
+                var trimmed = false
                 val fresh = withContext(io) {
                     val fresh = q.transactionWithResult {
                         // Num trecho antigo a mensagem nova não entra: ficaria um buraco entre ela e o que está guardado.
-                        val insert = !detachedNow(event.channelId)
+                        // Conversa fora das mais recentes e sem tela não guarda mensagem (a prévia e o não lido seguem abaixo).
+                        val insert = retention.keeps(event.channelId) && !detachedNow(event.channelId)
                         val fresh = insert && q.selectMessage(event.id).executeAsOneOrNull() == null
                         if (insert) {
                             q.insertMessageIfAbsent(
@@ -790,6 +827,7 @@ class ChatStore(
                                 external_author = event.externalAuthor?.let { PapoJson.encodeToString(ExternalAuthorDto.serializer(), it) },
                                 attachments = encodeList(AttachmentDto.serializer(), event.attachments),
                             )
+                            trimmed = retention.trimIfClosed(event.channelId)
                         }
                         noteLastMessage(event.channelId, event.id, event.createdAt, preview(event.content, event.attachments), event.authorId)
                         fresh
@@ -798,6 +836,7 @@ class ChatStore(
                     publishTyping()
                     fresh
                 }
+                if (trimmed) hasOlder.remove(event.channelId)
                 // Mensagem minha que chegou antes da resposta do POST: sai da fila de envio, senão apareceria duas vezes.
                 // Se ela já estava guardada (a resposta chegou antes), a entrada não existe mais, e uma igual que
                 // ainda esteja saindo é outra mensagem: não se mexe nela.
@@ -1080,7 +1119,7 @@ class ChatStore(
         // Procura da mensagem respondida: páginas do tamanho máximo do servidor, e quantas ler antes de desistir.
         const val ORIGINAL_PAGE_SIZE = 100
         const val ORIGINAL_MAX_PAGES = 5
-        const val DETACHED = "detached:"
+        const val DETACHED = MessageRetention.DETACHED_KEY
         const val BLOCKED = "blocked"
         const val MAX_USER_PAGES = 50
         // Mudar permissões de canal manda um channel_update por cargo; uma releitura basta para a rajada.

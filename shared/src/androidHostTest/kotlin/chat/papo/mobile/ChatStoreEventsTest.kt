@@ -64,7 +64,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun canaisCriadosAlteradosEApagadosEmTempoReal() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.sync()
         chat.handle(WsEvent.ChannelCreated("v1", "voz", "voice", 2, null, null))
         chat.handle(WsEvent.ChannelCreated("c1", "duplicado", "text", 9)) // já existe: não sobrescreve
@@ -85,7 +85,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun embedsModeracaoEAvatar() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.sync()
         chat.handle(
             WsEvent.MessageCreated(
@@ -116,7 +116,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun avatarTrocadoPelaPropriaContaSobeAVersaoDepoisDeGuardarAImagemComONomeNovo() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.sync()
         runCurrent()
         var stored: Long? = null
@@ -135,7 +135,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun avatarTrocadoComFalhaAoGuardarAImagemAindaSobeAVersaoERepassaOCancelamento() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.sync()
         runCurrent()
 
@@ -152,7 +152,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun avatarDeUsuarioQueOAppNaoConheceNaoFazNada() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         var called = false
 
         chat.avatarReplaced("u9") { called = true }
@@ -162,7 +162,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun videoDoEmbedSobreviveAGravacaoELeitura() = runTest {
-        val session = TestResources.session(engine, this)
+        val session = TestResources.session(engine, this, open = listOf("c1"))
         val chat = session.chat
         chat.sync()
         chat.handle(message("m5", 5))
@@ -189,7 +189,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun embedSemVideoContinuaSemVideoDepoisDeGravar() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.sync()
         chat.handle(message("m5", 5))
         chat.handle(WsEvent.EmbedsUpdated("c1", "m5", listOf(EmbedDto("e1", title = "Página", url = "https://x.test"))))
@@ -198,7 +198,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun fixadasSeguemOsEventos() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.sync()
         chat.handle(message("m1", 1))
         chat.handle(message("m2", 2))
@@ -223,7 +223,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun enviarGravaAMensagemEDeixaOCanalLido() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.sync()
         runCurrent()
         assertTrue(chat.channels.value.single().unread)
@@ -245,7 +245,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun reagirAlternaOEuReagiEChamaOEndpointCerto() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.handle(message("m1", 1))
         var stored = chat.messages("c1", 10).first().single()
 
@@ -266,7 +266,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun conversaDiretaChegaPeloEventoJaComOUsuario() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         val dm = DirectConversationDto("d1", UserSummaryDto("u9", "novato", nickname = "Novato"), "2026-01-01T00:00:00Z", unreadCount = 1)
         chat.handle(WsEvent.DmUpdated(dm))
         runCurrent()
@@ -287,7 +287,7 @@ class ChatStoreEventsTest {
 
     @Test
     fun mensagemDeQuemEstavaDigitandoLimpaOIndicador() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.handle(WsEvent.Typing("c1", "u2"))
         assertEquals(setOf("u2"), chat.typing.value["c1"])
         chat.handle(message("m1", 1, author = "u2"))

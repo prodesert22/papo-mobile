@@ -27,6 +27,11 @@ release notes in [releases/](../releases/) describe each version's changes.
   opens the stored data stays in the phone's secure hardware.
 - Accounts, sessions, messages, drafts and cached media are stored encrypted and
   are left out of device backups.
+- The phone keeps only the 120 newest messages of the 3 conversations, channels
+  or direct messages, you opened last on each account, with their images, GIFs
+  and video posters. Videos are never stored. The rest of the history is
+  removed from the phone and fetched from the server when you open the
+  conversation.
 - Optionally block screenshots and hide conversations in the recent apps list.
 - The in-app YouTube player is the one exception: while it is open, the phone's
   web component keeps its cookies and cache unencrypted in the app's folder.

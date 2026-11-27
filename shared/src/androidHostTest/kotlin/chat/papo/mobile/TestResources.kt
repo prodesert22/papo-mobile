@@ -31,11 +31,15 @@ object TestResources {
         return AccountResources(driver(), MediaCache(tempDir(), crypto.randomBytes(32), crypto, io))
     }
 
-    /** Sessão de conta sobre um motor HTTP falso; o WebSocket nunca conecta. */
-    fun session(engine: HttpClientEngine, scope: TestScope, userId: String = "u1"): AccountSession {
+    /**
+     * Sessão de conta sobre um motor HTTP falso; o WebSocket nunca conecta. Só as conversas com tela aberta, ou entre as
+     * mais recentes, guardam mensagens do tempo real: [open] são as que o teste precisa ter abertas.
+     */
+    fun session(engine: HttpClientEngine, scope: TestScope, userId: String = "u1", open: List<String> = emptyList()): AccountSession {
         val dispatcher = StandardTestDispatcher(scope.testScheduler)
         val client = PapoClient(engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt"))
         return AccountSession("conta", userId, client, scope.backgroundScope, inMemory(dispatcher), dispatcher)
+            .also { session -> open.forEach(session.chat::conversationOpened) }
     }
 
     /**

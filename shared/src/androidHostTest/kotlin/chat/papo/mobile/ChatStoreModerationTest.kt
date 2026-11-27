@@ -54,7 +54,9 @@ class ChatStoreModerationTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val client = PapoClient(engine, ServerUrl("https://papo.test"), MemoryCookieStore("jwt"))
         val resources = TestResources.inMemory(dispatcher)
-        return Account(AccountSession("conta", "u1", client, backgroundScope, resources, dispatcher), AccountDb(resources.driver))
+        val session = AccountSession("conta", "u1", client, backgroundScope, resources, dispatcher)
+        session.chat.conversationOpened("c1") // só uma conversa aberta guarda mensagens do tempo real
+        return Account(session, AccountDb(resources.driver))
     }
 
     private fun attachment(id: String, status: String?) =

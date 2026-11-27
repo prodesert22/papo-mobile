@@ -43,6 +43,7 @@ import chat.papo.mobile.chat.Message
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.ModerationView
 import chat.papo.mobile.media.aspectOrNull
+import chat.papo.mobile.media.attachmentThumbKey
 import chat.papo.mobile.media.guardGone
 import chat.papo.mobile.media.moderationView
 import chat.papo.mobile.media.playableAttachment
@@ -126,7 +127,7 @@ internal fun ImageAttachment(session: AccountSession, messageId: String, attachm
     val sensitive = moderationView(attachment.moderationStatus) == ModerationView.Sensitive
     var revealed by remember(attachment.id, sensitive) { mutableStateOf(!sensitive) }
     val ratio = aspectOrNull(attachment.thumbnailWidth, attachment.thumbnailHeight) ?: (4f / 3f)
-    val name = "att-thumb/${attachment.id}"
+    val name = attachmentThumbKey(attachment.id)
     val image = if (revealed) {
         rememberMediaPainter(session, name, THUMBNAIL_PX, animate = true) {
             session.guardGone(messageId, attachment.id) { session.api.attachmentThumbnail(attachment.id) }
