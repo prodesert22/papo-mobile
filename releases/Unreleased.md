@@ -66,3 +66,7 @@
 - An avatar with a transparent background no longer shows a colored circle
   behind it in conversations, profiles and the member list. The account tile in
   the server bar keeps the account color behind it.
+- The keyboard no longer pops up for a moment after you pick an item from the
+  conversation menu. It now closes when you open the menu, the member list, a
+  profile, a message's actions, reactions, an image or a video full screen, the
+  quick switcher or a call from the conversation.

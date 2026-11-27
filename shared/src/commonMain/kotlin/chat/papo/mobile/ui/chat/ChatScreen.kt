@@ -296,11 +296,22 @@ fun ChatScreen(
     LaunchedEffect(session) { session.emojis.start() }
 
     val channel = channels.firstOrNull { it.id == viewModel.channelId }
+    // Sai do campo de mensagem antes de abrir qualquer coisa por cima da conversa (menu, folha, gaveta, outra tela). Sem
+    // isso o foco volta ao campo quando o menu ou a folha fecha, e o teclado aparece por um instante antes da tela nova.
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val leaveComposer = {
+        keyboard?.hide()
+        focusManager.clearFocus(force = true)
+    }
     val dmUser = dms.firstOrNull { it.id == viewModel.channelId }?.let { users[it.userId] }
     val title = channel?.name ?: dmUser?.displayName ?: ""
     val profileLabel = stringResource(Res.string.profile_open)
     // Numa conversa direta o título (avatar e nome) leva ao perfil da outra pessoa.
-    val openDmProfile = if (dmUser == null) Modifier else Modifier.clickable(onClickLabel = profileLabel) { onOpenProfile(dmUser.id) }
+    val openDmProfile = if (dmUser == null) Modifier else Modifier.clickable(onClickLabel = profileLabel) {
+        leaveComposer()
+        onOpenProfile(dmUser.id)
+    }
 
     val isVoice = channel?.type == ChannelType.Voice
     val isDm = dms.any { it.id == viewModel.channelId }
@@ -337,6 +348,8 @@ fun ChatScreen(
     val videoHost = remember(videosState) { VideoHost(videosState) }
     // Só a tela cheia importa aqui: o vídeo que toca no cartão recompõe o cartão, não a conversa.
     val playing by remember(videosState) { derivedStateOf { videosState.value.fullscreen } }
+    // A tela cheia do vídeo também fica por cima da conversa: o campo de mensagem sai dela.
+    LaunchedEffect(playing != null) { if (playing != null) leaveComposer() }
     // Perder a leitura com uma folha ou diálogo aberto: eles agiriam sobre uma conversa que a pessoa já não vê.
     LaunchedEffect(access.readDenied) {
         if (access.readDenied) {
@@ -474,7 +487,10 @@ fun ChatScreen(
                                 // Num canal, tocar na descrição cortada abre o texto inteiro.
                                 val topicLabel = stringResource(Res.string.channel_topic_open)
                                 val openTopic = if (dmUser == null && channel != null) {
-                                    Modifier.clickable(onClickLabel = topicLabel) { topicOpen = true }
+                                    Modifier.clickable(onClickLabel = topicLabel) {
+                                        leaveComposer()
+                                        topicOpen = true
+                                    }
                                 } else {
                                     Modifier
                                 }
@@ -497,21 +513,33 @@ fun ChatScreen(
                 },
                 actions = {
                     if (isVoice && onJoinCall != null && access.joinVoice) {
-                        IconButton(onClick = onJoinCall) {
+                        IconButton(onClick = {
+                            leaveComposer()
+                            onJoinCall()
+                        }) {
                             Icon(Icons.Filled.Call, contentDescription = stringResource(Res.string.channels_join_call))
                         }
                     }
-                    IconButton(onClick = onSwitch) {
+                    IconButton(onClick = {
+                        leaveComposer()
+                        onSwitch()
+                    }) {
                         Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(Res.string.switcher_title))
                     }
                     if (!isDm) {
-                        IconButton(onClick = onOpenMembers) {
+                        IconButton(onClick = {
+                            leaveComposer()
+                            onOpenMembers()
+                        }) {
                             Icon(Icons.Filled.Group, contentDescription = stringResource(Res.string.members_open))
                         }
                     }
                     // Busca, fixadas e notificações ficam no menu: com tudo solto na barra, o título some em 360 dp.
                     Box {
-                        IconButton(onClick = { moreMenu = true }) {
+                        IconButton(onClick = {
+                            leaveComposer()
+                            moreMenu = true
+                        }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(Res.string.notif_more_options))
                         }
                         PapoDropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
@@ -633,13 +661,32 @@ fun ChatScreen(
                                 onReply = { viewModel.startReply(message) }.takeIf { access.send },
                                 onQuickReact = { viewModel.quickReact(message) }.takeIf { access.react },
                                 // A folha só abre se tiver o que oferecer (copiar não existe numa mensagem só de anexo).
-                                onLongPress = { if (messageActionOffer(access, message, session.userId).any) actionsFor = message },
+                                onLongPress = {
+                                    if (messageActionOffer(access, message, session.userId).any) {
+                                        leaveComposer()
+                                        actionsFor = message
+                                    }
+                                },
                                 onReact = { viewModel.react(message, it.emojiId, it.unicode) },
-                                onOpenImage = { viewing = ViewingMedia.image(message.id, it) },
-                                onOpenEmbedImage = { viewing = ViewingMedia.embedImage(message.id, it.id) },
-                                onShowReactors = { reactorsOf = ReactorsRequest(message.id, it) },
+                                onOpenImage = {
+                                    leaveComposer()
+                                    viewing = ViewingMedia.image(message.id, it)
+                                },
+                                onOpenEmbedImage = {
+                                    leaveComposer()
+                                    viewing = ViewingMedia.embedImage(message.id, it.id)
+                                },
+                                onShowReactors = {
+                                    leaveComposer()
+                                    reactorsOf = ReactorsRequest(message.id, it)
+                                },
                                 videos = videoHost,
-                                onOpenAuthor = profileId?.let { id -> { onOpenProfile(id) } },
+                                onOpenAuthor = profileId?.let { id ->
+                                    {
+                                        leaveComposer()
+                                        onOpenProfile(id)
+                                    }
+                                },
                             )
                         }
                     }
