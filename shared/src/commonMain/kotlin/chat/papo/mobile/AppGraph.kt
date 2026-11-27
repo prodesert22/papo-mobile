@@ -32,6 +32,7 @@ import chat.papo.mobile.security.LockState
 import chat.papo.mobile.security.MasterKeyStore
 import chat.papo.mobile.security.UnlockedSession
 import chat.papo.mobile.security.WebPlayerData
+import chat.papo.mobile.ui.theme.AppThemeStore
 import chat.papo.mobile.voice.CallManager
 import chat.papo.mobile.voice.VoiceEngineFactory
 import io.ktor.client.engine.HttpClientEngine
@@ -117,6 +118,9 @@ class AppGraph(private val platform: PlatformDeps) {
 
     /** O que tocar numa notificação pede à tela: abrir uma conversa de uma conta. */
     val notificationOpens = NotificationOpenRequests()
+
+    /** O tema global; nas preferências, para a tela de bloqueio já usá-lo. */
+    val theme = AppThemeStore(platform.prefs)
 
     val lock = AppLock(
         keyStore = platform.keyStore,

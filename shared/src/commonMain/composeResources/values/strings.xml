@@ -654,6 +654,35 @@
     <!-- fim da trilha A -->
 
     <!-- 0.9.0 · trilha B: tema -->
+    <string name="theme_mode_title">Modo</string>
+    <string name="theme_mode_system">Sistema</string>
+    <string name="theme_mode_light">Claro</string>
+    <string name="theme_mode_dark">Escuro</string>
+    <string name="theme_mode_oled">OLED</string>
+    <string name="theme_mode_oled_hint">Fundo e áreas de itens pretos: em telas OLED os pontos pretos ficam apagados e gastam menos bateria.</string>
+    <string name="theme_presets_title">Predefinições</string>
+    <string name="theme_preset_papo">Papo</string>
+    <string name="theme_preset_ocean">Oceano</string>
+    <string name="theme_preset_forest">Floresta</string>
+    <string name="theme_preset_amethyst">Ametista</string>
+    <string name="theme_preset_amber">Âmbar</string>
+    <string name="theme_preset_rose">Rosa</string>
+    <string name="theme_summary">%1$s · %2$s</string>
+    <string name="theme_preview_title">Prévia</string>
+    <string name="theme_preview_description">Prévia da interface com o tema escolhido</string>
+    <string name="theme_preview_tab_channels">Canais</string>
+    <string name="theme_preview_tab_dms">Conversas diretas</string>
+    <string name="theme_preview_channel_general">geral</string>
+    <string name="theme_preview_channel_news">avisos</string>
+    <string name="theme_preview_author_1">Ana</string>
+    <string name="theme_preview_message_1">Bom dia! Viu o aviso?</string>
+    <string name="theme_preview_author_2">Beto</string>
+    <string name="theme_preview_message_2">@você pode confirmar?</string>
+    <string name="theme_preview_input">Mensagem em #geral</string>
+    <string name="theme_server_use_app">Usar o tema do app</string>
+    <string name="theme_server_use_app_hint">Este servidor segue a aparência definida em Aplicativo.</string>
+    <string name="theme_server_own">Tema próprio</string>
+    <string name="theme_server_own_hint">Só este servidor usa estas cores, neste aparelho.</string>
     <!-- fim da trilha B -->
 
     <!-- 0.9.0 · trilha C: lista de canais e conversas diretas -->

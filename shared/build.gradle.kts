@@ -54,6 +54,7 @@ kotlin {
             implementation(libs.ktor.serialization.json)
             implementation(libs.sqldelight.coroutines)
             implementation(libs.zoomable)
+            implementation(libs.material.color.utilities)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

@@ -73,6 +73,8 @@ class AccountSession(
     val recentEmojis = RecentEmojis(db.metaQueries, scope, io)
     val drafts = Drafts(db.metaQueries, scope, io)
     val recentSearches = RecentSearchFilters()
+    /** O tema só deste servidor, se a conta tiver um; no banco cifrado dela. */
+    val theme = ServerThemeStore(db.metaQueries, scope, io)
 
     val ws = WsClient(client, scope, sessionStillValid = ::sessionStillValid)
     /** Dono do servidor, cargos e entradas por canal desta conta; o `ChatStore` o lê e o atualiza. */
