@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -117,6 +120,8 @@ class CallController(
     private val slots: VoiceSlots = VoiceSlots(),
     /** Relógio do prazo para ligar um erro do servidor ao último pedido de assinatura; os testes passam o virtual. */
     private val timeSource: TimeSource = TimeSource.Monotonic,
+    /** Os volumes por pessoa da conta; sem eles todas as faixas tocam no normal. */
+    private val volumes: VoiceVolumes? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext.job))
     private val _state = MutableStateFlow(CallState(accountId, channelId))
@@ -170,7 +175,20 @@ class CallController(
                 }
             }
         }
+        volumes?.let { source -> scope.launch { applyGains(source) } }
         scope.launch { runJoin() }
+    }
+
+    /**
+     * Mantém o ganho de cada faixa de áudio igual ao volume de quem toca nela. O servidor troca as pessoas de
+     * faixa (a cada `voice_audio_routes`), então o ganho se reaplica a cada snapshot de rotas e a cada mudança de
+     * volume. Só começa depois de os volumes guardados serem lidos: ninguém silenciado toca no normal por um instante.
+     */
+    private suspend fun applyGains(source: VoiceVolumes) {
+        source.awaitLoaded()
+        combine(_state.map { it.audioRoutes }.distinctUntilChanged(), source.levels, ::gains).collect { byTrack ->
+            for ((trackId, gain) in byTrack) engine.setRemoteAudioGain(trackId, gain)
+        }
     }
 
     private suspend fun runJoin() {

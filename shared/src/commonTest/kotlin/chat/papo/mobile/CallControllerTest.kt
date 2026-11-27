@@ -17,9 +17,13 @@ import chat.papo.mobile.voice.VideoTrackHandle
 import chat.papo.mobile.voice.VoiceEngine
 import chat.papo.mobile.voice.VoiceSignal
 import chat.papo.mobile.voice.VoiceSlots
+import chat.papo.mobile.voice.VoiceVolumes
+import chat.papo.mobile.voice.VolumeLevels
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -114,13 +118,29 @@ class CallControllerTest {
         override val outputs = MutableStateFlow<List<AudioOutput>>(emptyList())
         override val currentOutput = MutableStateFlow<AudioOutput?>(null)
         override fun selectOutput(id: String) = Unit
-        override fun setRemoteAudioGain(trackId: String, gain: Double) = Unit
+        val gains = mutableMapOf<String, Double>()
+        override fun setRemoteAudioGain(trackId: String, gain: Double) {
+            gains[trackId] = gain
+        }
+
         override fun close() {
             closed = true
         }
     }
 
-    private class Fixture(scope: TestScope) {
+    /** Volumes por pessoa em memória; [loaded] segura a leitura do banco como se ainda estivesse em andamento. */
+    private class FakeVolumes(
+        initial: VolumeLevels = VolumeLevels(),
+        val loaded: CompletableDeferred<Unit> = CompletableDeferred(Unit),
+    ) : VoiceVolumes {
+        override val levels = MutableStateFlow(initial)
+        override suspend fun awaitLoaded() = loaded.await()
+        override fun setVoice(userId: String, percent: Int) = levels.update { it.copy(voice = it.voice + (userId to percent)) }
+        override fun setScreen(userId: String, percent: Int) = levels.update { it.copy(screen = it.screen + (userId to percent)) }
+        override fun flush() = Unit
+    }
+
+    private class Fixture(scope: TestScope, volumes: VoiceVolumes? = null) {
         val signal = FakeSignal()
         val engine = FakeEngine()
         val call = CallController(
@@ -132,6 +152,7 @@ class CallControllerTest {
             engine = engine,
             parentScope = scope.backgroundScope,
             timeSource = scope.testTimeSource,
+            volumes = volumes,
         )
     }
 
@@ -548,5 +569,62 @@ class CallControllerTest {
         f.signal.events.emit(WsEvent.VoiceAudioRoutes("v1", emptyList()))
         runCurrent()
         assertTrue(f.call.state.value.audioRoutes.isEmpty())
+    }
+
+    // Volume por pessoa
+
+    private suspend fun TestScope.routes(f: Fixture, vararg routes: Triple<String, String, String>) {
+        f.signal.events.emit(WsEvent.VoiceAudioRoutes("v1", routes.map { (track, user, kind) -> WsEvent.AudioRoute(track, user, kind) }))
+        runCurrent()
+    }
+
+    @Test
+    fun ganhoDeCadaFaixaSegueOVolumeDeQuemToca() = runTest {
+        val volumes = FakeVolumes(VolumeLevels(voice = mapOf("bia" to 30)))
+        val f = Fixture(this, volumes)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+
+        routes(f, Triple("papo-audio-0", "bia", "audio"), Triple("papo-screen-audio-0", "bia", "screen_audio"), Triple("papo-audio-1", "caio", "audio"))
+        assertEquals(mapOf("papo-audio-0" to 0.3, "papo-screen-audio-0" to 1.0, "papo-audio-1" to 1.0), f.engine.gains)
+
+        volumes.setVoice("bia", 0)
+        volumes.setScreen("bia", 150)
+        runCurrent()
+        assertEquals(mapOf("papo-audio-0" to 0.0, "papo-screen-audio-0" to 1.5, "papo-audio-1" to 1.0), f.engine.gains)
+    }
+
+    @Test
+    fun servidorTrocaAPessoaDeFaixaEOGanhoAcompanha() = runTest {
+        val f = Fixture(this, FakeVolumes(VolumeLevels(voice = mapOf("bia" to 0, "caio" to 200))))
+        f.call.start()
+        advanceTimeBy(1.seconds)
+
+        routes(f, Triple("papo-audio-0", "bia", "audio"))
+        assertEquals(0.0, f.engine.gains["papo-audio-0"])
+        routes(f, Triple("papo-audio-0", "caio", "audio"))
+        assertEquals(2.0, f.engine.gains["papo-audio-0"])
+    }
+
+    @Test
+    fun nadaTocaNoNormalEnquantoOsVolumesNaoForemLidos() = runTest {
+        val loaded = CompletableDeferred<Unit>()
+        val f = Fixture(this, FakeVolumes(VolumeLevels(voice = mapOf("bia" to 0)), loaded))
+        f.call.start()
+        advanceTimeBy(1.seconds)
+
+        routes(f, Triple("papo-audio-0", "bia", "audio"))
+        assertTrue(f.engine.gains.isEmpty())
+
+        loaded.complete(Unit)
+        runCurrent()
+        assertEquals(mapOf("papo-audio-0" to 0.0), f.engine.gains)
+    }
+
+    @Test
+    fun semVolumesNaoMexeNoGanho() = runTest {
+        val f = connected()
+        routes(f, Triple("papo-audio-0", "bia", "audio"))
+        assertTrue(f.engine.gains.isEmpty())
     }
 }

@@ -3,6 +3,7 @@ package chat.papo.mobile.ui.call
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Cameraswitch
@@ -90,6 +93,7 @@ import chat.papo.mobile.resources.call_speaker_off
 import chat.papo.mobile.resources.call_speaker_on
 import chat.papo.mobile.resources.call_switch_camera
 import chat.papo.mobile.resources.call_unmute
+import chat.papo.mobile.resources.call_volume_adjusted
 import chat.papo.mobile.resources.call_you
 import chat.papo.mobile.resources.call_your_screen
 import chat.papo.mobile.resources.channels_open_chat
@@ -100,8 +104,10 @@ import chat.papo.mobile.voice.CallController
 import chat.papo.mobile.voice.CallEnd
 import chat.papo.mobile.voice.CallPhase
 import chat.papo.mobile.voice.CallState
+import chat.papo.mobile.voice.DEFAULT_VOLUME_PERCENT
 import chat.papo.mobile.voice.VideoKey
 import chat.papo.mobile.voice.VideoTrackHandle
+import chat.papo.mobile.voice.VolumeLevels
 import org.jetbrains.compose.resources.stringResource
 
 /** Um quadro da grade: uma pessoa (com ou sem câmera) ou a tela que alguém transmite. */
@@ -200,6 +206,19 @@ private fun Participants(session: AccountSession, controller: CallController, st
         }
     }
 
+    // Quadro sem vídeo (toque) ou qualquer quadro (toque longo) abre o volume da pessoa.
+    var volumeUserId by remember { mutableStateOf<String?>(null) }
+    val levels by session.voiceVolumes.levels.collectAsStateWithLifecycle()
+    volumeUserId?.let { userId ->
+        // Quem saiu da chamada deixa de ter o que ajustar: a folha fecha.
+        val member = state.members[userId]
+        if (member == null) {
+            LaunchedEffect(userId) { volumeUserId = null }
+        } else {
+            ParticipantSheet(session, userId, users[userId], member.screenAudio, onDismiss = { volumeUserId = null })
+        }
+    }
+
     // Tocar num vídeo o amplia para a área toda (inteiro, sem recorte); tocar de novo volta à grade.
     var focusedKey by remember { mutableStateOf<String?>(null) }
     val focused = tiles.firstOrNull { it.key == focusedKey && it.video != null }
@@ -238,7 +257,11 @@ private fun Participants(session: AccountSession, controller: CallController, st
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(tiles, key = { it.key }, span = { if (it.isScreen) GridItemSpan(maxLineSpan) else GridItemSpan(1) }) { tile ->
-                ParticipantTile(session, tile, users[tile.userId], state, onFocus = { focusedKey = tile.key })
+                ParticipantTile(
+                    session, tile, users[tile.userId], state, levels,
+                    onFocus = { focusedKey = tile.key },
+                    onVolume = { volumeUserId = tile.userId },
+                )
             }
         }
         if (state.phase == CallPhase.Connected && state.members.size <= 1) {
@@ -253,7 +276,15 @@ private fun Participants(session: AccountSession, controller: CallController, st
 }
 
 @Composable
-private fun ParticipantTile(session: AccountSession, tile: Tile, user: User?, state: CallState, onFocus: () -> Unit) {
+private fun ParticipantTile(
+    session: AccountSession,
+    tile: Tile,
+    user: User?,
+    state: CallState,
+    levels: VolumeLevels,
+    onFocus: () -> Unit,
+    onVolume: () -> Unit,
+) {
     val member = state.members[tile.userId]
     val mine = tile.userId == session.userId
     val speaking = !tile.isScreen && tile.userId in state.speakers
@@ -266,7 +297,12 @@ private fun ParticipantTile(session: AccountSession, tile: Tile, user: User?, st
             .clip(shape)
             .background(if (tile.isScreen && tile.video != null) Color.Black else MaterialTheme.colorScheme.surfaceContainer)
             .border(2.dp, if (speaking) LocalPapoColors.current.online else Color.Transparent, shape)
-            .clickable(enabled = tile.video != null, onClick = onFocus),
+            // Com vídeo, tocar amplia; sem vídeo, tocar abre o volume; o toque longo abre o volume sempre. O próprio quadro não tem volume.
+            .combinedClickable(
+                enabled = tile.video != null || !mine,
+                onClick = if (tile.video != null) onFocus else onVolume,
+                onLongClick = if (mine) null else onVolume,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         if (tile.video != null) {
@@ -287,6 +323,21 @@ private fun ParticipantTile(session: AccountSession, tile: Tile, user: User?, st
                 Icon(
                     Icons.Filled.MicOff,
                     contentDescription = stringResource(Res.string.call_muted),
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+            // Volume diferente do normal: um aviso discreto de que o som dessa pessoa (ou da transmissão) está ajustado.
+            val level = if (tile.isScreen) levels.screenOf(tile.userId) else levels.voiceOf(tile.userId)
+            if (!mine && level != DEFAULT_VOLUME_PERCENT) {
+                Icon(
+                    when {
+                        level == 0 -> Icons.AutoMirrored.Filled.VolumeOff
+                        level < DEFAULT_VOLUME_PERCENT -> Icons.AutoMirrored.Filled.VolumeDown
+                        else -> Icons.AutoMirrored.Filled.VolumeUp
+                    },
+                    contentDescription = stringResource(Res.string.call_volume_adjusted),
                     tint = Color.White,
                     modifier = Modifier.size(14.dp),
                 )

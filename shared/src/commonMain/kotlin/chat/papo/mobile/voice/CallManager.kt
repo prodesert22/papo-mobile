@@ -35,6 +35,7 @@ class CallManager(private val engines: VoiceEngineFactory?, private val scope: C
             ws = session.ws,
             engine = factory.create(),
             parentScope = session.scope,
+            volumes = session.voiceVolumes,
         )
         _current.value = controller
         _active.value = true
