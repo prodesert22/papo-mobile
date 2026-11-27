@@ -35,6 +35,7 @@ Para mudar ao vivo, entre como o dono e use as rotas da OpenAPI (com cookie), qu
 `POST /roles`, `PUT`/`DELETE /roles/{id}` (estes dois, como no servidor, **não** mandam evento),
 `POST /users/{id}/roles` e `DELETE /users/{id}/roles/{role_id}` (`role_add`/`role_remove`),
 `PUT /channels/{id}/permissions/{role_id}` e `DELETE /channels/{id}/role/{role_id}` (`channel_update`).
+`PUT /channels/{id}` edita nome e descrição de um canal (`manage_channels`, 409 se o nome já existe, `channel_update`).
 Os ids dos cargos são fixos (derivados do nome) e saem na linha de partida, junto com os dos usuários.
 
 Vídeos anexados (tudo desligado por padrão; sem estas variáveis o fake responde como sempre). `GET /attachments/{id}`
@@ -1152,6 +1153,60 @@ def update_profile_text(name, data):
     return None
 
 
+# ── Editar canal ─────────────────────────────────────────────────────────────────────────────────
+
+CHANNEL_NAME_MAX = 32
+CHANNEL_TOPIC_MAX = 512
+
+
+def serve_channel_edit(handler, method, path, me):
+    """`PUT /channels/{id}` como o servidor (`handlers/channels.go`, `services/channels.go`), lido no código e não
+    observado em execução. Devolve False se a rota não é esta.
+
+    Exige `manage_channels` (o dono passa; sem FAKE_PERMISSIONS todos passam). Valida antes de procurar o canal: `name` de 1 a
+    32 caracteres (o servidor não apara espaços) e `topic`, se vier, até 512 caracteres e só vazio em categoria. `topic`
+    ausente ou nulo mantém a descrição, `""` a apaga (o servidor guarda nulo). Nome de outro canal: 409, e o nome é único no
+    servidor inteiro. Responde 200 com o canal como em `GET /channels` e manda `channel_update` a todos, com `parent_id`.
+    """
+    found = re.fullmatch(r"/channels/([^/]+)", path)
+    if method != "PUT" or not found:
+        return False
+    data = handler.body()
+    if not has_role_flag(me, "manage_channels"):
+        handler.forbidden("usuário não possui a permissão necessária para esta operação")
+        return True
+    data = data if isinstance(data, dict) else {}
+    name, topic = data.get("name"), data.get("topic")
+    if not isinstance(name, str) or not name or len(name) > CHANNEL_NAME_MAX or not (topic is None or isinstance(topic, str)):
+        handler.problem(400, "Parâmetro inválido", "name é obrigatório e deve ter no máximo 32 caracteres; "
+                        "topic tem no máximo 512 caracteres e é válido apenas para canais de texto")
+        return True
+    channel = next((c for c in CHANNELS if c["id"] == found.group(1)), None)
+    if channel is None:
+        handler.problem(404, "Recurso não encontrado", "canal não encontrado")
+        return True
+    if topic is not None and (len(topic) > CHANNEL_TOPIC_MAX or (channel["type"] == "category" and topic != "")):
+        handler.problem(400, "Parâmetro inválido", "name é obrigatório e deve ter no máximo 32 caracteres; "
+                        "topic tem no máximo 512 caracteres e é válido apenas para canais de texto")
+        return True
+    if any(c["name"] == name and c is not channel for c in CHANNELS):
+        handler.problem(409, "Nome de canal já existe", "o nome informado já está em uso")
+        return True
+    channel["name"] = name
+    if topic is not None:
+        channel["topic"] = topic or None
+    emit({"type": "channel_update", "channel_id": channel["id"], "name": name, "position": channel["position"],
+          "topic": channel.get("topic"), "parent_id": channel.get("parent_id")})
+    item = dict(channel, topic=channel.get("topic"), parent_id=channel.get("parent_id"))
+    item["last_message"] = last_message(channel["id"])
+    item["last_read_message"] = READS.get((me, channel["id"]))
+    item["notification_settings"] = notify_setting(me, channel["id"])
+    if ACCESS["on"]:
+        item["permissions"] = entry_views(channel["id"])
+    handler.send(200, item)
+    return True
+
+
 def serve_profile_writes(handler, method, path, me):
     """Responde os PUT do próprio perfil; devolve False se `path` não é um deles."""
     found = re.fullmatch(r"/users/([^/]+)(|/avatar|/banner|/status)", path)
@@ -1516,6 +1571,8 @@ class Handler(BaseHTTPRequestHandler):
     def chat_write(self, method, url, me):
         path = url.path
         if serve_profile_writes(self, method, path, me):
+            return
+        if serve_channel_edit(self, method, path, me):
             return
         if method == "POST" and path == "/messages":
             ctype = self.headers.get("Content-Type", "")

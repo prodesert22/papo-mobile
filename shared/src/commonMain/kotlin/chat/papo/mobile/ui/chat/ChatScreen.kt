@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.ButtonDefaults
@@ -135,6 +136,7 @@ import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.UnicodeEmojis
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.authorCanEveryone
+import chat.papo.mobile.chat.canManageChannels
 import chat.papo.mobile.chat.authorsByRecency
 import chat.papo.mobile.chat.completeMention
 import chat.papo.mobile.chat.continuesGroup
@@ -154,6 +156,8 @@ import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
 import chat.papo.mobile.resources.action_close
+import chat.papo.mobile.resources.channel_settings
+import chat.papo.mobile.resources.channel_topic_open
 import chat.papo.mobile.resources.channels_join_call
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_emoji
@@ -205,6 +209,7 @@ import chat.papo.mobile.resources.presence_offline
 import chat.papo.mobile.resources.presence_online
 import chat.papo.mobile.resources.profile_open
 import chat.papo.mobile.resources.switcher_title
+import chat.papo.mobile.ui.channel.ChannelTopicSheet
 import chat.papo.mobile.ui.components.AppBadge
 import chat.papo.mobile.ui.components.AuthorAvatar
 import chat.papo.mobile.ui.components.AudioBar
@@ -302,6 +307,9 @@ fun ChatScreen(
     // O menu ⋮ e a folha de notificações da conversa (canal ou DM).
     var moreMenu by remember { mutableStateOf(false) }
     var notificationsOpen by rememberSaveable { mutableStateOf(false) }
+    // A descrição completa do canal e o atalho de editá-lo, que só existe com `manage_channels` confirmado.
+    var topicOpen by rememberSaveable { mutableStateOf(false) }
+    val canEditChannel = channel != null && channel.type != ChannelType.Category && canManageChannels(permissions, session.userId)
     val draft = viewModel.draft
     // O rascunho vai para o banco quando a tela sai de cena: outra tela por cima, app em segundo plano ou fim da conversa.
     // O compositor avisa as mudanças do campo no quadro seguinte; a última tecla antes de sair não pode ficar de fora.
@@ -463,8 +471,16 @@ fun ChatScreen(
                             Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             val subtitle = if (dmUser != null) presenceLabel(presence[dmUser.id]?.status) else channel?.topic
                             subtitle?.takeIf { it.isNotBlank() }?.let {
+                                // Num canal, tocar na descrição cortada abre o texto inteiro.
+                                val topicLabel = stringResource(Res.string.channel_topic_open)
+                                val openTopic = if (dmUser == null && channel != null) {
+                                    Modifier.clickable(onClickLabel = topicLabel) { topicOpen = true }
+                                } else {
+                                    Modifier
+                                }
                                 Text(
                                     it,
+                                    modifier = openTopic,
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -525,6 +541,17 @@ fun ChatScreen(
                                     onClick = {
                                         moreMenu = false
                                         notificationsOpen = true
+                                    },
+                                )
+                            }
+                            // Só quem tem `manage_channels` com certeza: sem a permissão, o menu não mostra nada de administração.
+                            if (canEditChannel) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.channel_settings)) },
+                                    leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                                    onClick = {
+                                        moreMenu = false
+                                        onOpenChannelSettings()
                                     },
                                 )
                             }
@@ -804,6 +831,15 @@ fun ChatScreen(
         }
     }
     state.pinnedList?.takeUnless { access.readDenied }?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
+    val fullTopic = channel?.topic?.takeIf { it.isNotBlank() }
+    if (topicOpen && channel != null && fullTopic != null) {
+        ChannelTopicSheet(
+            name = channel.name,
+            topic = fullTopic,
+            onEdit = if (canEditChannel) ({ topicOpen = false; onOpenChannelSettings() }) else null,
+            onDismiss = { topicOpen = false },
+        )
+    }
     if (notificationsOpen) {
         val closeNotifications = { notificationsOpen = false }
         when {
