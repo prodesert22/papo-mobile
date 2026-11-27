@@ -436,7 +436,6 @@ private fun Unlocked(
             val accountId = route.accountId?.takeIf { id -> accounts.any { it.id == id } }
             SettingsScreen(
                 session = session,
-                lock = lock,
                 appVersion = appVersion,
                 accountId = accountId,
                 initialTab = if (route.serverTab && accountId != null) SettingsTab.Server else SettingsTab.App,
@@ -458,7 +457,7 @@ private fun Unlocked(
             )
         }
         composable<SecurityRoute> {
-            SecurityScreen(lock, onBack = { navController.popBackStack() })
+            SecurityScreen(lock, graph.notificationPrivacy, onBack = { navController.popBackStack() })
         }
         composable<DeviceDataRoute> {
             DeviceDataScreen(onBack = { navController.popBackStack() })
