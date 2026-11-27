@@ -623,7 +623,7 @@
     <string name="notif_system_channel_push">Notificações push</string>
     <string name="notif_system_summary">Novas mensagens</string>
     <string name="notif_system_permission_title">Notificações do sistema</string>
-    <string name="notif_system_permission_body">O Papo pode avisar de menções, respostas e mensagens diretas na área de notificações do aparelho, enquanto o app estiver aberto. O Android vai pedir a sua permissão.</string>
+    <string name="notif_system_permission_body">O Papo pode avisar de menções, respostas e mensagens diretas na área de notificações do aparelho, com o app aberto e, nos servidores que enviam push, também com ele fechado. O Android vai pedir a sua permissão.</string>
     <string name="notif_system_permission_allow">Permitir</string>
     <string name="notif_system_permission_later">Agora não</string>
     <string name="notif_system_denied_title">Notificações desligadas no Android</string>
