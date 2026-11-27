@@ -638,6 +638,7 @@ fun ChatScreen(
                                 emojiIds = serverEmojis.idByName,
                                 unicodeEmojis = unicodeEmojis,
                                 repliedTo = { byId[it] },
+                                newest = messages.firstOrNull(),
                                 onRetry = viewModel::retry,
                                 onWithdraw = viewModel::withdraw,
                             )
