@@ -42,6 +42,7 @@ import chat.papo.mobile.resources.notif_suppress_mentions
 import chat.papo.mobile.resources.notif_suppress_mentions_note
 import chat.papo.mobile.resources.notif_sync_title
 import chat.papo.mobile.resources.notif_unmute
+import chat.papo.mobile.ui.components.NotificationPermissionNotice
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 
@@ -69,6 +70,7 @@ fun AccountNotificationsScreen(prefs: NotificationPrefs, onBack: () -> Unit) {
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            NotificationPermissionNotice()
             ScreenHeading(stringResource(Res.string.notif_level_title))
             RadioGroup {
                 listOf(NotificationLevel.All, NotificationLevel.OnlyMentions, NotificationLevel.Nothing).forEach { level ->

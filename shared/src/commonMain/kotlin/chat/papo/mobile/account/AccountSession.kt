@@ -3,16 +3,21 @@ package chat.papo.mobile.account
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.chat.AccessStore
 import chat.papo.mobile.chat.BlockList
+import chat.papo.mobile.chat.Channel
 import chat.papo.mobile.chat.ChatStore
+import chat.papo.mobile.chat.ConversationDirectory
+import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
 import chat.papo.mobile.chat.MentionBadges
 import chat.papo.mobile.chat.readableChannels
+import chat.papo.mobile.chat.NotificationDispatcher
 import chat.papo.mobile.chat.NotificationInbox
 import chat.papo.mobile.chat.NotificationPrefs
 import chat.papo.mobile.chat.ProfileCache
 import chat.papo.mobile.chat.RecentEmojis
 import chat.papo.mobile.chat.RecentSearchFilters
+import chat.papo.mobile.chat.SystemNotifications
 import chat.papo.mobile.chat.WebhookAvatars
 import chat.papo.mobile.chat.profileStamp
 import chat.papo.mobile.data.api.ApiException
@@ -44,6 +49,10 @@ class AccountSession(
     io: CoroutineDispatcher,
     background: CoroutineDispatcher = io,
     posterExtractor: VideoPosterExtractor? = null,
+    /** Onde as notificações do sistema aparecem; nulo onde a plataforma não tem (e então a conta não notifica fora do app). */
+    notifications: SystemNotifications? = null,
+    /** O nome da conta nas notificações (servidor e `@usuário`), lido a cada notificação porque o rótulo pode mudar. */
+    accountLabel: () -> String = { accountId },
 ) {
     private val driver = resources.driver
     val media: MediaCache = resources.media
@@ -70,6 +79,28 @@ class AccountSession(
         userId, inbox.state, chat.dms, combine(chat.channels, chat.access) { list, access -> readableChannels(list, access, userId) },
         notificationPrefs, scope,
     )
+    /** Decide quais mensagens do tempo real viram notificação do sistema; só existe se a plataforma notifica. */
+    private val dispatcher = notifications?.let { system ->
+        NotificationDispatcher(
+            accountId = accountId,
+            userId = userId,
+            accountLabel = accountLabel,
+            events = ws.events,
+            readMarks = chat.readMarks,
+            inbox = inbox,
+            prefs = notificationPrefs,
+            directory = object : ConversationDirectory {
+                override fun channel(id: String): Channel? = readableChannels(chat.channels.value, chat.access.value, userId).firstOrNull { it.id == id }
+                override fun dm(id: String): Dm? = chat.dms.value.firstOrNull { it.id == id }
+                override fun userName(id: String): String? = chat.users.value[id]?.displayName
+            },
+            viewing = chat.viewingChannel,
+            mentionCount = { id -> mentions.mentions.value.let { it.perChannel[id] ?: it.perDm[id] ?: 0 } },
+            notifier = system.notifier,
+            texts = system.texts,
+            scope = scope,
+        )
+    }
     /** Avatares dos webhooks: um pedido ao servidor por sessão, depois o cache de mídia cifrado da conta. */
     val webhookAvatars = WebhookAvatars(api, media, scope)
     /** Quem esta conta bloqueou; a lista é desta sessão e não vale para outra conta. */
@@ -84,6 +115,8 @@ class AccountSession(
         if (client.cookies.get() == null) return
         if (!started) {
             started = true
+            // Antes do WebSocket: o primeiro evento não pode passar sem quem o escute.
+            dispatcher?.start()
             chat.start()
             blocks.start()
             inbox.start()

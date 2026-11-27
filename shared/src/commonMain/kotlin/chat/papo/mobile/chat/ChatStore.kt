@@ -161,7 +161,10 @@ class ChatStore(
     val connection: StateFlow<WsState> get() = ws.state
 
     private val hasOlder = HashMap<String, Boolean>()
-    private var viewing: String? = null
+    private val _viewing = MutableStateFlow<String?>(null)
+
+    /** O canal que está na tela agora, ou nulo. As notificações do sistema não avisam da conversa que já se lê. */
+    val viewingChannel: StateFlow<String?> = _viewing.asStateFlow()
     private var lastTypingSent: Pair<String, TimeMark>? = null
     private var lastActivitySent: TimeMark? = null
     private val typingMarks = HashMap<Pair<String, String>, TimeMark>()
@@ -186,17 +189,17 @@ class ChatStore(
         runSync()
         // Quem lê um trecho antigo fica onde está; o fim do histórico vem quando voltar para ele. Canal que
         // a leitura nega nem é pedido: seria um 403 certo.
-        viewing?.let { if (!isDetached(it) && !readDenied(it)) runCatching { refreshLatest(it) } }
+        _viewing.value?.let { if (!isDetached(it) && !readDenied(it)) runCatching { refreshLatest(it) } }
     }
 
     /** Canal que está na tela agora; mensagens dele não contam como não lidas. */
     fun setViewing(channelId: String?) {
-        viewing = channelId
+        _viewing.value = channelId
     }
 
     /** [channelId] deixou de estar na tela. Só vale se ele ainda é o que está: outro, já marcado depois, fica. */
     fun clearViewing(channelId: String) {
-        if (viewing == channelId) viewing = null
+        if (_viewing.value == channelId) _viewing.value = null
     }
 
     suspend fun runSync() {
@@ -892,7 +895,7 @@ class ChatStore(
         val author = authorId?.let { q.selectUser(it).executeAsOneOrNull()?.username }
         q.setChannelLastMessage(messageId, createdAt, text, author, channelId)
         val mine = authorId == myUserId
-        val unseen = if (mine || viewing == channelId) 0L else 1L
+        val unseen = if (mine || _viewing.value == channelId) 0L else 1L
         q.setDmLastMessage(messageId, createdAt, text, author, unseen, channelId)
         if (mine) {
             q.setChannelRead(messageId, channelId)

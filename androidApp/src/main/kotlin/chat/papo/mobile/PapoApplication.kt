@@ -15,7 +15,7 @@ class PapoApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        graph = createAndroidGraph(this, activities)
+        graph = createAndroidGraph(this, activities, R.drawable.ic_stat_notification)
         CallService.hangupHandler = { graph.currentSession()?.calls?.leave() }
 
         // O bloqueio automático conta o tempo com o app inteiro fora da tela,

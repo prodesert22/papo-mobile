@@ -5,6 +5,10 @@ import chat.papo.mobile.account.AccountManager
 import chat.papo.mobile.account.AccountStore
 import chat.papo.mobile.account.AddAccountResult
 import chat.papo.mobile.account.InvalidServerUrl
+import chat.papo.mobile.chat.ConversationNotification
+import chat.papo.mobile.chat.NotificationTexts
+import chat.papo.mobile.chat.SystemNotifications
+import chat.papo.mobile.chat.SystemNotifier
 import chat.papo.mobile.core.AppDispatchers
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.db.registry.RegistryDb
@@ -142,7 +146,7 @@ class AccountManagerTest {
         private val dispatchers = AppDispatchers(dispatcher, dispatcher, dispatcher)
         val store = AccountStore(RegistryDb(driver), dispatcher)
 
-        fun manager(scope: TestScope) = AccountManager(
+        fun manager(scope: TestScope, notifications: SystemNotifications? = null) = AccountManager(
             store = store,
             engine = backend.engine,
             prefs = prefs,
@@ -150,6 +154,7 @@ class AccountManagerTest {
             scope = scope.backgroundScope,
             openResources = { TestResources.inMemory(dispatcher) },
             deleteLocalData = { deleted += it },
+            notifications = notifications,
         ).also { it.setForeground(false) } // sem tempo real: o motor falso não fala WebSocket
     }
 
@@ -257,6 +262,30 @@ class AccountManagerTest {
         assertEquals(listOf(ana.account.id), manager.accounts.value.map { it.id })
         assertNull(manager.session(bia.account.id))
         assertEquals(ana.account.id, manager.activeId.value)
+    }
+
+    @Test
+    fun removerContaTiraAsNotificacoesDoSistemaSoDela() = runTest {
+        val removed = mutableListOf<String>()
+        val notifier = object : SystemNotifier {
+            override fun isPermissionGranted() = true
+            override suspend fun post(notification: ConversationNotification) = Unit
+            override fun cancelConversation(accountId: String, conversationId: String) = Unit
+            override fun cancelAccount(accountId: String) = Unit
+            override fun removeAccount(accountId: String) {
+                removed += accountId
+            }
+        }
+        val f = Fixture(this)
+        val manager = f.manager(this, SystemNotifications(notifier, NotificationTexts("Anexo", "usuário", "Nova mensagem"))).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+
+        manager.remove(bia.account.id)
+        runCurrent()
+
+        assertEquals(listOf(bia.account.id), removed)
+        assertEquals(listOf(ana.account.id), manager.accounts.value.map { it.id })
     }
 
     @Test

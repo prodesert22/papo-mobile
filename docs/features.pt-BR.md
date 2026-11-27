@@ -158,12 +158,23 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   diretas. As conversas diretas também podem ser silenciadas.
 - Silenciar tira o círculo de mensagem nova e esmaece o canal, mas as menções
   continuam contando. Suprimir `@everyone` ou as menções as tira da contagem.
+- Notificações do sistema com o app aberto: uma menção, uma resposta, `@everyone`
+  ou uma mensagem direta aparece na área de notificações do Android, uma
+  notificação por conversa com as últimas mensagens, agrupadas por conta. As
+  configurações de notificação da conta decidem quais aparecem, e uma conversa
+  aberta nunca notifica. Tocar numa notificação pede o desbloqueio se o bloqueio
+  do app estiver ligado e depois abre a mensagem. O Android 13 ou mais pede a
+  permissão uma vez, com uma explicação curta antes; a tela de notificações da
+  conta explica como ligá-la de novo.
 
 ## Limitações atuais
 
-- Ainda sem notificações do sistema: nada aparece fora do app, e as mensagens
-  só chegam com ele aberto. As configurações de notificação já valem para as
-  contagens e vão valer para as notificações do sistema quando elas chegarem.
+- As notificações do sistema só chegam com o app aberto, porque a conexão com o
+  servidor se fecha quando o app sai da tela. Nada chega com o app fechado ou em
+  segundo plano até o push do servidor ser suportado.
+- Com o nível "todas as mensagens" só neste celular, as mensagens comuns
+  notificam depois de cerca de um segundo, o tempo que o app espera para saber
+  do servidor se a mensagem é uma menção.
 - As configurações de notificação ficam neste celular: o servidor ainda não as
   guarda, então elas não seguem você no web nem em outro celular.
 - A contagem de menções lê até 500 notificações por conta e mostra "99+" além

@@ -157,12 +157,23 @@ release notes in [releases/](../releases/) describe each version's changes.
   hide `@everyone` or direct mentions. Direct conversations can be muted too.
 - Muting removes the new-message dot and dims the channel, but mentions still
   count. Hiding `@everyone` or mentions removes them from the count.
+- System notifications while the app is open: a mention, a reply, `@everyone` or
+  a direct message shows in the Android notification shade, one notification per
+  conversation with the latest messages, grouped by account. The account's
+  notification settings decide which ones appear, and a conversation you have
+  open never notifies. Tapping one asks for the unlock if the app lock is on and
+  then opens the message. Android 13 or later asks for the permission once, with
+  a short explanation first; the account's notification screen explains how to
+  turn it back on.
 
 ## Current limitations
 
-- No system notifications yet: nothing appears outside the app, and messages
-  arrive only while it is open. The notification settings already apply to the
-  counts and will apply to system notifications when they arrive.
+- System notifications come only while the app is open, because the connection
+  to the server closes when the app leaves the screen. Nothing arrives with the
+  app closed or in the background until the server's push is supported.
+- With the server's "all messages" level only on this phone, ordinary messages
+  notify after about a second, the time the app waits to learn from the server
+  whether the message is a mention.
 - The notification settings stay on this phone: the server does not store them
   yet, so they do not follow you to the web or to another phone.
 - The mention count reads up to 500 notifications per account and shows "99+"

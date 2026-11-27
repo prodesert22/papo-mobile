@@ -4,6 +4,12 @@ import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.account.AccountManager
 import chat.papo.mobile.account.AccountResources
 import chat.papo.mobile.account.AccountStore
+import chat.papo.mobile.chat.NotificationOpenRequests
+import chat.papo.mobile.chat.NotificationPermission
+import chat.papo.mobile.chat.NotificationPermissionPrompt
+import chat.papo.mobile.chat.NotificationTexts
+import chat.papo.mobile.chat.SystemNotifications
+import chat.papo.mobile.chat.SystemNotifier
 import chat.papo.mobile.core.AppDispatchers
 import chat.papo.mobile.core.crypto.Crypto
 import chat.papo.mobile.core.crypto.KeyRing
@@ -15,6 +21,10 @@ import chat.papo.mobile.media.AudioEngineFactory
 import chat.papo.mobile.media.AudioPlayback
 import chat.papo.mobile.media.MediaCache
 import chat.papo.mobile.media.VideoPosterExtractor
+import chat.papo.mobile.resources.Res
+import chat.papo.mobile.resources.notif_system_attachment
+import chat.papo.mobile.resources.notif_system_empty
+import chat.papo.mobile.resources.notif_system_unknown_user
 import chat.papo.mobile.security.AppLock
 import chat.papo.mobile.security.AppPrefs
 import chat.papo.mobile.security.LockState
@@ -31,6 +41,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.getString
 
 /** O que cada plataforma precisa fornecer ao código comum. */
 class PlatformDeps(
@@ -52,6 +63,10 @@ class PlatformDeps(
     val webPlayerData: WebPlayerData? = null,
     /** Motor do player de áudio; null onde a plataforma ainda não tem um, e então os áudios aparecem como arquivos. */
     val audio: AudioEngineFactory? = null,
+    /** Mostra as notificações do sistema; null onde a plataforma ainda não tem, e então nada notifica fora do app. */
+    val notifier: SystemNotifier? = null,
+    /** A permissão de notificar, para a interface pedi-la; null junto com [notifier]. */
+    val notificationPermission: NotificationPermission? = null,
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -90,6 +105,16 @@ class AppGraph(private val platform: PlatformDeps) {
 
     val appVersion: String get() = platform.appVersion
 
+    /** A permissão de notificar do sistema; null onde a plataforma não tem notificações. */
+    val notificationPermission: NotificationPermission? get() = platform.notificationPermission
+
+    /** A explicação única que antecede o pedido da permissão; null onde não há permissão a pedir. */
+    val notificationPrompt: NotificationPermissionPrompt? =
+        platform.notificationPermission?.let { NotificationPermissionPrompt(it, platform.prefs) }
+
+    /** O que tocar numa notificação pede à tela: abrir uma conversa de uma conta. */
+    val notificationOpens = NotificationOpenRequests()
+
     val lock = AppLock(
         keyStore = platform.keyStore,
         crypto = platform.crypto,
@@ -107,6 +132,8 @@ class AppGraph(private val platform: PlatformDeps) {
 
     /** App voltou para a tela: confere o bloqueio e religa o tempo real das contas. */
     fun onForeground() {
+        // A pessoa pode ter mudado a permissão nas configurações do Android enquanto o app estava fora da tela.
+        platform.notificationPermission?.refresh()
         lock.onForeground()
         currentSession()?.accounts?.setForeground(true)
     }
@@ -130,6 +157,16 @@ class AppGraph(private val platform: PlatformDeps) {
             key.fill(0)
         }
         val sessionScope = CoroutineScope(SupervisorJob() + platform.dispatchers.main)
+        val notifications = platform.notifier?.let {
+            SystemNotifications(
+                it,
+                NotificationTexts(
+                    attachment = getString(Res.string.notif_system_attachment),
+                    unknownUser = getString(Res.string.notif_system_unknown_user),
+                    emptyMessage = getString(Res.string.notif_system_empty),
+                ),
+            )
+        }
         val accounts = AccountManager(
             store = AccountStore(RegistryDb(driver), platform.dispatchers.io),
             engine = platform.httpEngine,
@@ -152,6 +189,7 @@ class AppGraph(private val platform: PlatformDeps) {
                 MediaCache.deleteDirectory(mediaDir(id))
             },
             posterExtractor = platform.videoPosters,
+            notifications = notifications,
         )
         accounts.load()
         val audio = platform.audio?.let { engines ->
