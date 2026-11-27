@@ -672,6 +672,28 @@
     <string name="settings_notif_content_always">Ocultar sempre</string>
     <string name="settings_notif_content_note">Vale para as notificações que o próprio Papo monta. As notificações push, que o Android mostra sozinho, seguem a prévia que o servidor envia e não mudam com esta opção.</string>
     <string name="notif_hidden_text">Nova mensagem</string>
+    <string name="about_name">Papo Mobile</string>
+    <string name="about_version">Versão %1$s</string>
+    <string name="about_beta">Beta %1$d</string>
+    <string name="about_build">Build %1$d</string>
+    <string name="about_debug">Compilação de desenvolvimento</string>
+    <string name="about_copy_version">Copiar versão</string>
+    <string name="about_version_copied">Versão copiada</string>
+    <string name="about_section_project">Projeto</string>
+    <string name="about_link_source">Código-fonte</string>
+    <string name="about_link_releases">Versões e notas</string>
+    <string name="about_link_server">Servidor Papo</string>
+    <string name="about_link_web">Cliente web</string>
+    <string name="about_link_terminal">Cliente de terminal</string>
+    <string name="about_link_failed">Não há um aplicativo neste aparelho que abra o link.</string>
+    <string name="about_link_copied">Link copiado</string>
+    <string name="about_section_developer">Desenvolvedor</string>
+    <string name="about_developer">Desenvolvido por %1$s</string>
+    <string name="about_section_license">Licença</string>
+    <string name="about_license_notice">O Papo Mobile é software livre, distribuído sob a GNU Affero General Public License v3.0, sem nenhuma garantia.</string>
+    <string name="about_license_read">Ler a licença</string>
+    <string name="about_license_title">GNU AGPL v3.0</string>
+    <string name="about_license_failed">Não foi possível ler o texto da licença.</string>
     <!-- fim da trilha A -->
 
     <!-- 0.9.0 · trilha B: tema -->

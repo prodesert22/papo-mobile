@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,6 +66,7 @@ import chat.papo.mobile.ui.chat.ChatScreen
 import chat.papo.mobile.ui.chat.ChatViewModel
 import chat.papo.mobile.ui.chat.MessageTarget
 import chat.papo.mobile.ui.components.AudioBar
+import chat.papo.mobile.ui.components.ExternalUriHandler
 import chat.papo.mobile.ui.components.LocalAudioPlayback
 import chat.papo.mobile.ui.components.LocalNotificationPermission
 import chat.papo.mobile.ui.components.LocalPlatformUi
@@ -221,7 +223,13 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
     // Fica fora da tela principal para sobreviver a girar o aparelho; é esvaziado ao travar.
     val chatStores = viewModel { ParkedChatStores() }
 
-    CompositionLocalProvider(LocalPlatformUi provides platformUi, LocalNotificationPermission provides graph.notificationPermission) {
+    // Todo link que o Compose abre passa pelo filtro da regra 6 (só http e https), por `platformUi.openExternalUrl`.
+    val uriHandler = remember(platformUi) { ExternalUriHandler(platformUi::openExternalUrl) }
+    CompositionLocalProvider(
+        LocalPlatformUi provides platformUi,
+        LocalNotificationPermission provides graph.notificationPermission,
+        LocalUriHandler provides uriHandler,
+    ) {
       // ---- 0.9.0 · trilha B: tema global ----
       val globalTheme by graph.theme.spec.collectAsStateWithLifecycle()
       PapoTheme(globalTheme) {
