@@ -39,7 +39,12 @@ enum class MuteDuration(val length: Duration?) {
     fun from(now: Instant): Mute = Mute(length?.let { now + it })
 }
 
-/** O geral de uma conta: vale para todo canal que não escolheu o próprio valor. Os padrões são os do plano. */
+/**
+ * O geral de uma conta: vale para todo canal que não escolheu o próprio valor. Os padrões são os do plano.
+ *
+ * [level] é o nível deste aparelho para os canais **sem** sincronização. Com [sync] ligado (o padrão) o nível de cada
+ * canal é o que o servidor guarda (`notification_settings`), e este não é consultado.
+ */
 data class ServerNotificationSettings(
     val level: NotificationLevel = NotificationLevel.OnlyMentions,
     val suppressEveryone: Boolean = false,
@@ -48,7 +53,10 @@ data class ServerNotificationSettings(
     val sync: Boolean = true,
 )
 
-/** Um canal. Campo nulo quer dizer "Usar padrão do servidor". */
+/**
+ * Um canal. Campo nulo quer dizer "Usar padrão do servidor". [level] é o nível deste aparelho e só vale com a
+ * sincronização desligada; sincronizado, o nível é o do servidor.
+ */
 data class ChannelNotificationSettings(
     val level: NotificationLevel? = null,
     val suppressEveryone: Boolean? = null,
@@ -61,12 +69,9 @@ data class ChannelNotificationSettings(
         get() = level == null && suppressEveryone == null && suppressMentions == null && mute == null && sync == null
 }
 
-/** Uma conversa direta: só tem silêncio, e a sincronização segue o servidor se for nula. */
-data class DmNotificationSettings(
-    val mute: Mute? = null,
-    val sync: Boolean? = null,
-) {
-    val isDefault: Boolean get() = mute == null && sync == null
+/** Uma conversa direta: só tem silêncio (o servidor não tem nível para elas). */
+data class DmNotificationSettings(val mute: Mute? = null) {
+    val isDefault: Boolean get() = mute == null
 }
 
 /** De quem é o silêncio que vale. */
@@ -87,32 +92,43 @@ data class EffectiveNotifications(
     val suppressEveryone: Boolean,
     val suppressMentions: Boolean,
     val mute: ActiveMute?,
-    /** A opção "Sincronizar com o backend" que vale; se o backend aceita é outra pergunta (`NotificationPrefs.isSyncing`). */
+    /** O nível vem do servidor (canal sincronizado) ou é deste aparelho. */
     val sync: Boolean,
 ) {
     val muted: Boolean get() = mute != null
 }
 
-/** O que vale para uma DM: só o silêncio (o do servidor não conta) e a sincronização. */
-data class EffectiveDm(val mute: ActiveMute?, val sync: Boolean) {
+/** O que vale para uma DM: só o silêncio, e o do servidor não conta. */
+data class EffectiveDm(val mute: ActiveMute?) {
     val muted: Boolean get() = mute != null
 }
 
-/** Os valores do [channel] sobre o padrão do [server] em [now]. Silêncio que já acabou conta como não silenciado. */
-fun effective(server: ServerNotificationSettings, channel: ChannelNotificationSettings, now: Instant): EffectiveNotifications {
+/**
+ * Os valores do [channel] sobre o padrão do [server] em [now]. Silêncio que já acabou conta como não silenciado.
+ *
+ * O nível: com a sincronização ligada (a do canal, senão a do servidor) é [serverLevel], o que o servidor guarda para o
+ * canal; desligada, é o do canal neste aparelho, senão o geral deste aparelho. Quem não passa [serverLevel] só tem
+ * "só menções" para os canais sincronizados, o que serve a quem não olha o nível (silêncio, círculo, número).
+ */
+fun effective(
+    server: ServerNotificationSettings,
+    channel: ChannelNotificationSettings,
+    now: Instant,
+    serverLevel: NotificationLevel = NotificationLevel.OnlyMentions,
+): EffectiveNotifications {
+    val sync = channel.sync ?: server.sync
     val own = channel.mute?.takeIf { it.isActive(now) }?.let { ActiveMute(MuteSource.Channel, it.until) }
     val inherited = server.mute?.takeIf { it.isActive(now) }?.let { ActiveMute(MuteSource.Server, it.until) }
     return EffectiveNotifications(
-        level = channel.level ?: server.level,
+        level = if (sync) serverLevel else channel.level ?: server.level,
         suppressEveryone = channel.suppressEveryone ?: server.suppressEveryone,
         suppressMentions = channel.suppressMentions ?: server.suppressMentions,
         mute = own ?: inherited,
-        sync = channel.sync ?: server.sync,
+        sync = sync,
     )
 }
 
-/** Os valores de uma DM. Silenciar o servidor não cala as DMs. */
-fun effectiveDm(server: ServerNotificationSettings, dm: DmNotificationSettings, now: Instant): EffectiveDm {
-    val own = dm.mute?.takeIf { it.isActive(now) }?.let { ActiveMute(MuteSource.Channel, it.until) }
-    return EffectiveDm(mute = own, sync = dm.sync ?: server.sync)
-}
+/** Os valores de uma DM. Silenciar o servidor não cala as DMs, e o servidor não tem nível para elas. */
+@Suppress("UNUSED_PARAMETER")
+fun effectiveDm(server: ServerNotificationSettings, dm: DmNotificationSettings, now: Instant): EffectiveDm =
+    EffectiveDm(mute = dm.mute?.takeIf { it.isActive(now) }?.let { ActiveMute(MuteSource.Channel, it.until) })

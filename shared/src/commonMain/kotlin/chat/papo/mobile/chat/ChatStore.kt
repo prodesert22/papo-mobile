@@ -283,6 +283,9 @@ class ChatStore(
         withContext(io) { q.transaction { storeChannels(channelList) } }
     }
 
+    /** Relê os canais para conferir uma mudança que pode ter chegado ao servidor. Falha como qualquer leitura; nada é reenviado. */
+    suspend fun reloadChannels() = refreshChannels()
+
     /**
      * Pede a releitura das permissões depois de um 403: o que o app sabia ficou velho (um `PUT /roles` não
      * avisa ninguém). No máximo uma a cada poucos segundos; nada é reenviado (regra 15).

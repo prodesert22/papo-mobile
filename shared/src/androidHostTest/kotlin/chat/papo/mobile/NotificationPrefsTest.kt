@@ -7,10 +7,10 @@ import chat.papo.mobile.chat.Mute
 import chat.papo.mobile.chat.MuteDuration
 import chat.papo.mobile.chat.MuteSource
 import chat.papo.mobile.chat.NotificationLevel
+import chat.papo.mobile.chat.NoServerChannelLevels
 import chat.papo.mobile.chat.NotificationPrefs
-import chat.papo.mobile.chat.NotificationSettingsRemote
+import chat.papo.mobile.chat.ServerChannelLevels
 import chat.papo.mobile.chat.ServerNotificationSettings
-import chat.papo.mobile.chat.UnavailableNotificationSettingsRemote
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.db.account.MetaQueries
 import kotlinx.coroutines.CoroutineScope
@@ -44,9 +44,9 @@ class NotificationPrefsTest {
 
     private fun TestScope.prefs(
         meta: MetaQueries,
-        remote: NotificationSettingsRemote = UnavailableNotificationSettingsRemote,
+        levels: ServerChannelLevels = NoServerChannelLevels,
         scope: CoroutineScope = backgroundScope,
-    ) = NotificationPrefs(meta, scope, StandardTestDispatcher(testScheduler), remote, clock())
+    ) = NotificationPrefs(meta, scope, StandardTestDispatcher(testScheduler), levels, clock())
 
     private fun meta() = AccountDb(TestResources.driver()).metaQueries
 
@@ -76,7 +76,7 @@ class NotificationPrefsTest {
         runCurrent()
         val server = ServerNotificationSettings(NotificationLevel.All, suppressEveryone = true, sync = false)
         val channel = ChannelNotificationSettings(NotificationLevel.Nothing, suppressMentions = true, mute = Mute(start + 1.days))
-        val dm = DmNotificationSettings(Mute(null), sync = true)
+        val dm = DmNotificationSettings(Mute(null))
         prefs.updateServer { server }
         prefs.updateChannel("c1") { channel }
         prefs.updateDm("d1") { dm }
@@ -99,9 +99,10 @@ class NotificationPrefsTest {
         prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
         prefs.updateChannel("c1") { it.copy(suppressEveryone = true) }
         assertEquals(ChannelNotificationSettings(NotificationLevel.All, suppressEveryone = true), prefs.channels.value["c1"])
-        prefs.updateDm("d1") { it.copy(sync = false) }
         prefs.updateDm("d1") { it.copy(mute = Mute(null)) }
-        assertEquals(DmNotificationSettings(Mute(null), sync = false), prefs.dms.value["d1"])
+        assertEquals(DmNotificationSettings(Mute(null)), prefs.dms.value["d1"])
+        prefs.updateDm("d2") { it.copy(mute = MuteDuration.Hour1.from(start)) }
+        assertEquals(setOf("d1", "d2"), prefs.dms.value.keys)
     }
 
     @Test
@@ -111,7 +112,7 @@ class NotificationPrefsTest {
         runCurrent()
         prefs.updateServer { it.copy(level = NotificationLevel.Nothing) }
         prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
-        prefs.updateDm("d1") { it.copy(sync = false) }
+        prefs.updateDm("d1") { it.copy(mute = Mute(null)) }
         runCurrent()
         assertTrue(meta.keysWithPrefix("notif:").executeAsList().size == 3)
 
@@ -150,7 +151,7 @@ class NotificationPrefsTest {
         meta.put(NotificationPrefs.channelKey("c2"), NotificationPrefs.encodeChannel(ChannelNotificationSettings(level = NotificationLevel.All)))
         meta.put(NotificationPrefs.channelKey("c3"), NotificationPrefs.encodeChannel(ChannelNotificationSettings(suppressMentions = true)))
         meta.put(NotificationPrefs.dmKey("d1"), NotificationPrefs.encodeDm(DmNotificationSettings(Mute(null))))
-        meta.put(NotificationPrefs.dmKey("d2"), NotificationPrefs.encodeDm(DmNotificationSettings(sync = false)))
+        meta.put(NotificationPrefs.dmKey("d2"), NotificationPrefs.encodeDm(DmNotificationSettings(Mute(null))))
         val prefs = prefs(meta)
 
         // Nada rodou ainda: a leitura do banco só termina no `runCurrent`.
@@ -168,7 +169,7 @@ class NotificationPrefsTest {
             ),
             prefs.channels.value,
         )
-        assertEquals(mapOf("d2" to DmNotificationSettings(sync = false)), prefs.dms.value)
+        assertEquals(mapOf("d2" to DmNotificationSettings(Mute(null))), prefs.dms.value)
         assertEquals(ServerNotificationSettings(suppressEveryone = true), meta.server())
         assertNull(meta.channel("c2"))
         assertNull(meta.dm("d1"))
@@ -180,49 +181,13 @@ class NotificationPrefsTest {
         runCurrent()
         assertEquals(NotificationLevel.OnlyMentions, prefs.effectiveFor("c1").level)
         prefs.updateServer { it.copy(level = NotificationLevel.All, mute = MuteDuration.Hour1.from(start)) }
-        assertEquals(NotificationLevel.All, prefs.effectiveFor("c1").level)
+        // Sincronizado (o padrão), o nível geral do aparelho não vale: o do servidor, sem valor, é "só menções".
+        assertEquals(NotificationLevel.OnlyMentions, prefs.effectiveFor("c1").level)
         assertEquals(ActiveMute(MuteSource.Server, start + 1.hours), prefs.effectiveFor("c1").mute)
-        prefs.updateChannel("c1") { it.copy(level = NotificationLevel.Nothing, mute = Mute(null)) }
-        assertEquals(NotificationLevel.Nothing, prefs.effectiveFor("c1").level)
+        prefs.updateChannel("c1") { it.copy(mute = Mute(null)) }
         assertEquals(ActiveMute(MuteSource.Channel, null), prefs.effectiveFor("c1").mute)
-        // A DM não herda o silêncio do servidor, mas herda a sincronização.
+        // A DM não herda o silêncio do servidor.
         assertNull(prefs.effectiveForDm("d1").mute)
-        prefs.updateServer { it.copy(sync = false) }
-        assertFalse(prefs.effectiveForDm("d1").sync)
-    }
-
-    @Test
-    fun comOBackendIndisponivelNadaSincronizaEOValorFicaNoAparelho() = runTest {
-        val meta = meta()
-        val prefs = prefs(meta)
-        runCurrent()
-        assertTrue(prefs.effectiveFor("c1").sync) // a opção está ligada...
-        assertFalse(prefs.isSyncing("c1")) // ...mas não há para onde mandar
-        assertFalse(prefs.isSyncingDm("d1"))
-        prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
-        runCurrent()
-        assertEquals(NotificationLevel.All, meta.channel("c1")?.level) // fica guardado no aparelho
-    }
-
-    @Test
-    fun comOBackendDisponivelSincronizaSoOQueEstaLigado() = runTest {
-        val remote = object : NotificationSettingsRemote {
-            override val available = true
-        }
-        val prefs = prefs(meta(), remote)
-        runCurrent()
-        assertTrue(prefs.isSyncing("c1"))
-        assertTrue(prefs.isSyncingDm("d1"))
-        prefs.updateChannel("c1") { it.copy(sync = false) }
-        prefs.updateDm("d2") { it.copy(sync = false) }
-        assertFalse(prefs.isSyncing("c1"))
-        assertTrue(prefs.isSyncing("c2"))
-        assertFalse(prefs.isSyncingDm("d2"))
-        prefs.updateServer { it.copy(sync = false) }
-        assertFalse(prefs.isSyncing("c2"))
-        assertFalse(prefs.isSyncingDm("d1"))
-        prefs.updateChannel("c2") { it.copy(sync = true) } // o canal liga mesmo com o servidor desligado
-        assertTrue(prefs.isSyncing("c2"))
     }
 
     @Test
@@ -233,7 +198,7 @@ class NotificationPrefsTest {
         prefs.updateChannel("c1") { it.copy(mute = MuteDuration.Minutes15.from(start)) }
         prefs.updateChannel("c2") { it.copy(level = NotificationLevel.All, mute = MuteDuration.Minutes15.from(start)) }
         prefs.updateDm("d1") { it.copy(mute = MuteDuration.Hour1.from(start)) }
-        prefs.updateDm("d2") { it.copy(mute = MuteDuration.Hour1.from(start), sync = false) }
+        prefs.updateDm("d2") { it.copy(mute = MuteDuration.Hours3.from(start)) }
         prefs.updateServer { it.copy(mute = MuteDuration.Hours3.from(start)) }
         runCurrent()
 
@@ -252,14 +217,16 @@ class NotificationPrefsTest {
 
         advanceTimeBy(45.minutes)
         runCurrent()
-        assertEquals(mapOf("d2" to DmNotificationSettings(sync = false)), prefs.dms.value)
+        assertEquals(mapOf("d2" to DmNotificationSettings(MuteDuration.Hours3.from(start))), prefs.dms.value)
         assertNull(meta.dm("d1"))
-        assertEquals(DmNotificationSettings(sync = false), meta.dm("d2"))
+        assertEquals(DmNotificationSettings(MuteDuration.Hours3.from(start)), meta.dm("d2"))
 
         advanceTimeBy(2.hours)
         runCurrent()
         assertEquals(ServerNotificationSettings(), prefs.server.value)
         assertNull(meta.raw(NotificationPrefs.SERVER_KEY))
+        assertEquals(emptyMap(), prefs.dms.value)
+        assertNull(meta.dm("d2"))
         assertFalse(prefs.effectiveFor("c2").muted)
     }
 
@@ -347,7 +314,7 @@ class NotificationPrefsTest {
         runCurrent()
         a.updateServer { it.copy(level = NotificationLevel.Nothing) }
         a.updateChannel("mesmo-id") { it.copy(mute = Mute(null)) }
-        a.updateDm("mesmo-id") { it.copy(sync = false) }
+        a.updateDm("mesmo-id") { it.copy(mute = Mute(null)) }
         runCurrent()
         assertEquals(ServerNotificationSettings(), b.server.value)
         assertEquals(emptyMap(), b.channels.value)
@@ -373,7 +340,7 @@ class NotificationPrefsTest {
         val prefs = prefs(meta)
         runCurrent()
         assertTrue(prefs.loaded.value) // a leitura falhou: valem os padrões
-        prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
+        prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All, sync = false) }
         prefs.updateServer { it.copy(mute = MuteDuration.Minutes15.from(start)) }
         runCurrent() // as gravações falham sem estourar no escopo
         assertEquals(NotificationLevel.All, prefs.effectiveFor("c1").level)

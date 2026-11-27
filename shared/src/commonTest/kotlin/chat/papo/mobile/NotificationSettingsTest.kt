@@ -93,7 +93,8 @@ class NotificationSettingsTest {
     fun cadaCampoHerdaSozinho() {
         val custom = ServerNotificationSettings(NotificationLevel.All, suppressEveryone = true, suppressMentions = false)
         val result = effective(custom, ChannelNotificationSettings(suppressMentions = true), now)
-        assertEquals(NotificationLevel.All, result.level)
+        // Sincronizado (o padrão), o nível não é o geral do aparelho: é o do servidor, que aqui não foi dado.
+        assertEquals(NotificationLevel.OnlyMentions, result.level)
         assertTrue(result.suppressEveryone)
         assertTrue(result.suppressMentions)
         assertTrue(result.sync)
@@ -142,23 +143,51 @@ class NotificationSettingsTest {
         assertFalse(ChannelNotificationSettings(sync = true).isDefault)
         assertTrue(DmNotificationSettings().isDefault)
         assertFalse(DmNotificationSettings(mute = Mute()).isDefault)
-        assertFalse(DmNotificationSettings(sync = false).isDefault)
     }
 
     @Test
-    fun dmSemEscolhaNaoEstaSilenciadaEUsaASincronizacaoDoServidor() {
-        val result = effectiveDm(ServerNotificationSettings(sync = false), DmNotificationSettings(), now)
+    fun dmSemEscolhaNaoEstaSilenciada() {
+        val result = effectiveDm(ServerNotificationSettings(), DmNotificationSettings(), now)
         assertNull(result.mute)
         assertFalse(result.muted)
-        assertFalse(result.sync)
     }
 
     @Test
-    fun dmTemOSeuSilencioEAPropriaSincronizacao() {
-        val result = effectiveDm(ServerNotificationSettings(sync = false), DmNotificationSettings(Mute(later), sync = true), now)
+    fun dmTemOSeuSilencio() {
+        val result = effectiveDm(ServerNotificationSettings(), DmNotificationSettings(Mute(later)), now)
         assertEquals(ActiveMute(MuteSource.Channel, later), result.mute)
         assertTrue(result.muted)
-        assertTrue(result.sync)
+    }
+
+    // O nível do canal: sincronizado é o do servidor; sem sincronização é o do canal neste aparelho, senão o geral.
+
+    private fun level(server: ServerNotificationSettings, channel: ChannelNotificationSettings, serverLevel: NotificationLevel) =
+        effective(server, channel, now, serverLevel).level
+
+    @Test
+    fun canalSincronizadoUsaONivelDoServidorEIgnoraOsDoAparelho() {
+        val server = ServerNotificationSettings(level = NotificationLevel.Nothing)
+        val channel = ChannelNotificationSettings(level = NotificationLevel.All)
+        // Sincronização do servidor ligada e a do canal herdada.
+        assertEquals(NotificationLevel.All, level(server, ChannelNotificationSettings(), NotificationLevel.All))
+        assertEquals(NotificationLevel.All, level(server, channel, NotificationLevel.All))
+        assertTrue(effective(server, channel, now).sync)
+        assertEquals(NotificationLevel.OnlyMentions, level(server, channel, NotificationLevel.OnlyMentions))
+        // Sincronização do canal ligada de propósito, com a do servidor desligada.
+        val off = server.copy(sync = false)
+        assertEquals(NotificationLevel.OnlyMentions, level(off, channel.copy(sync = true), NotificationLevel.OnlyMentions))
+    }
+
+    @Test
+    fun canalSemSincronizacaoUsaONivelDoAparelhoDoCanalSenaoOGeral() {
+        val server = ServerNotificationSettings(level = NotificationLevel.Nothing)
+        // Desligada no canal (o servidor segue ligado).
+        assertEquals(NotificationLevel.All, level(server, ChannelNotificationSettings(NotificationLevel.All, sync = false), NotificationLevel.OnlyMentions))
+        assertEquals(NotificationLevel.Nothing, level(server, ChannelNotificationSettings(sync = false), NotificationLevel.OnlyMentions))
+        // Desligada no servidor inteiro e herdada pelo canal.
+        val off = server.copy(sync = false)
+        assertEquals(NotificationLevel.All, level(off, ChannelNotificationSettings(NotificationLevel.All), NotificationLevel.OnlyMentions))
+        assertEquals(NotificationLevel.Nothing, level(off, ChannelNotificationSettings(), NotificationLevel.All))
     }
 
     @Test

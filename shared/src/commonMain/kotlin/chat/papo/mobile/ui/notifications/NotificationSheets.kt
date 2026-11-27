@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,7 +32,12 @@ import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.notif_allow
 import chat.papo.mobile.resources.notif_channel_title
 import chat.papo.mobile.resources.notif_dm_title
-import chat.papo.mobile.resources.notif_level_note
+import chat.papo.mobile.resources.notif_level_note_local
+import chat.papo.mobile.resources.notif_level_note_synced
+import chat.papo.mobile.resources.notif_level_nothing_warning
+import chat.papo.mobile.resources.notif_local_only_note
+import chat.papo.mobile.resources.notif_saving
+import chat.papo.mobile.resources.notif_sync_note_channel
 import chat.papo.mobile.resources.notif_level_title
 import chat.papo.mobile.resources.notif_mute_channel
 import chat.papo.mobile.resources.notif_mute_conversation
@@ -61,12 +67,23 @@ private enum class Section { Mute, Level, SuppressEveryone, SuppressMentions, Sy
 fun ChannelNotificationSheet(prefs: NotificationPrefs, channel: Channel, onDismiss: () -> Unit) {
     val server by prefs.server.collectAsStateWithLifecycle()
     val channels by prefs.channels.collectAsStateWithLifecycle()
+    val serverLevels by prefs.serverLevels.collectAsStateWithLifecycle()
+    val save by prefs.levelSave.collectAsStateWithLifecycle()
     val edits = remember(prefs) { NotificationEdits(prefs) }
-    val state = channelNotificationsState(server, channels[channel.id] ?: ChannelNotificationSettings(), Clock.System.now(), prefs.syncAvailable)
+    val state = channelNotificationsState(
+        channel.id,
+        server,
+        channels[channel.id] ?: ChannelNotificationSettings(),
+        serverLevels[channel.id] ?: NotificationLevel.OnlyMentions,
+        save,
+        Clock.System.now(),
+    )
     var open by rememberSaveable { mutableStateOf(-1) }
     fun toggle(section: Section) {
         open = if (open == section.ordinal) -1 else section.ordinal
     }
+    // Uma falha de gravação é desta folha: a próxima abertura começa limpa.
+    DisposableEffect(prefs) { onDispose { prefs.clearLevelFailure() } }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
@@ -86,23 +103,12 @@ fun ChannelNotificationSheet(prefs: NotificationPrefs, channel: Channel, onDismi
                 onUnmute = { edits.unmuteChannel(channel.id) },
             )
 
-            val levelLabels = listOf(NotificationLevel.All, NotificationLevel.OnlyMentions, NotificationLevel.Nothing)
-            val defaultLevel = serverDefaultLabel(state.serverLevel.label())
-            SectionHeader(
-                stringResource(Res.string.notif_level_title),
-                summary = state.level?.label() ?: defaultLevel,
+            LevelSection(
+                state = state,
                 expanded = open == Section.Level.ordinal,
                 onToggle = { toggle(Section.Level) },
+                onSelect = { edits.setChannelLevel(channel.id, it) },
             )
-            if (open == Section.Level.ordinal) {
-                RadioGroup {
-                    RadioChoice(state.level == null, defaultLevel) { edits.setChannelLevel(channel.id, null) }
-                    levelLabels.forEach { level ->
-                        RadioChoice(state.level == level, level.label()) { edits.setChannelLevel(channel.id, level) }
-                    }
-                }
-                NoteText(stringResource(Res.string.notif_level_note))
-            }
 
             SuppressSection(
                 title = stringResource(Res.string.notif_suppress_everyone),
@@ -126,23 +132,24 @@ fun ChannelNotificationSheet(prefs: NotificationPrefs, channel: Channel, onDismi
             SyncSection(
                 value = state.sync,
                 serverValue = state.serverSync,
-                syncAvailable = state.syncAvailable,
+                note = stringResource(Res.string.notif_sync_note_channel),
                 expanded = open == Section.Sync.ordinal,
                 onToggle = { toggle(Section.Sync) },
                 onSelect = { edits.setChannelSync(channel.id, it) },
             )
+            NoteText(stringResource(Res.string.notif_local_only_note))
         }
     }
 }
 
-/** A folha de notificações de uma conversa direta: só silêncio e sincronização. [name] é o nome da outra pessoa. */
+/** A folha de notificações de uma conversa direta: só o silêncio, porque o servidor não tem nível para elas. [name] é o nome da outra pessoa. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DmNotificationSheet(prefs: NotificationPrefs, dmId: String, name: String, onDismiss: () -> Unit) {
     val server by prefs.server.collectAsStateWithLifecycle()
     val dms by prefs.dms.collectAsStateWithLifecycle()
     val edits = remember(prefs) { NotificationEdits(prefs) }
-    val state = dmNotificationsState(server, dms[dmId] ?: DmNotificationSettings(), Clock.System.now(), prefs.syncAvailable)
+    val state = dmNotificationsState(server, dms[dmId] ?: DmNotificationSettings(), Clock.System.now())
     var open by rememberSaveable { mutableStateOf(-1) }
     fun toggle(section: Section) {
         open = if (open == section.ordinal) -1 else section.ordinal
@@ -165,14 +172,7 @@ fun DmNotificationSheet(prefs: NotificationPrefs, dmId: String, name: String, on
                 },
                 onUnmute = { edits.unmuteDm(dmId) },
             )
-            SyncSection(
-                value = state.sync,
-                serverValue = state.serverSync,
-                syncAvailable = state.syncAvailable,
-                expanded = open == Section.Sync.ordinal,
-                onToggle = { toggle(Section.Sync) },
-                onSelect = { edits.setDmSync(dmId, it) },
-            )
+            NoteText(stringResource(Res.string.notif_local_only_note))
         }
     }
 }
@@ -229,12 +229,12 @@ private fun SuppressSection(
     }
 }
 
-/** "Sincronizar com o servidor": usar o padrão do servidor, ligado ou desligado, com o aviso enquanto o servidor não guarda. */
+/** "Sincronizar com o servidor": usar o padrão do servidor, ligado ou desligado. */
 @Composable
 private fun SyncSection(
     value: Boolean?,
     serverValue: Boolean,
-    syncAvailable: Boolean,
+    note: String,
     expanded: Boolean,
     onToggle: () -> Unit,
     onSelect: (Boolean?) -> Unit,
@@ -245,8 +245,36 @@ private fun SyncSection(
     SectionHeader(stringResource(Res.string.notif_sync_title), summary = triStateSummary(value, defaultLabel, on, off), expanded = expanded, onToggle = onToggle)
     if (expanded) {
         TriStateChoices(value, defaultLabel, on, off, onSelect)
-        SyncNote(syncAvailable)
+        NoteText(note)
     }
+}
+
+/**
+ * "Notificações": o nível do canal. Sincronizado são as três opções do servidor, com a gravação e as falhas à vista;
+ * sem sincronização entra "Usar padrão do servidor", com o nível geral deste aparelho.
+ */
+@Composable
+private fun LevelSection(state: ChannelNotificationsState, expanded: Boolean, onToggle: () -> Unit, onSelect: (NotificationLevel?) -> Unit) {
+    val defaultLabel = serverDefaultLabel(state.defaultLevel.label())
+    val summary = when {
+        state.saving -> stringResource(Res.string.notif_saving)
+        state.synced -> state.serverLevel.label()
+        else -> state.level?.label() ?: defaultLabel
+    }
+    SectionHeader(stringResource(Res.string.notif_level_title), summary = summary, expanded = expanded, onToggle = onToggle)
+    if (!expanded) return
+    RadioGroup {
+        if (!state.synced) RadioChoice(state.level == null, defaultLabel) { onSelect(null) }
+        NotificationLevel.entries.forEach { level ->
+            val selected = if (state.synced) state.serverLevel == level else state.level == level
+            // Uma gravação por vez: enquanto ela não volta, as opções esperam.
+            RadioChoice(selected, level.label(), enabled = !state.saving) { onSelect(level) }
+            if (state.synced && level == NotificationLevel.Nothing) NoteText(stringResource(Res.string.notif_level_nothing_warning))
+        }
+    }
+    if (state.saving) NoteText(stringResource(Res.string.notif_saving))
+    state.failure?.let { ErrorText(it.text()) }
+    NoteText(stringResource(if (state.synced) Res.string.notif_level_note_synced else Res.string.notif_level_note_local))
 }
 
 private fun triStateSummary(value: Boolean?, defaultLabel: String, trueLabel: String, falseLabel: String): String = when (value) {

@@ -3,6 +3,7 @@ package chat.papo.mobile.account
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.chat.AccessStore
 import chat.papo.mobile.chat.BlockList
+import chat.papo.mobile.chat.ChannelNotificationLevels
 import chat.papo.mobile.chat.ChatStore
 import chat.papo.mobile.chat.Drafts
 import chat.papo.mobile.chat.EmojiCatalog
@@ -55,14 +56,16 @@ class AccountSession(
     val emojis = EmojiCatalog(api, media, db.metaQueries, scope, io, background)
     val recentEmojis = RecentEmojis(db.metaQueries, scope, io)
     val drafts = Drafts(db.metaQueries, scope, io)
-    /** Silêncio, nível e supressão das notificações desta conta; ficam no banco cifrado dela. */
-    val notificationPrefs = NotificationPrefs(db.metaQueries, scope, io)
     val recentSearches = RecentSearchFilters()
 
     val ws = WsClient(client, scope, sessionStillValid = ::sessionStillValid)
     /** Dono do servidor, cargos e entradas por canal desta conta; o `ChatStore` o lê e o atualiza. */
     val permissions = AccessStore(db.metaQueries, api, scope, io, server = auth::server)
     val chat = ChatStore(userId, db, api, ws, scope, io, permissions)
+    /** O nível de notificação que o servidor guarda por canal; é o que vale nos canais sincronizados. */
+    private val channelLevels = ChannelNotificationLevels(api, db.chatQueries, userId, chat.channels, chat::reloadChannels, scope, io, chat::requestRefresh)
+    /** Silêncio, supressão e nível das notificações desta conta; ficam no banco cifrado dela (o nível sincronizado, no servidor). */
+    val notificationPrefs = NotificationPrefs(db.metaQueries, scope, io, channelLevels)
     /** Caixa de notificações desta conta, só em memória; as contagens de menção saem dela. */
     val inbox = NotificationInbox(userId, api, ws.events, ws.state, chat.readMarks, chat::storedPositions, scope)
     /** O número de menções por canal, por conversa direta e no total, já com a supressão aplicada. */

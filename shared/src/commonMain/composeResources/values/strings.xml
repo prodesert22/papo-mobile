@@ -574,7 +574,21 @@
     <string name="notif_suppress_everyone_note">Suprimir tira a notificação e também o número de menções de @everyone.</string>
     <string name="notif_suppress_mentions_note">Vale para @usuário e para respostas às suas mensagens. Suprimir tira a notificação e também o número de menções.</string>
     <string name="notif_sync_title">Sincronizar com o servidor</string>
-    <string name="notif_sync_note">O servidor ainda não guarda estas opções. Por enquanto elas ficam só neste aparelho.</string>
+    <string name="notif_level_note_synced">Esta escolha é salva no servidor e vale também no TUI e no web. Ela controla as notificações do sistema.</string>
+    <string name="notif_level_note_local">Esta escolha fica só neste aparelho. Ela controla as notificações do sistema; o número de menções não muda.</string>
+    <string name="notif_level_nothing_warning">Com a sincronização ligada, o servidor deixa de registrar as menções deste canal: o número de menções dele some.</string>
+    <string name="notif_level_account_title">Nível nos canais sem sincronização</string>
+    <string name="notif_saving">Salvando…</string>
+    <string name="notif_save_forbidden">Sem permissão para alterar as notificações deste canal.</string>
+    <string name="notif_save_not_found">Canal indisponível. A configuração não foi confirmada.</string>
+    <string name="notif_save_rate_limited">Limite de requisições. Aguarde um pouco e escolha a opção de novo.</string>
+    <string name="notif_save_rejected">O servidor recusou a mudança. Escolha a opção de novo para tentar.</string>
+    <string name="notif_save_not_sent">Sem conexão: a configuração não foi enviada. Escolha a opção de novo para tentar.</string>
+    <string name="notif_save_unauthorized">Sua sessão terminou. Entre de novo para alterar as notificações.</string>
+    <string name="notif_save_uncertain">Resultado não confirmado. Os canais foram atualizados: confira o nível antes de escolher de novo.</string>
+    <string name="notif_sync_note_channel">Sincronizado, o nível do canal é o que o servidor guarda e vale no TUI e no web. Sem sincronização, o nível fica só neste aparelho. Silêncio e supressão ficam sempre neste aparelho.</string>
+    <string name="notif_sync_note_account">Com a sincronização ligada, os canais usam o nível que o servidor guarda, e as mudanças valem no TUI e no web. O nível acima vale para os canais sem sincronização. Ligar ou desligar não muda o nível de nenhum canal na hora. Silêncio e supressão ficam sempre neste aparelho.</string>
+    <string name="notif_local_only_note">Silêncio e supressão ficam só neste aparelho.</string>
 
     <!-- Notificações: caixa e contagens -->
     <string name="inbox_title">Caixa de notificações</string>
