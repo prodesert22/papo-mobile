@@ -19,6 +19,14 @@ cd papo-mobile
 adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```
 
+As notificações push com o app fechado precisam de `androidApp/google-services.json`,
+a configuração do projeto Firebase do app. O arquivo não está no repositório (o
+git o ignora). Sem ele o build funciona e o app roda com o push desligado; com ele
+o Gradle aplica o plugin `google-services` sozinho. O CI o escreve a partir do
+secret `GOOGLE_SERVICES_JSON`, quando ele existe. O servidor também precisa ter o
+push ligado, e o backend falso só guarda o registro (`/users/me/push-device`), sem
+mandar push nenhum.
+
 ## Verificações
 
 ```sh
