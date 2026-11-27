@@ -118,17 +118,17 @@ class NotificationRulesTest {
 
     @Test
     fun dmNotificaToda() {
-        assertTrue(shouldNotifyDm(EffectiveDm(mute = null, sync = true)))
+        assertTrue(shouldNotifyDm(EffectiveDm(mute = null)))
     }
 
     @Test
     fun dmSilenciadaNaoNotifica() {
-        assertFalse(shouldNotifyDm(EffectiveDm(channelMute, sync = true)))
+        assertFalse(shouldNotifyDm(EffectiveDm(channelMute)))
     }
 
     @Test
     fun dmPropriaAbertaOuSemPermissaoNaoNotifica() {
-        val dm = EffectiveDm(mute = null, sync = true)
+        val dm = EffectiveDm(mute = null)
         assertFalse(shouldNotifyDm(dm, isOwn = true))
         assertFalse(shouldNotifyDm(dm, conversationOpen = true))
         assertFalse(shouldNotifyDm(dm, permissionGranted = false))
@@ -174,8 +174,8 @@ class NotificationRulesTest {
         assertTrue(showsUnreadDot(channel()))
         assertFalse(showsUnreadDot(channel(muted = channelMute)))
         assertFalse(showsUnreadDot(channel(muted = serverMute)))
-        assertTrue(showsUnreadDot(EffectiveDm(mute = null, sync = true)))
-        assertFalse(showsUnreadDot(EffectiveDm(channelMute, sync = true)))
+        assertTrue(showsUnreadDot(EffectiveDm(mute = null)))
+        assertFalse(showsUnreadDot(EffectiveDm(channelMute)))
     }
 
     @Test

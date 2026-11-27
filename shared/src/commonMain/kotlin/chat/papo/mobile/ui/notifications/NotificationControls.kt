@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import chat.papo.mobile.chat.ActiveMute
+import chat.papo.mobile.chat.LevelFailureReason
 import chat.papo.mobile.chat.MuteDuration
 import chat.papo.mobile.chat.MuteSource
 import chat.papo.mobile.chat.NotificationLevel
@@ -46,7 +47,13 @@ import chat.papo.mobile.resources.notif_muted_forever
 import chat.papo.mobile.resources.notif_muted_until
 import chat.papo.mobile.resources.notif_section_collapsed
 import chat.papo.mobile.resources.notif_section_expanded
-import chat.papo.mobile.resources.notif_sync_note
+import chat.papo.mobile.resources.notif_save_forbidden
+import chat.papo.mobile.resources.notif_save_not_found
+import chat.papo.mobile.resources.notif_save_not_sent
+import chat.papo.mobile.resources.notif_save_rate_limited
+import chat.papo.mobile.resources.notif_save_rejected
+import chat.papo.mobile.resources.notif_save_uncertain
+import chat.papo.mobile.resources.notif_save_unauthorized
 import chat.papo.mobile.resources.notif_unmute
 import chat.papo.mobile.resources.notif_use_server_default
 import chat.papo.mobile.resources.notif_value_off
@@ -133,18 +140,23 @@ internal fun RadioGroup(content: @Composable () -> Unit) {
 }
 
 @Composable
-internal fun RadioChoice(selected: Boolean, label: String, onClick: () -> Unit) {
+internal fun RadioChoice(selected: Boolean, label: String, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = RowMinHeight)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = ContentPadding, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = null)
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
         Spacer(Modifier.width(16.dp))
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -173,11 +185,30 @@ internal fun NoteText(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** O aviso de que o servidor ainda não guarda estas opções; só aparece enquanto isso for verdade. */
+/** Um aviso de erro, com a cor de erro do tema. */
 @Composable
-internal fun SyncNote(syncAvailable: Boolean) {
-    if (!syncAvailable) NoteText(stringResource(Res.string.notif_sync_note))
+internal fun ErrorText(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = ContentPadding, vertical = 8.dp),
+    )
 }
+
+/** Por que a gravação do nível no servidor não valeu, em palavras. */
+@Composable
+internal fun LevelFailureReason.text(): String = stringResource(
+    when (this) {
+        LevelFailureReason.Forbidden -> Res.string.notif_save_forbidden
+        LevelFailureReason.NotFound -> Res.string.notif_save_not_found
+        LevelFailureReason.RateLimited -> Res.string.notif_save_rate_limited
+        LevelFailureReason.Rejected -> Res.string.notif_save_rejected
+        LevelFailureReason.NotSent -> Res.string.notif_save_not_sent
+        LevelFailureReason.Unauthorized -> Res.string.notif_save_unauthorized
+        LevelFailureReason.Uncertain -> Res.string.notif_save_uncertain
+    },
+)
 
 /** O estado do silêncio, com o "Reativar" quando quem silenciou foi a própria conversa (ou o servidor, na tela dele). */
 @Composable

@@ -238,6 +238,18 @@ class ChatApi(private val client: PapoClient) {
         }.bodyOrThrow()
     }
 
+    /**
+     * Grava o nível de notificação de [userId] (só a própria conta) em [channelId]: `all`, `only_mentions` ou `off`. O
+     * servidor guarda um nível por canal e usuário; silêncio e supressão não existem nele. Muda o que ele registra e
+     * notifica daqui para frente, no web e no TUI também.
+     */
+    suspend fun setChannelNotification(channelId: String, userId: String, mode: String): ChannelUserSettingDto =
+        http.post {
+            url(path("/channels/$channelId/user/$userId/settings"))
+            contentType(ContentType.Application.Json)
+            setBody(UpdateChannelUserSettingRequest(mode))
+        }.bodyOrThrow()
+
     suspend fun pin(channelId: String, messageId: String) =
         http.post { url(path("/channels/$channelId/messages/$messageId/pin")) }.requireSuccess()
 

@@ -371,6 +371,19 @@ data class MarkNotificationsReadRequest(@SerialName("notification_ids") val noti
 @Serializable
 data class MarkNotificationsReadResponse(val updated: Int = 0)
 
+/** Corpo de `POST /channels/{id}/user/{id}/settings`: o nível de notificação (`all`, `only_mentions` ou `off`) do usuário no canal. */
+@Serializable
+data class UpdateChannelUserSettingRequest(@SerialName("notification_settings") val notificationSettings: String)
+
+/** A resposta do mesmo pedido (`ChannelUserSetting`): o que o servidor passou a guardar. */
+@Serializable
+data class ChannelUserSettingDto(
+    @SerialName("user_id") val userId: String? = null,
+    @SerialName("channel_id") val channelId: String? = null,
+    @SerialName("notification_settings") val notificationSettings: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
 @Serializable
 data class IceServerDto(val urls: List<String> = emptyList(), val username: String? = null, val credential: String? = null)
 

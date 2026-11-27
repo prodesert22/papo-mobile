@@ -33,7 +33,9 @@ import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.notif_account_title
 import chat.papo.mobile.resources.notif_level_note
-import chat.papo.mobile.resources.notif_level_title
+import chat.papo.mobile.resources.notif_level_account_title
+import chat.papo.mobile.resources.notif_local_only_note
+import chat.papo.mobile.resources.notif_sync_note_account
 import chat.papo.mobile.resources.notif_mute_note_server
 import chat.papo.mobile.resources.notif_mute_server
 import chat.papo.mobile.resources.notif_suppress_everyone
@@ -54,7 +56,7 @@ import kotlin.time.Clock
 fun AccountNotificationsScreen(prefs: NotificationPrefs, onBack: () -> Unit) {
     val server by prefs.server.collectAsStateWithLifecycle()
     val edits = remember(prefs) { NotificationEdits(prefs) }
-    val state = serverNotificationsState(server, Clock.System.now(), prefs.syncAvailable)
+    val state = serverNotificationsState(server, Clock.System.now())
 
     Scaffold(
         topBar = {
@@ -69,7 +71,7 @@ fun AccountNotificationsScreen(prefs: NotificationPrefs, onBack: () -> Unit) {
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-            ScreenHeading(stringResource(Res.string.notif_level_title))
+            ScreenHeading(stringResource(Res.string.notif_level_account_title))
             RadioGroup {
                 listOf(NotificationLevel.All, NotificationLevel.OnlyMentions, NotificationLevel.Nothing).forEach { level ->
                     RadioChoice(state.level == level, level.label()) { edits.setServerLevel(level) }
@@ -108,7 +110,8 @@ fun AccountNotificationsScreen(prefs: NotificationPrefs, onBack: () -> Unit) {
                     onChange = edits::setServerSync,
                 )
             }
-            SyncNote(state.syncAvailable)
+            NoteText(stringResource(Res.string.notif_sync_note_account))
+            NoteText(stringResource(Res.string.notif_local_only_note))
         }
     }
 }
@@ -130,7 +133,7 @@ private fun ScreenHeading(text: String) {
 fun ServerMuteMenu(prefs: NotificationPrefs, expanded: Boolean, onDismiss: () -> Unit) {
     val server by prefs.server.collectAsStateWithLifecycle()
     val edits = remember(prefs) { NotificationEdits(prefs) }
-    val state = serverNotificationsState(server, Clock.System.now(), prefs.syncAvailable)
+    val state = serverNotificationsState(server, Clock.System.now())
 
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         Text(

@@ -23,23 +23,6 @@ import kotlin.time.Clock
 import kotlin.time.Instant
 
 /**
- * O lado do backend das configurações de notificação (padrão do servidor, silêncio, supressão).
- *
- * O backend de hoje não tem esses campos (`UserConfig` descarta o que não conhece e `channel_user_settings` só
- * tem `notification_settings`), então não há o que chamar: a única implementação é [UnavailableNotificationSettingsRemote].
- * Quando o backend ganhar os campos e o contrato (`openapi.yml`) os definir, a implementação entra aqui.
- */
-interface NotificationSettingsRemote {
-    /** O backend guarda estas configurações? Falso: tudo fica só no aparelho, mesmo com "Sincronizar" ligado. */
-    val available: Boolean
-}
-
-/** O backend ainda não guarda estas configurações. */
-object UnavailableNotificationSettingsRemote : NotificationSettingsRemote {
-    override val available: Boolean = false
-}
-
-/**
  * As configurações de notificação de uma conta: o geral do servidor, as de cada canal e as de cada DM. Ficam na
  * tabela `meta` do banco cifrado da conta, uma chave `notif:...` por entrada, então não saem do aparelho nem se
  * misturam entre contas. Quem as lê e as muda é o escopo da sessão, que é também o dono do relógio dos silêncios.
@@ -47,12 +30,17 @@ object UnavailableNotificationSettingsRemote : NotificationSettingsRemote {
  * Os valores mudam na hora, na memória; a gravação vem logo depois, uma por vez e sempre do valor mais novo.
  * Um silêncio com fim some sozinho quando o fim chega, e os fluxos emitem de novo, sem consultar a rede.
  * Use os setters de uma thread só, como o resto do [ChatStore].
+ *
+ * Só o nível tem lado no servidor (`notification_settings` de cada canal, em [levelsOnServer]); silêncio e supressão
+ * existem só aqui. Um canal sincronizado (a opção do canal, senão a do servidor; ligada por padrão) usa o nível do
+ * servidor e o grava lá ([setChannelLevel]); sem sincronização o nível é deste aparelho. Ligar ou desligar a
+ * sincronização não muda o nível de nenhum canal na hora: o que mudaria é copiado ([setChannelSync], [setServerSync]).
  */
 class NotificationPrefs(
     private val meta: MetaQueries,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
-    private val remote: NotificationSettingsRemote = UnavailableNotificationSettingsRemote,
+    private val levelsOnServer: ServerChannelLevels = NoServerChannelLevels,
     private val now: () -> Instant = { Clock.System.now() },
 ) {
     private val _server = MutableStateFlow(ServerNotificationSettings())
@@ -68,6 +56,12 @@ class NotificationPrefs(
 
     /** Só as DMs que escolheram algo. */
     val dms: StateFlow<Map<String, DmNotificationSettings>> = _dms.asStateFlow()
+
+    /** O nível que o servidor guarda para cada canal; muda quando os canais são relidos ou uma gravação vale. */
+    val serverLevels: StateFlow<Map<String, NotificationLevel>> get() = levelsOnServer.levels
+
+    /** A gravação do nível no servidor: qual canal está sendo gravado e a última falha. */
+    val levelSave: StateFlow<LevelSave> get() = levelsOnServer.save
 
     /** Verdadeiro quando o que estava no banco já foi lido (ou a leitura falhou e valem os padrões). */
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
@@ -107,20 +101,67 @@ class NotificationPrefs(
 
     /** O que vale para o canal agora. Quem desenha deve ler também os fluxos, para refazer a conta quando algo mudar. */
     fun effectiveFor(channelId: String): EffectiveNotifications =
-        effective(_server.value, _channels.value[channelId] ?: ChannelNotificationSettings(), now())
+        effective(_server.value, _channels.value[channelId] ?: ChannelNotificationSettings(), now(), serverLevelFor(channelId))
 
     /** O que vale para a DM agora. */
     fun effectiveForDm(dmId: String): EffectiveDm =
         effectiveDm(_server.value, _dms.value[dmId] ?: DmNotificationSettings(), now())
 
-    /** O backend guarda estas configurações? Falso hoje: a tela avisa que elas ficam só neste aparelho. */
-    val syncAvailable: Boolean get() = remote.available
+    /** O nível do canal no servidor; sem valor guardado, "só menções" (o padrão do servidor). */
+    private fun serverLevelFor(channelId: String): NotificationLevel =
+        levelsOnServer.levels.value[channelId] ?: NotificationLevel.OnlyMentions
 
-    /** Os valores do canal vão e vêm do backend? Só se a opção vale e o backend guarda estas configurações. */
-    fun isSyncing(channelId: String): Boolean = remote.available && effectiveFor(channelId).sync
+    /** O nível do canal vai e vem do servidor? */
+    fun isSyncing(channelId: String): Boolean = effectiveFor(channelId).sync
 
-    /** O mesmo para uma DM. */
-    fun isSyncingDm(dmId: String): Boolean = remote.available && effectiveForDm(dmId).sync
+    /**
+     * Escolhe o nível do canal. Sincronizado, grava no servidor (o resultado aparece em [levelSave] e o nível só muda
+     * quando o servidor confirma) e [level] nulo não faz nada; sem sincronização, vale na hora neste aparelho e
+     * nulo é "Usar padrão do servidor".
+     */
+    fun setChannelLevel(channelId: String, level: NotificationLevel?) {
+        if (effectiveFor(channelId).sync) {
+            if (level != null) levelsOnServer.set(channelId, level)
+        } else {
+            updateChannel(channelId) { it.copy(level = level) }
+        }
+    }
+
+    /**
+     * Liga ou desliga a sincronização do canal ([value] nulo segue o servidor) sem mudar o nível de agora. Desligar
+     * guarda neste aparelho o nível que o servidor tinha; ligar larga o nível do aparelho e volta ao do servidor, sem
+     * mandar o do aparelho para lá.
+     */
+    fun setChannelSync(channelId: String, value: Boolean?) {
+        val before = effectiveFor(channelId)
+        val willSync = value ?: _server.value.sync
+        updateChannel(channelId) {
+            it.copy(sync = value, level = if (willSync) null else if (before.sync) before.level else it.level)
+        }
+    }
+
+    /**
+     * Liga ou desliga a sincronização do servidor inteiro. Nenhum canal muda de nível por isso: os que seguem o servidor
+     * e mudariam guardam neste aparelho o nível que tinham (e, se passariam a sincronizar com outro nível, ficam sem
+     * sincronização, porque ligar nunca manda o nível do aparelho ao servidor).
+     */
+    fun setServerSync(value: Boolean) {
+        val ids = levelsOnServer.levels.value.keys + _channels.value.keys
+        val before = ids.associateWith(::effectiveFor)
+        updateServer { it.copy(sync = value) }
+        for ((id, was) in before) {
+            val after = effectiveFor(id)
+            if (after.level == was.level) {
+                // Sincronizado, o nível do aparelho não vale mais: não deixa um valor velho guardado.
+                if (after.sync && _channels.value[id]?.level != null) updateChannel(id) { it.copy(level = null) }
+            } else {
+                updateChannel(id) { it.copy(sync = if (after.sync) false else it.sync, level = was.level) }
+            }
+        }
+    }
+
+    /** Esquece a última falha da gravação do nível (a folha que a mostrava foi fechada). */
+    fun clearLevelFailure() = levelsOnServer.clearFailure()
 
     private fun touch(key: String) = touched.update { it + key }
 
@@ -291,12 +332,12 @@ class NotificationPrefs(
 
         fun encodeDm(value: DmNotificationSettings): String = json.encodeToString(
             StoredDm.serializer(),
-            StoredDm(muted = value.mute != null, mutedUntil = value.mute?.until?.toEpochMilliseconds(), sync = value.sync),
+            StoredDm(muted = value.mute != null, mutedUntil = value.mute?.until?.toEpochMilliseconds()),
         )
 
         fun decodeDm(value: String?): DmNotificationSettings? {
             val stored = parse(StoredDm.serializer(), value) ?: return null
-            return DmNotificationSettings(muteOf(stored.muted, stored.mutedUntil), stored.sync).takeUnless { it.isDefault }
+            return DmNotificationSettings(muteOf(stored.muted, stored.mutedUntil)).takeUnless { it.isDefault }
         }
 
         private fun <T> parse(serializer: kotlinx.serialization.KSerializer<T>, value: String?): T? {
@@ -337,6 +378,5 @@ class NotificationPrefs(
     private class StoredDm(
         val muted: Boolean = false,
         val mutedUntil: Long? = null,
-        val sync: Boolean? = null,
     )
 }

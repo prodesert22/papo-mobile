@@ -682,6 +682,40 @@ class ChatApiTest {
     }
 
     @Test
+    fun nivelDeNotificacaoDoCanalVaiEmPostComUmCampoEVoltaOQueOServidorGuardou() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) {
+            json("""{"user_id":"u1","channel_id":"c1","notification_settings":"off","updated_at":"2026-01-01T00:00:00Z","extra":1}""")
+        }
+
+        val saved = api.setChannelNotification("c1", "u1", "off")
+
+        assertEquals("c1", saved.channelId)
+        assertEquals("u1", saved.userId)
+        assertEquals("off", saved.notificationSettings)
+        assertEquals("2026-01-01T00:00:00Z", saved.updatedAt)
+        val recorded = seen.single()
+        assertEquals(HttpMethod.Post, recorded.request.method)
+        assertEquals("/channels/c1/user/u1/settings", recorded.request.url.encodedPath)
+        assertEquals("""{"notification_settings":"off"}""", recorded.body)
+    }
+
+    @Test
+    fun nivelDeNotificacaoRecusadoViraErroDoServidorComOCodigo() = runTest {
+        for (status in listOf(HttpStatusCode.Forbidden, HttpStatusCode.NotFound, HttpStatusCode.BadRequest, HttpStatusCode.TooManyRequests)) {
+            val api = api(mutableListOf()) { json("""{"type":"t","title":"Erro","status":${status.value}}""", status) }
+            assertEquals(status.value, assertFailsWith<ApiException> { api.setChannelNotification("c1", "u1", "all") }.status)
+        }
+    }
+
+    @Test
+    fun respostaSemOsCamposTrazTudoNulo() = runTest {
+        val saved = api(mutableListOf()) { json("{}") }.setChannelNotification("c1", "u1", "all")
+        assertNull(saved.notificationSettings)
+        assertNull(saved.channelId)
+    }
+
+    @Test
     fun conversaDiretaPorIdLeUmaConversaQueNaoEstaNaLista() = runTest {
         val seen = mutableListOf<Recorded>()
         val api = api(seen) {

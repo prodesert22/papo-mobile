@@ -40,7 +40,7 @@ class NotificationPrefsCodecTest {
 
     @Test
     fun dmIdaEVolta() {
-        val values = listOf(DmNotificationSettings(Mute(at + 15.minutes)), DmNotificationSettings(Mute(null)), DmNotificationSettings(sync = false))
+        val values = listOf(DmNotificationSettings(Mute(at + 15.minutes)), DmNotificationSettings(Mute(null)))
         for (value in values) assertEquals(value, NotificationPrefs.decodeDm(NotificationPrefs.encodeDm(value)))
     }
 
