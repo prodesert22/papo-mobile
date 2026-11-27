@@ -24,6 +24,8 @@ lifecycle = "2.11.0"
 coil = "3.6.3"
 accompanist = "0.37.3"
 zoomable = "2.16.0"
+# Só o motor de cores do Material (sem Compose): o MaterialKolor 5.0.1 exige material3 1.12.0-alpha03 e puxaria o projeto para uma alfa.
+material-color-utilities = "5.0.1"
 sqlcipher = "4.20.0"
 webrtc = "1.3.10"
 androidx-activity = "1.13.0"
@@ -93,6 +95,8 @@ coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" 
 accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanist" }
 # Pinça, toque duplo e arrasto do visualizador de imagens (Compose Multiplatform, Apache-2.0).
 zoomable = { module = "net.engawapg.lib:zoomable", version.ref = "zoomable" }
+# Esquemas de cor do Material por cor semente, para as predefinições de tema.
+material-color-utilities = { module = "com.materialkolor:material-color-utilities", version.ref = "material-color-utilities" }
 
 # Android
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }

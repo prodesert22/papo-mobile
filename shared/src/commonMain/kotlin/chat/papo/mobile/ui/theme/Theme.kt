@@ -8,6 +8,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -26,7 +27,7 @@ private val Agua = Color(0xFF5CC8BE)
 // Dourado do cliente web (`--gold`), do destaque das mensagens que mencionam ou respondem a quem usa a conta.
 private val Ouro = Color(0xFFE7A80B)
 
-private val DarkColors = darkColorScheme(
+internal val DarkColors = darkColorScheme(
     primary = Manga,
     onPrimary = Color(0xFF2B1B00),
     primaryContainer = Color(0xFF5C3D00),
@@ -56,7 +57,7 @@ private val DarkColors = darkColorScheme(
     onErrorContainer = Color(0xFFFFDAD5),
 )
 
-private val LightColors = lightColorScheme(
+internal val LightColors = lightColorScheme(
     primary = Color(0xFF0F4C5C),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFCDE8EE),
@@ -107,7 +108,7 @@ data class PapoColors(
     val onMention: Color,
 )
 
-private val DarkPapoColors = PapoColors(
+internal val DarkPapoColors = PapoColors(
     rail = Color(0xFF0A161B),
     onRail = Color(0xFFEAF2F1),
     onRailMuted = Color(0xFF7F979A),
@@ -121,7 +122,7 @@ private val DarkPapoColors = PapoColors(
     onMention = Color.White,
 )
 
-private val LightPapoColors = DarkPapoColors.copy(
+internal val LightPapoColors = DarkPapoColors.copy(
     rail = Color(0xFF0F3A46),
     onRailMuted = Color(0xFF9DBFC6),
     highlight = Ouro.copy(alpha = 0.16f),
@@ -152,11 +153,16 @@ private fun papoTypography(): Typography {
     )
 }
 
+/**
+ * Aplica [spec] (o tema padrão do Papo, no modo do sistema, se não vier nenhum). [systemDark] é quem decide o modo
+ * [Sistema][ThemeMode.System]; a prévia da tela de aparência o troca para mostrar os dois lados.
+ */
 @Composable
-fun PapoTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalPapoColors provides if (dark) DarkPapoColors else LightPapoColors) {
+fun PapoTheme(spec: ThemeSpec = ThemeSpec(), systemDark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+    val theme = remember(spec, systemDark) { resolveTheme(spec, systemDark) }
+    CompositionLocalProvider(LocalPapoColors provides theme.papo) {
         MaterialTheme(
-            colorScheme = if (dark) DarkColors else LightColors,
+            colorScheme = theme.colorScheme,
             typography = papoTypography(),
             content = content,
         )

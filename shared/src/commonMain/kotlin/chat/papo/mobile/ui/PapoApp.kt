@@ -110,6 +110,7 @@ import chat.papo.mobile.ui.settings.ChangePasswordScreen
 import chat.papo.mobile.ui.settings.ChangePasswordViewModel
 import chat.papo.mobile.ui.switcher.QuickSwitcherScreen
 import chat.papo.mobile.ui.switcher.QuickSwitcherViewModel
+import chat.papo.mobile.ui.theme.AccountTheme
 import chat.papo.mobile.ui.theme.PapoTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -221,7 +222,10 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
     val chatStores = viewModel { ParkedChatStores() }
 
     CompositionLocalProvider(LocalPlatformUi provides platformUi, LocalNotificationPermission provides graph.notificationPermission) {
-      PapoTheme {
+      // ---- 0.9.0 · trilha B: tema global ----
+      val globalTheme by graph.theme.spec.collectAsStateWithLifecycle()
+      PapoTheme(globalTheme) {
+      // ---- fim da trilha B ----
         when (val current = state) {
             LockState.Starting -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
             is LockState.Locked -> {
@@ -232,7 +236,11 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
             is LockState.Unlocked -> {
                 val session = current.session as AppSession
                 CompositionLocalProvider(LocalAudioPlayback provides session.audio) {
-                    Unlocked(graph, session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
+                    // ---- 0.9.0 · trilha B: tema da conta ativa ----
+                    AccountTheme(session, globalTheme) {
+                        Unlocked(graph, session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
+                    }
+                    // ---- fim da trilha B ----
                 }
             }
         }
@@ -490,11 +498,11 @@ private fun Unlocked(
 
         // ---- 0.9.0 · trilha B: tema (só a trilha B muda estes blocos) ----
         composable<AppearanceRoute> {
-            AppearanceScreen(onBack = { navController.popBackStack() })
+            AppearanceScreen(graph.theme, onBack = { navController.popBackStack() })
         }
         composable<ServerThemeRoute> { entry ->
             val route = entry.toRoute<ServerThemeRoute>()
-            ServerThemeScreen(session, route.accountId, onBack = { navController.popBackStack() })
+            ServerThemeScreen(session, route.accountId, graph.theme, onBack = { navController.popBackStack() })
         }
         // ---- fim da trilha B ----
 
