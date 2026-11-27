@@ -117,6 +117,9 @@ class ChatViewModel(
     /** Nomes escolhidos no autocompletar deste rascunho, para virar menção no envio. */
     private val pickedMentions = HashMap<String, String>()
 
+    /** Os mesmos nomes, só para ler: o compositor destaca no campo o que vai virar menção. */
+    val picked: Map<String, String> get() = pickedMentions
+
     init {
         // Enquanto este ViewModel existir a conversa não é podada do aparelho ([onCleared] encerra a contagem).
         chat.conversationOpened(channelId)
