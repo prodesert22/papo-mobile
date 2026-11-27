@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,6 +50,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import chat.papo.mobile.ui.components.PapoDropdownMenu
 import chat.papo.mobile.chat.AttachmentProblem
 import chat.papo.mobile.chat.MAX_ATTACHMENTS
 import chat.papo.mobile.chat.MAX_ATTACHMENTS_TOTAL_MB
@@ -98,7 +98,7 @@ internal fun AttachButton(enabled: Boolean, freeSlots: Int, onFiles: (List<Outgo
         IconButton(onClick = { open = true }, enabled = enabled) {
             Icon(Icons.Filled.AttachFile, contentDescription = stringResource(Res.string.chat_attach))
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        PapoDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.attach_photo_video)) },
                 leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },

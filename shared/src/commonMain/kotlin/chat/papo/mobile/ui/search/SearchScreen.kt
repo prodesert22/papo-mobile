@@ -35,7 +35,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DateRangePicker
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -72,6 +71,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.papo.mobile.ui.components.PapoDropdownMenu
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.AttachmentFilter
 import chat.papo.mobile.chat.Channel
@@ -379,7 +379,7 @@ private fun FilterBar(session: AccountSession, filters: SearchFilters, directory
                     )
                 },
             )
-            DropdownMenu(expanded = picking == Picker.Attachments, onDismissRequest = { picking = null }) {
+            PapoDropdownMenu(expanded = picking == Picker.Attachments, onDismissRequest = { picking = null }) {
                 AttachmentFilter.entries.forEach { option ->
                     DropdownMenuItem(
                         text = { Text(attachmentsLabel(option)) },

@@ -58,7 +58,6 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -118,6 +117,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
+import chat.papo.mobile.ui.components.PapoDropdownMenu
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.ChannelType
 import chat.papo.mobile.chat.EVERYONE_MENTION
@@ -514,7 +514,7 @@ fun ChatScreen(
                         IconButton(onClick = { moreMenu = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(Res.string.notif_more_options))
                         }
-                        DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                        PapoDropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(Res.string.chat_search)) },
                                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
