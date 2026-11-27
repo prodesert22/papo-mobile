@@ -101,6 +101,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -112,6 +113,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.NavigationEventInfo
@@ -237,6 +240,7 @@ import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -336,6 +340,12 @@ fun ChatScreen(
         }
     }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
+    // Muda a cada resposta começada (deslizando ou pelo menu): o compositor põe o foco no campo e abre o teclado.
+    var replyFocus by remember { mutableIntStateOf(0) }
+    val startReply: (Message) -> Unit = { message ->
+        viewModel.startReply(message)
+        replyFocus++
+    }
     var reactingTo by remember { mutableStateOf<Message?>(null) }
     var selecting by remember { mutableStateOf<Message?>(null) }
     var columnPx by remember { mutableIntStateOf(0) }
@@ -673,7 +683,7 @@ fun ChatScreen(
                                 canRemoveOwnReaction = access.removeOwnReaction,
                                 onOpenReply = { viewModel.openReply(message) },
                                 // Sem envio não se responde, nem deslizando nem pela acessibilidade; sem reação, nem o toque duplo.
-                                onReply = { viewModel.startReply(message) }.takeIf { access.send },
+                                onReply = { startReply(message) }.takeIf { access.send },
                                 onQuickReact = { viewModel.quickReact(message) }.takeIf { access.react },
                                 // A folha só abre se tiver o que oferecer (copiar não existe numa mensagem só de anexo).
                                 onLongPress = {
@@ -813,6 +823,7 @@ fun ChatScreen(
                 voice = voice,
                 voiceOwner = viewModel.voiceOwner,
                 onSendVoice = viewModel::sendVoice,
+                focusRequests = replyFocus,
             )
         }
     }
@@ -831,7 +842,7 @@ fun ChatScreen(
                 actionsFor = null
                 reactingTo = message
             },
-            onReply = { viewModel.startReply(message) },
+            onReply = { startReply(message) },
             onEdit = { viewModel.startEdit(message) },
             onDelete = { confirmDelete = message },
             onTogglePin = { viewModel.setPinned(message, !isPinned) },
@@ -1149,10 +1160,33 @@ private fun Composer(
     voice: VoiceRecording?,
     voiceOwner: String,
     onSendVoice: () -> Unit,
+    /** Muda quando o campo deve receber o foco com o teclado aberto, como ao começar uma resposta. */
+    focusRequests: Int,
 ) {
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    // Sair do app com o campo em foco o deixava em foco, e a janela reabria o teclado ao voltar. O foco só volta ao campo
+    // quando a pessoa toca nele.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        keyboard?.hide()
+        focusManager.clearFocus(force = true)
+    }
+    // A folha de ações é outra janela: o foco e o teclado só pegam depois que a janela da conversa volta a ter o foco.
+    // Um pedido de antes de o compositor entrar na composição (a barra de somente leitura no lugar dele) não vale mais.
+    val windowInfo = LocalWindowInfo.current
+    var handledFocusRequest by remember { mutableIntStateOf(focusRequests) }
+    LaunchedEffect(focusRequests) {
+        if (focusRequests == handledFocusRequest) return@LaunchedEffect
+        handledFocusRequest = focusRequests
+        snapshotFlow { windowInfo.isWindowFocused }.first { it }
+        try {
+            focus.requestFocus()
+            keyboard?.show()
+        } catch (e: IllegalStateException) {
+            // campo fora da composição (a barra de gravação de voz no lugar dele)
+        }
+    }
     val density = LocalDensity.current
     val panelScope = rememberCoroutineScope()
     val panel = remember { EmojiPanelState(panelScope) }
