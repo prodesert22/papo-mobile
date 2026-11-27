@@ -660,5 +660,16 @@
     <!-- fim da trilha C -->
 
     <!-- 0.9.0 · trilha D: descrição e edição do canal -->
+    <string name="channel_topic_open">Ver a descrição completa</string>
+    <string name="channel_topic_edit">Editar canal</string>
+    <string name="channel_edit_name">Nome do canal</string>
+    <string name="channel_edit_topic">Descrição</string>
+    <string name="channel_edit_counter">%1$d/%2$d</string>
+    <string name="channel_edit_name_empty">Escreva um nome para o canal.</string>
+    <string name="channel_edit_no_permission">Você não tem permissão para editar este canal.</string>
+    <string name="channel_edit_name_taken">Já existe um canal com esse nome. Escolha outro.</string>
+    <string name="channel_edit_forbidden">O servidor recusou: sua conta não pode editar canais.</string>
+    <string name="channel_edit_gone">Este canal não existe mais.</string>
+    <string name="channel_edit_uncertain">Não deu para confirmar se a mudança foi salva. Confira o canal antes de tentar de novo.</string>
     <!-- fim da trilha D -->
 </resources>

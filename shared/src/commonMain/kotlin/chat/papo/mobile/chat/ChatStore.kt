@@ -2,7 +2,9 @@ package chat.papo.mobile.chat
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
+import chat.papo.mobile.core.MutationResult
 import chat.papo.mobile.core.parseInstant
+import chat.papo.mobile.core.runMutation
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.data.api.ChannelDto
@@ -16,6 +18,7 @@ import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.PapoJson
 import chat.papo.mobile.data.api.ReactionRequest
 import chat.papo.mobile.data.api.ReactionSummaryDto
+import chat.papo.mobile.data.api.UpdateChannelRequest
 import chat.papo.mobile.data.api.UserReactionDto
 import chat.papo.mobile.data.api.UserSummaryDto
 import chat.papo.mobile.data.db.account.AccountDb
@@ -288,6 +291,53 @@ class ChatStore(
 
     /** Relê os canais para conferir uma mudança que pode ter chegado ao servidor. Falha como qualquer leitura; nada é reenviado. */
     suspend fun reloadChannels() = refreshChannels()
+
+    /** Uma edição de canal por vez: a resposta de uma nunca passa por cima da outra no banco. */
+    private val channelEditLock = Mutex()
+
+    /**
+     * Edita o nome e a descrição de um canal em `PUT /channels/{id}`. [topic] nulo mantém a descrição, `""` a apaga.
+     * Com [ChannelEditResult.Saved] o canal local ganha o que o servidor devolveu, sem sair da categoria: o
+     * `parent_id` guardado vale se a resposta não o trouxer. Nada é repetido sozinho (regra 15): um 403 pede a
+     * releitura das permissões, um 404 tira o canal do aparelho e um resultado incerto relê os canais para conferir.
+     */
+    suspend fun updateChannel(channelId: String, name: String, topic: String?): ChannelEditResult = channelEditLock.withLock {
+        var status: Int? = null
+        var saved: ChannelDto? = null
+        val result = runMutation {
+            try {
+                saved = api.updateChannel(channelId, UpdateChannelRequest(name, topic))
+            } catch (e: ApiException) {
+                status = e.status
+                throw e
+            }
+        }
+        val outcome = channelEditResult(result, status)
+        when (outcome) {
+            ChannelEditResult.Saved -> saved?.let { dto -> withContext(io) { storeEdited(channelId, dto) } }
+            ChannelEditResult.Forbidden -> requestRefresh()
+            ChannelEditResult.NotFound -> {
+                withContext(io) { forgetChannel(channelId) }
+                quietly { refreshChannels() }
+            }
+            // O servidor pode ter gravado: conferir é uma leitura, e o pedido não é reenviado.
+            is ChannelEditResult.Failed -> if (result == MutationResult.Uncertain) quietly { refreshChannels() }
+            ChannelEditResult.NameTaken -> Unit
+        }
+        outcome
+    }
+
+    private fun storeEdited(channelId: String, dto: ChannelDto) {
+        val parent = dto.parentId ?: q.selectChannel(channelId).executeAsOneOrNull()?.parent_id
+        q.updateChannelInfo(dto.name, dto.position.toLong(), dto.topic, parent, channelId)
+    }
+
+    /** Tira do aparelho o canal que não existe mais: a linha, as mensagens e a marca de trecho antigo. */
+    private fun forgetChannel(channelId: String) = q.transaction {
+        q.deleteChannel(channelId)
+        q.deleteChannelMessages(channelId)
+        meta.remove(DETACHED + channelId)
+    }
 
     /**
      * Pede a releitura das permissões depois de um 403: o que o app sabia ficou velho (um `PUT /roles` não
@@ -848,13 +898,7 @@ class ChatStore(
                 // (o canal sairia da categoria): a releitura traz as entradas e devolve a categoria.
                 channelRefreshRequests.trySend(Unit)
             }
-            is WsEvent.ChannelDeleted -> withContext(io) {
-                q.transaction {
-                    q.deleteChannel(event.channelId)
-                    q.deleteChannelMessages(event.channelId)
-                    meta.remove(DETACHED + event.channelId)
-                }
-            }
+            is WsEvent.ChannelDeleted -> withContext(io) { forgetChannel(event.channelId) }
             is WsEvent.Typing -> {
                 if (event.userId.isEmpty() || event.userId == myUserId) return
                 val key = event.channelId to event.userId

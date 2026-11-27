@@ -91,6 +91,7 @@ import chat.papo.mobile.ui.notifications.AccountNotificationsScreen
 import chat.papo.mobile.ui.notifications.InboxScreen
 import chat.papo.mobile.ui.notifications.InboxViewModel
 import chat.papo.mobile.ui.channel.ChannelSettingsScreen
+import chat.papo.mobile.ui.channel.ChannelSettingsViewModel
 import chat.papo.mobile.ui.settings.AccountLocalScreen
 import chat.papo.mobile.ui.settings.DeviceDataScreen
 import chat.papo.mobile.ui.settings.DevicesScreen
@@ -495,7 +496,10 @@ private fun Unlocked(
             if (accountSession == null) {
                 LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
             } else {
-                ChannelSettingsScreen(accountSession, route.channelId, onBack = { navController.popBackStack() })
+                val vm = viewModel(key = "channel-settings/${route.accountId}/${route.channelId}/${accountSession.hashCode()}") {
+                    ChannelSettingsViewModel(accountSession.chat, accountSession.userId, route.channelId)
+                }
+                ChannelSettingsScreen(vm, onBack = { navController.popBackStack() })
             }
         }
         // ---- fim da trilha D ----
