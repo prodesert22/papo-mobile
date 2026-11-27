@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenuItem
@@ -70,6 +71,8 @@ import chat.papo.mobile.resources.attach_problem_file_too_large
 import chat.papo.mobile.resources.attach_problem_too_many
 import chat.papo.mobile.resources.attach_problem_total_too_large
 import chat.papo.mobile.resources.attach_unavailable
+import chat.papo.mobile.resources.attach_voice
+import chat.papo.mobile.resources.attach_voice_in_call
 import chat.papo.mobile.resources.chat_attach
 import chat.papo.mobile.resources.chat_remove_attachment
 import chat.papo.mobile.ui.components.LocalPlatformUi
@@ -85,11 +88,18 @@ private val PREVIEW_SIZE = 72.dp
 
 /**
  * O clipe do compositor: abre um menu com a galeria de fotos e vídeos (que o sistema entrega sem pedir permissão
- * de armazenamento) e o seletor de arquivos. [freeSlots] são as vagas que restam na mensagem, o teto do seletor de
- * fotos; o que passar disso é recusado com aviso por quem recebe os arquivos.
+ * de armazenamento), o seletor de arquivos e, com [onRecordVoice], a gravação de um áudio (que pede o microfone). [freeSlots]
+ * são as vagas que restam na mensagem, o teto do seletor de fotos; o que passar disso é recusado com aviso por quem recebe
+ * os arquivos. Sem [voiceAvailable] (o microfone é de uma chamada) o item de gravar aparece desligado.
  */
 @Composable
-internal fun AttachButton(enabled: Boolean, freeSlots: Int, onFiles: (List<OutgoingFile>) -> Unit) {
+internal fun AttachButton(
+    enabled: Boolean,
+    freeSlots: Int,
+    onFiles: (List<OutgoingFile>) -> Unit,
+    onRecordVoice: (() -> Unit)? = null,
+    voiceAvailable: Boolean = true,
+) {
     val platform = LocalPlatformUi.current
     val pickMedia = platform.rememberMediaPicker(freeSlots, onFiles)
     val pickFile = platform.rememberFilePicker(onFiles)
@@ -115,6 +125,17 @@ internal fun AttachButton(enabled: Boolean, freeSlots: Int, onFiles: (List<Outgo
                     pickFile()
                 },
             )
+            if (onRecordVoice != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (voiceAvailable) Res.string.attach_voice else Res.string.attach_voice_in_call)) },
+                    leadingIcon = { Icon(Icons.Filled.Mic, contentDescription = null) },
+                    enabled = voiceAvailable,
+                    onClick = {
+                        open = false
+                        onRecordVoice()
+                    },
+                )
+            }
         }
     }
 }

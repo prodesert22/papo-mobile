@@ -152,12 +152,16 @@ import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.ReactionSummaryDto
 import chat.papo.mobile.media.AudioTrack
+import chat.papo.mobile.media.VoiceProblem
+import chat.papo.mobile.media.VoiceRecording
+import chat.papo.mobile.media.owner
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
 import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.channel_settings
 import chat.papo.mobile.resources.channel_topic_open
+import chat.papo.mobile.resources.voice_open_settings
 import chat.papo.mobile.resources.channels_join_call
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_emoji
@@ -233,6 +237,7 @@ import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.pluralStringResource
@@ -446,6 +451,15 @@ fun ChatScreen(
         onPauseOrDispose {}
     }
     DisposableEffect(viewModel) { onDispose { viewModel.onHidden() } }
+    // A gravação de voz é desta conversa: se ela sair da tela e não voltar logo (girar o aparelho a recria), a gravação é descartada.
+    val voice = LocalVoiceRecording.current
+    if (voice != null) {
+        DisposableEffect(voice, viewModel, active) {
+            if (active) voice.hostShown(viewModel.voiceOwner)
+            onDispose { voice.hostHidden(viewModel.voiceOwner) }
+        }
+    }
+    val voiceProblem by (voice?.problem ?: NO_VOICE_PROBLEM).collectAsStateWithLifecycle()
     // O vídeo que tocava no cartão não segue tocando atrás da lista de canais.
     LaunchedEffect(active) { if (!active) videos = InlineVideos() }
     // Mensagem pedida ao abrir: rola até ela quando entra na lista e a destaca por alguns segundos.
@@ -737,6 +751,14 @@ fun ChatScreen(
                         )
                     }
                     state.attachProblem?.let { problem -> NoticeBar(problem.text(), viewModel::dismissAttachProblem) }
+                    voiceProblem?.let { problem ->
+                        if (voice != null && problem == VoiceProblem.MicrophoneBlocked) {
+                            // Negado de vez: só as configurações do aparelho liberam o microfone.
+                            ActionNoticeBar(problem.text(), stringResource(Res.string.voice_open_settings), onAction = voice::openSettings, onClose = voice::dismissProblem)
+                        } else if (voice != null) {
+                            NoticeBar(problem.text(), voice::dismissProblem)
+                        }
+                    }
                     state.error?.let { error -> NoticeBar(error.text(), viewModel::dismissError) }
                 }
                 // Num trecho antigo quem leva de volta ao fim é a `OlderHistoryBar`.
@@ -787,6 +809,9 @@ fun ChatScreen(
                 onPreviewFile = { previewing = it },
                 onCancelContext = viewModel::cancelContext,
                 onSubmit = viewModel::submit,
+                voice = voice,
+                voiceOwner = viewModel.voiceOwner,
+                onSendVoice = viewModel::sendVoice,
             )
         }
     }
@@ -1120,6 +1145,9 @@ private fun Composer(
     onPreviewFile: (OutgoingFile) -> Unit,
     onCancelContext: () -> Unit,
     onSubmit: () -> Unit,
+    voice: VoiceRecording?,
+    voiceOwner: String,
+    onSendVoice: () -> Unit,
 ) {
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -1319,9 +1347,30 @@ private fun Composer(
 
             AttachmentTray(state.files, onRemoveFile, onPreviewFile)
 
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
+            // Com uma gravação de voz desta conversa, a barra dela toma o lugar do campo de texto.
+            // Só o fato de haver gravação aqui recompõe o compositor; o tempo que corre fica dentro da barra.
+            val voiceHere by remember(voice, voiceOwner) {
+                (voice?.state ?: IDLE_VOICE).map { it.owner == voiceOwner }.distinctUntilChanged()
+            }.collectAsStateWithLifecycle(false)
+            val callActive by (voice?.callActive ?: NO_CALL).collectAsStateWithLifecycle()
+            if (voice != null && voiceHere) {
+                VoiceRecorderBar(voice, onSendVoice)
+            } else Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Bottom) {
                 if (canAttach) {
-                    AttachButton(enabled = state.editing == null, freeSlots = MAX_ATTACHMENTS - state.files.size, onFiles = onAddFiles)
+                    AttachButton(
+                        enabled = state.editing == null,
+                        freeSlots = MAX_ATTACHMENTS - state.files.size,
+                        onFiles = onAddFiles,
+                        onRecordVoice = voice?.let {
+                            {
+                                // O teclado cede o lugar à barra de gravação.
+                                keyboard?.hide()
+                                focusManager.clearFocus()
+                                it.start(voiceOwner)
+                            }
+                        },
+                        voiceAvailable = !callActive,
+                    )
                 } else {
                     // O campo ocuparia o lugar do clipe: a folga mantém o recuo de quando ele existe.
                     Spacer(Modifier.width(8.dp))

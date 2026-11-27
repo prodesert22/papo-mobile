@@ -39,6 +39,11 @@ release notes in [releases/](../releases/) describe each version's changes.
 - Choose what the app's own notifications show: everything, nothing on the
   phone's lock screen, or only "Nova mensagem" everywhere. Push notifications
   shown by Android follow the server's preview instead.
+- The phone keeps only the 120 newest messages of the 3 conversations, channels
+  or direct messages, you opened last on each account, with their images, GIFs
+  and video posters. Videos are never stored. The rest of the history is
+  removed from the phone and fetched from the server when you open the
+  conversation.
 - The in-app YouTube player is the one exception: while it is open, the phone's
   web component keeps its cookies and cache unencrypted in the app's folder.
   They are deleted when the player closes and when the app locks; a few empty
@@ -87,6 +92,12 @@ release notes in [releases/](../releases/) describe each version's changes.
   attachments too. Up to 10 files, 100 MB each and 105 MB together; files upload
   as a stream, with progress and a cancel button, and a JPEG that carries its
   location warns you before sending.
+- Record a voice message from the clip menu: the app asks for the microphone,
+  records up to 30 minutes, and after you stop you can listen, discard or send
+  it. It goes out as its own message, answering the message you were replying
+  to, and what you typed and the files you attached stay in the composer. It
+  is sent as an audio file that plays in the message here and on the web, and
+  it is kept only in memory: never written to the phone's storage.
 - Replies, editing and deleting, reactions, pinned messages and
   mentions. Mentions find people by any part of their name, without caring about
   accents (in a direct conversation, only its two people), and messages that
@@ -274,4 +285,8 @@ release notes in [releases/](../releases/) describe each version's changes.
   to 20 MB each.
 - Messages waiting to be sent, and files attached to a draft, are lost when the
   app locks or closes.
+- A voice message cannot be recorded during a voice call, and leaving the app
+  stops the recording: it is kept to listen to and send when you come back. It
+  is discarded when you leave the conversation or the app locks. The microphone
+  permission you refuse for good has to be given in the phone's settings.
 - The interface is in Portuguese.

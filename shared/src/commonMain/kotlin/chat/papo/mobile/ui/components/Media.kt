@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.avatarMediaName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -94,7 +95,7 @@ fun rememberMediaPainter(
  */
 @Composable
 fun rememberUserAvatarImage(session: AccountSession, user: User?): State<ImageBitmap?> =
-    rememberMediaImage(session, user?.let { "avatar/${it.id}/${it.avatarVersion}" }, holdFailures = true) {
+    rememberMediaImage(session, user?.let { avatarMediaName(it.id, it.avatarVersion) }, holdFailures = true) {
         user?.let { session.api.avatar(it.id) }
     }
 

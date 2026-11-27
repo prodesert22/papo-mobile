@@ -224,6 +224,23 @@ DELETE FROM message WHERE channel_id = ? AND created_us < ?;
 deleteChannelMessages:
 DELETE FROM message WHERE channel_id = ?;
 
+-- Retenção: os canais que têm mensagem guardada, quantas, e o corte para as mais novas.
+selectMessageChannels:
+SELECT DISTINCT channel_id FROM message;
+
+countChannelMessages:
+SELECT COUNT(*) FROM message WHERE channel_id = ?;
+
+-- Apaga o que passa das :keep mais novas do canal, na ordem de selectMessages.
+trimChannelMessages:
+DELETE FROM message WHERE id IN (
+    SELECT id FROM message WHERE channel_id = :channel_id ORDER BY created_us DESC, id DESC LIMIT -1 OFFSET :keep
+);
+
+-- Só o que decide a mídia guardada: anexos e embeds das mensagens que os têm.
+selectMessageMedia:
+SELECT attachments, embeds FROM message WHERE attachments <> '[]' OR embeds <> '[]';
+
 editMessage:
 UPDATE message SET content = ?, edited_at = ? WHERE id = ?;
 

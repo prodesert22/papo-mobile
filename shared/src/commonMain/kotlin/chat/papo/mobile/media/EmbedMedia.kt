@@ -4,12 +4,6 @@ import chat.papo.mobile.account.AccountSession
 import chat.papo.mobile.data.api.EmbedDto
 import kotlin.io.encoding.Base64
 
-/** Nome da imagem do embed no cache cifrado da conta: a `thumbnail` ou, sem ela, a `image`. */
-internal fun embedImageKey(embedId: String) = "embed/$embedId"
-
-/** Nome do ícone do autor do embed no cache cifrado da conta. */
-internal fun embedAuthorKey(embedId: String) = "embed-author/$embedId"
-
 /** O embed tem uma imagem que o servidor serve em `GET /embeds/{id}`? */
 internal fun EmbedDto.hasImage() = thumbnail != null || image != null
 

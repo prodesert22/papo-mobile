@@ -72,6 +72,8 @@ fun createAndroidGraph(
             pushTokens = pushTokens,
             notificationPrivacy = notificationPrivacy,
             libraryDefinitions = { readRawText(app, libraryDefinitionsRes) },
+            voiceRecorder = AndroidVoiceRecorder(app, requests, activities),
+            voiceClipPlayers = androidVoiceClipPlayerFactory(app),
         ),
     )
     // O que ficou para outros aplicativos lerem (Compartilhar) não sobrevive ao bloqueio nem ao apagamento dos dados locais.

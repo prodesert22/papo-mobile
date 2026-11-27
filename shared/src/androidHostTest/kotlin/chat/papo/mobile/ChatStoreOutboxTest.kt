@@ -114,7 +114,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun umCanalEnviaUmaPorVezNaOrdemEmQueAsMensagensForamMandadas() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         val gateA = hold("a")
         val gateB = hold("b")
         hold("c").complete(Unit)
@@ -138,7 +138,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun umRateLimitFazExatamenteUmPostERetentativaSoPeloUsuario() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         behavior = { problem(HttpStatusCode.TooManyRequests, "Limite de requisições excedido") }
 
         val a = chat.enqueue("c1", "a", null, emptyList())
@@ -158,7 +158,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun retirarDaFilaUmaMensagemEmEsperaNaoFazPedido() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         val gate = hold("a")
         holdAll()
 
@@ -177,7 +177,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun cancelarEmVooAntesDosBytesDescartaAMensagemEFechaOPedido() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         readBody = false // o servidor ainda não leu nada do que foi enviado
         val closed = CompletableDeferred<Unit>()
         behavior = {
@@ -200,7 +200,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun cancelarEmVooDepoisDeTodosOsBytesDeixaIncertaEPausaOCanal() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         val closed = CompletableDeferred<Unit>()
         behavior = {
             try {
@@ -227,7 +227,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun eventoDoWebSocketAntesDaRespostaNaoDuplicaAMensagem() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         val gate = hold("oi")
         hold("depois").complete(Unit)
         holdAll()
@@ -249,7 +249,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun ecoTardioDeUmaMensagemJaConfirmadaNaoTiraAIgualQueAindaEstaSaindo() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         val second = CompletableDeferred<Unit>()
         behavior = { post ->
             if (post.number == 2) second.await() // a primeira é respondida na hora; a segunda espera o teste
@@ -271,7 +271,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun mensagemDeOutraPessoaComOMesmoTextoNaoTiraANossa() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         val gate = hold("oi")
         holdAll()
 
@@ -289,7 +289,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun reenviarUmaMensagemQueFalhouLevaOMesmoTextoEAResposta() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         behavior = { post ->
             if (post.number == 1) problem(HttpStatusCode.Forbidden, "Sem permissão") else created(post.content.orEmpty(), "s${post.number}")
         }
@@ -309,7 +309,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun respostaDeErroDoServidorFicaIncertaEReenviarPedeConfirmacao() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         behavior = { post ->
             if (post.number == 1) problem(HttpStatusCode.BadGateway, "indisponível") else created(post.content.orEmpty(), "s${post.number}")
         }
@@ -328,7 +328,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun semConexaoANaoEnviadaAindaEPodeSerReenviadaSemConfirmar() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         readBody = false
         behavior = { throw java.net.ConnectException("Failed to connect") }
 
@@ -344,7 +344,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun arquivoQueNaoAbreFalhaSemChegarAoServidorENaoVoltaSozinho() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         var available = false
         val photo = OutgoingFile(
             "foto.jpg", "image/jpeg", 3,
@@ -369,7 +369,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun corpoRecusadoPorTamanhoNaoCriouAMensagemEFicaComMotivoProprio() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         behavior = { problem(HttpStatusCode.PayloadTooLarge, "corpo da requisição excede o tamanho máximo permitido") }
 
         chat.enqueue("c1", "muito", null, listOf(file()))
@@ -382,7 +382,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun conexaoCortadaDepoisDeEnviarOCorpoFicaIncerta() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         behavior = { throw java.io.IOException("reset") }
 
         chat.enqueue("c1", "x", null, listOf(file()))
@@ -392,7 +392,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun paginaDoHistoricoComAMensagemIncertaAConfirmaSemDuplicar() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         behavior = { problem(HttpStatusCode.GatewayTimeout, "demorou") }
         chat.enqueue("c1", "oi", null, emptyList())
         chat.outbox.first { it.firstOrNull()?.status == PendingStatus.Uncertain }
@@ -421,6 +421,7 @@ class ChatStoreOutboxTest {
             scope = backgroundScope,
             io = StandardTestDispatcher(testScheduler),
         )
+        store.conversationOpened("c1") // só conversa aberta guarda mensagens do tempo real
         return store to db
     }
 
@@ -466,7 +467,7 @@ class ChatStoreOutboxTest {
 
     @Test
     fun guardadaPeloBancoAMensagemSeLeSemIrAoServidor() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("c1")).chat
         chat.handle(WsEvent.MessageCreated("m1", "c1", "u2", content = "guardada", createdAt = "2026-01-01T00:00:01Z"))
 
         assertEquals("guardada", chat.storedMessage("c1", "m1")?.content)

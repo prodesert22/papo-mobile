@@ -82,6 +82,8 @@ import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.media.PREVIEW_MAX_BYTES
 import chat.papo.mobile.media.PlaybackFailure
 import chat.papo.mobile.media.PosterSource
+import chat.papo.mobile.media.attachmentOriginalKey
+import chat.papo.mobile.media.attachmentThumbKey
 import chat.papo.mobile.media.embedImageKey
 import chat.papo.mobile.media.fetchEmbedImage
 import chat.papo.mobile.media.guardGone
@@ -399,11 +401,9 @@ private class ViewerAction(
 
 /** O original de [attachmentId], do cache cifrado da conta (que o visualizador já encheu) ou do servidor; um 410 bloqueia o anexo. */
 private suspend fun originalBytes(session: AccountSession, messageId: String, attachmentId: String): ByteArray? =
-    session.media.get(originalName(attachmentId)) {
+    session.media.get(attachmentOriginalKey(attachmentId)) {
         session.guardGone(messageId, attachmentId) { session.api.attachment(attachmentId) }
     }
-
-private fun originalName(attachmentId: String) = "att/$attachmentId"
 
 /** O que **Salvar** e **Compartilhar** entregam à plataforma: a imagem da página, na memória, com o nome e o tipo dela. */
 private class ExportFile(val name: String, val mimeType: String, val bytes: ByteArray)
@@ -467,7 +467,7 @@ private fun rememberViewerImage(key1: Any?, key2: Any?, load: suspend () -> Plat
 private fun MessageImagePage(session: AccountSession, messageId: String, attachment: AttachmentDto, onGone: () -> Unit) {
     val platform = LocalPlatformUi.current
     val load = rememberViewerImage(session.accountId, attachment.id) {
-        session.media.get(originalName(attachment.id)) {
+        session.media.get(attachmentOriginalKey(attachment.id)) {
             session.guardGone(messageId, attachment.id, onGone = onGone) { session.api.attachment(attachment.id) }
         }?.let { platform.decodeImage(it, VIEWER_IMAGE_PX, animate = true) }
     }
@@ -536,8 +536,8 @@ private fun VideoCover(session: AccountSession, messageId: String, attachment: A
     val poster by rememberMediaImage(
         session,
         when (source) {
-            PosterSource.Server -> "att-thumb/${attachment.id}"
-            PosterSource.Extract -> posterKey(session.accountId, attachment.id)
+            PosterSource.Server -> attachmentThumbKey(attachment.id)
+            PosterSource.Extract -> posterKey(attachment.id)
             PosterSource.None -> null
         },
     ) {

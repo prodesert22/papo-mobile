@@ -61,7 +61,7 @@ class VoiceChannelChatTest {
 
     @Test
     fun mensagemEmCanalDeVozChegaEmTempoRealParaQuemNaoEstaNaChamadaNemNaConversa() = runTest {
-        val chat = TestResources.session(engine, this).chat
+        val chat = TestResources.session(engine, this, open = listOf("v1")).chat
         chat.sync()
         runCurrent()
         assertEquals(ChannelType.Voice, chat.channels.value.single().type)
@@ -79,7 +79,7 @@ class VoiceChannelChatTest {
     @Test
     fun conversaAbertaDeUmCanalDeVozMostraAsMensagensQueChegamEEnviaParaOCanal() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        val session = TestResources.session(engine, this)
+        val session = TestResources.session(engine, this, open = listOf("v1"))
         session.chat.sync()
         runCurrent()
         val vm = ChatViewModel(session, "v1")
