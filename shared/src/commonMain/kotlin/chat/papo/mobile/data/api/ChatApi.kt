@@ -60,6 +60,68 @@ class ChatApi(private val client: PapoClient) {
     suspend fun profile(userId: String): UserProfileDto =
         http.get { url(path("/users/$userId/profile")) }.bodyOrThrow()
 
+    /** Atualiza apelido, frase de status e descrição. Só a própria conta. */
+    suspend fun updateProfile(userId: String, request: UpdateProfileRequest) {
+        http.put {
+            url(path("/users/$userId"))
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }.requireSuccess()
+    }
+
+    /** Troca o avatar (base64, até 2 MB e 512 px). O corpo é grande: tempo maior que o de uma requisição comum. */
+    suspend fun updateAvatar(userId: String, request: UpdateAvatarRequest) {
+        http.put {
+            url(path("/users/$userId/avatar"))
+            contentType(ContentType.Application.Json)
+            setBody(request)
+            timeout { requestTimeoutMillis = 2 * 60_000; socketTimeoutMillis = 60_000 }
+        }.requireSuccess()
+    }
+
+    /** Troca o banner (até 2 MB e 2048 px); com os dois campos vazios, remove-o. */
+    suspend fun updateBanner(userId: String, request: UpdateBannerRequest) {
+        http.put {
+            url(path("/users/$userId/banner"))
+            contentType(ContentType.Application.Json)
+            setBody(request)
+            timeout { requestTimeoutMillis = 2 * 60_000; socketTimeoutMillis = 60_000 }
+        }.requireSuccess()
+    }
+
+    /** `away`, `busy` ou null (disponível). */
+    suspend fun updateStatus(userId: String, status: String?) {
+        http.put {
+            url(path("/users/$userId/status"))
+            contentType(ContentType.Application.Json)
+            setBody(UpdateStatusRequest(status))
+        }.requireSuccess()
+    }
+
+    /** Usuários que a conta bloqueou. */
+    suspend fun blocks(): List<UserSummaryDto> =
+        http.get { url(path("/users/blocks")) }.bodyOrThrow<BlocksResponse>().users
+
+    /** Idempotente (204). Vale nas duas direções para mensagens diretas; canais não mudam. */
+    suspend fun block(userId: String) = http.post { url(path("/users/$userId/block")) }.requireSuccess()
+
+    /** Idempotente (204). Não reabre uma DM fechada. */
+    suspend fun unblock(userId: String) = http.delete { url(path("/users/$userId/block")) }.requireSuccess()
+
+    /** Passo 1 da troca de senha: marca a conta para aceitar `PUT /users/{id}/password`. */
+    suspend fun prepareOwnPasswordChange(userId: String) {
+        http.post { url(path("/users/$userId/reset")) }.requireSuccess()
+    }
+
+    /** Passo 2. Encerra todas as sessões da conta, inclusive esta. */
+    suspend fun changePassword(userId: String, password: String) {
+        http.put {
+            url(path("/users/$userId/password"))
+            contentType(ContentType.Application.Json)
+            setBody(ChangePasswordRequest(password))
+        }.requireSuccess()
+    }
+
     /** Bytes do avatar, ou null se o usuário não tem um. */
     suspend fun avatar(userId: String): ByteArray? = bytesOrNull("/users/$userId/avatar")
 

@@ -98,6 +98,20 @@ class ProfilesTest {
     }
 
     @Test
+    fun fraseDeDigitacaoESoStatusGuardadoVindosDoServidor() {
+        val full = UserProfileDto(id = "u1", username = "ana", typing = "  pensando…  ", status = "busy").toProfile()
+        assertEquals("pensando…", full.typing)
+        assertEquals("busy", full.status)
+
+        assertEquals("away", UserProfileDto(id = "u1", username = "ana", status = "away").toProfile().status)
+        // Em branco ou fora do contrato: vira ausente, e "disponível" é ausência de status.
+        val empty = UserProfileDto(id = "u1", username = "ana", typing = " ", status = "online").toProfile()
+        assertNull(empty.typing)
+        assertNull(empty.status)
+        assertNull(UserProfileDto(id = "u1", username = "ana").toProfile().status)
+    }
+
+    @Test
     fun dataDeCriacaoIlegivelOuAusenteNaoQuebra() {
         assertNull(dto(createdAt = null).toProfile().memberSince)
         assertNull(dto(createdAt = "ontem").toProfile().memberSince)

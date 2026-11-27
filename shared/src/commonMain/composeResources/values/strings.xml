@@ -76,6 +76,50 @@
     <string name="security_alert_body">O servidor detectou o reuso de um token desta conta e encerrou todas as conexões. Se não foi você, troque a senha.</string>
     <string name="security_alert_dismiss">Entendi</string>
 
+    <!-- Editar perfil -->
+    <string name="profile_edit_action">Editar perfil</string>
+    <string name="profile_edit_title">Editar perfil</string>
+    <string name="profile_edit_row_title">Perfil e status</string>
+    <string name="profile_edit_row_body">Apelido, frase de status, descrição, avatar e banner.</string>
+    <string name="profile_edit_nickname">Apelido</string>
+    <string name="profile_edit_status_message">Frase de status</string>
+    <string name="profile_edit_description">Descrição</string>
+    <string name="profile_edit_typing">Frase de digitação</string>
+    <string name="profile_edit_typing_help">Aparece para os outros enquanto você digita.</string>
+    <string name="profile_edit_counter">%1$d/%2$d</string>
+    <string name="profile_edit_avatar_help">Você escolhe o recorte, em quadrado; a imagem é reduzida para até 512 px antes de enviar.</string>
+    <string name="profile_edit_banner_help">Você escolhe o recorte, na proporção 3:1; a imagem é reduzida para até 1536 × 512 px antes de enviar.</string>
+    <string name="profile_edit_pick_avatar">Escolher avatar</string>
+    <string name="profile_edit_pick_banner">Escolher banner</string>
+    <string name="profile_edit_remove_banner">Remover banner</string>
+    <string name="profile_edit_banner_removal">O banner será removido ao salvar.</string>
+    <string name="profile_edit_unsaved">Alterações não salvas</string>
+    <string name="profile_edit_discard_all">Descartar</string>
+    <string name="profile_edit_discard">Desfazer escolha</string>
+    <string name="profile_edit_save">Salvar</string>
+    <string name="profile_edit_saving">Salvando…</string>
+    <string name="profile_edit_reload">Recarregar perfil</string>
+    <string name="profile_edit_step_text">Dados do perfil</string>
+    <string name="profile_edit_step_avatar">Avatar</string>
+    <string name="profile_edit_step_banner">Banner</string>
+    <string name="profile_edit_outcome_sending">Enviando…</string>
+    <string name="profile_edit_outcome_saved">Salvo.</string>
+    <string name="profile_edit_outcome_skipped">Não enviado: um pedido anterior falhou.</string>
+    <string name="profile_edit_failed_rejected">O servidor recusou a mudança.</string>
+    <string name="profile_edit_failed_rate_limited">Muitos pedidos. Espere um pouco e salve de novo.</string>
+    <string name="profile_edit_failed_not_sent">Sem conexão. Nada foi enviado; salve de novo quando voltar.</string>
+    <string name="profile_edit_failed_unauthorized">A sessão desta conta terminou. Entre de novo.</string>
+    <string name="profile_edit_failed_uncertain">Não confirmado. O servidor pode ter aplicado a mudança: recarregue o perfil antes de tentar de novo.</string>
+    <string name="profile_edit_refused_not_an_image">Não foi possível abrir esta imagem.</string>
+    <string name="profile_edit_refused_source_too_large">O arquivo é grande demais (mais de 32 MB).</string>
+    <string name="profile_edit_refused_animation">Esta animação é maior que o servidor aceita (2 MB; 512 px no avatar e 2048 px no banner). Escolha uma menor ou uma imagem parada.</string>
+    <string name="profile_edit_refused_too_heavy">Mesmo comprimida, a imagem passa de 2 MB. Escolha uma mais simples.</string>
+    <string name="profile_edit_refused_unreadable">Não foi possível ler o arquivo.</string>
+    <string name="profile_status_title">Status</string>
+    <string name="profile_status_available">Disponível</string>
+    <string name="profile_status_away">Ausente</string>
+    <string name="profile_status_busy">Ocupado</string>
+
     <!-- Configurações da conta -->
     <string name="account_label">Apelido desta conta</string>
     <string name="account_label_hint">Ex.: Trabalho, Pessoal</string>
@@ -92,6 +136,74 @@
     <string name="account_remove_title">Sair de %1$s?</string>
     <string name="account_remove_body">A conta sai deste aparelho e as mensagens guardadas aqui são apagadas. Nada é apagado no servidor.</string>
     <string name="account_remove_confirm">Sair</string>
+
+    <!-- Membros, bloqueios e senha -->
+    <string name="server_title">Servidor</string>
+    <string name="server_public">Público</string>
+    <string name="server_closed">Fechado: pede a senha do servidor</string>
+    <string name="server_owner">Dono: %1$s</string>
+    <plurals name="server_channels">
+        <item quantity="one">%1$d canal</item>
+        <item quantity="other">%1$d canais</item>
+    </plurals>
+    <plurals name="server_roles">
+        <item quantity="one">%1$d cargo</item>
+        <item quantity="other">%1$d cargos</item>
+    </plurals>
+    <string name="server_created">Criado em %1$s</string>
+    <string name="server_stale">Mostrando o que está gravado neste aparelho.</string>
+    <string name="error_dm_blocked">Não é possível trocar mensagens diretas com esta pessoa.</string>
+
+    <!-- Resultado de uma mudança no servidor (bloqueio, senha) -->
+    <string name="mutation_rate_limited">O servidor pediu para esperar um pouco. Tente de novo daqui a pouco.</string>
+    <string name="mutation_not_sent">Sem conexão com o servidor. Nada foi alterado.</string>
+    <string name="mutation_unauthorized">A sessão desta conta terminou. Entre de novo.</string>
+    <string name="mutation_rejected">O servidor recusou o pedido.</string>
+
+    <!-- Segurança e bloqueios -->
+    <string name="account_security">Segurança</string>
+    <string name="account_blocked_users">Usuários bloqueados</string>
+    <string name="account_change_password">Trocar a senha</string>
+    <string name="blocked_title">Usuários bloqueados</string>
+    <string name="blocked_empty">Você não bloqueou ninguém.</string>
+    <string name="blocked_help">Quem você bloqueia não troca mensagens diretas com você. As mensagens nos canais continuam visíveis.</string>
+    <string name="blocked_unblock">Desbloquear</string>
+    <string name="blocked_uncertain">Não foi possível confirmar. Confira a lista antes de tentar de novo.</string>
+    <string name="profile_block">Bloquear</string>
+    <string name="profile_unblock">Desbloquear</string>
+    <string name="profile_block_title">Bloquear %1$s?</string>
+    <string name="profile_block_body">Vocês não poderão trocar mensagens diretas. Mensagens em canais continuam visíveis.</string>
+
+    <!-- Senha -->
+    <string name="password_new">Nova senha</string>
+    <string name="password_repeat">Repita a nova senha</string>
+    <string name="password_rules">Pelo menos 8 caracteres, com uma letra maiúscula e um símbolo. O servidor pode exigir mais.</string>
+    <string name="password_problem_short">Use pelo menos 8 caracteres.</string>
+    <string name="password_problem_upper">Falta uma letra maiúscula.</string>
+    <string name="password_problem_symbol">Falta um símbolo: algo que não seja letra nem número.</string>
+    <string name="password_mismatch">As duas senhas são diferentes.</string>
+    <string name="password_change_title">Trocar a senha</string>
+    <string name="password_change_body">O servidor não pede a senha de agora, então confira que é você quem está trocando.</string>
+    <string name="password_change_submit">Trocar a senha</string>
+    <string name="password_change_confirm_title">Trocar a senha?</string>
+    <string name="password_change_confirm_body">Todas as sessões desta conta terminam, inclusive esta. Você vai entrar de novo com a senha nova.</string>
+    <plurals name="password_change_queue">
+        <item quantity="one">%1$d mensagem ainda não saiu e vai se perder.</item>
+        <item quantity="other">%1$d mensagens ainda não saíram e vão se perder.</item>
+    </plurals>
+    <string name="password_change_uncertain_prepare">Não foi possível confirmar o pedido. A senha não mudou; você pode tentar de novo.</string>
+    <string name="password_change_uncertain">Não foi possível confirmar se a senha mudou. Tente entrar com a senha nova antes de repetir.</string>
+    <string name="reset_open">Redefinir senha com um link</string>
+    <string name="reset_title">Redefinir a senha</string>
+    <string name="reset_body">Cole o link de redefinição que o dono do servidor gerou para você e escolha a senha nova.</string>
+    <string name="reset_link">Link de redefinição</string>
+    <string name="reset_link_invalid">Isso não parece um link de redefinição.</string>
+    <string name="reset_host_mismatch">O link é de %1$s, mas este servidor é %2$s. Só continue se confia em quem mandou o link.</string>
+    <string name="reset_submit">Redefinir a senha</string>
+    <string name="reset_submit_anyway">Enviar mesmo assim</string>
+    <string name="reset_gone">Link inválido, expirado ou já usado.</string>
+    <string name="reset_uncertain">Não foi possível confirmar. Tente entrar com a senha nova antes de pedir outro link.</string>
+    <string name="reset_done">Senha redefinida. Entre com a senha nova.</string>
 
     <!-- Configurações do app -->
     <string name="settings_title">Configurações</string>
@@ -421,4 +533,13 @@
     <string name="msg_link_open">Abrir link</string>
     <!-- Painel da conversa sobre a lista de canais (0.6.1): a faixa da conversa estacionada -->
     <string name="conversation_panel_resume">Voltar à conversa</string>
+    <!-- Recorte da imagem -->
+    <string name="crop_title">Editar imagem</string>
+    <string name="crop_cancel">Cancelar</string>
+    <string name="crop_confirm">Confirmar</string>
+    <string name="crop_rotate">Girar</string>
+    <string name="crop_reset">Tamanho</string>
+    <string name="crop_zoom">Zoom</string>
+    <string name="crop_zoom_percent">%1$d%</string>
+    <string name="crop_area">Área de recorte. Arraste para mover a imagem e use dois dedos para ampliar.</string>
 </resources>

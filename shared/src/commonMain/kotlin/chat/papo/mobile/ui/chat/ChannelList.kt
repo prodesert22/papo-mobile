@@ -56,6 +56,7 @@ import chat.papo.mobile.chat.searchByName
 import chat.papo.mobile.data.ws.WsState
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.action_cancel
+import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.action_retry
 import chat.papo.mobile.resources.channels_direct
 import chat.papo.mobile.resources.channels_in_voice
@@ -69,7 +70,10 @@ import chat.papo.mobile.resources.channels_uncategorized
 import chat.papo.mobile.resources.dm_pick_search
 import chat.papo.mobile.resources.dm_pick_title
 import chat.papo.mobile.resources.search_clear_filter
+import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.UserAvatar
+import chat.papo.mobile.ui.components.text
+import chat.papo.mobile.ui.components.toUiError
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
@@ -90,7 +94,9 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
     val syncError by chat.syncError.collectAsStateWithLifecycle()
     val syncing by chat.syncing.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val blocked by session.blocks.blocked.collectAsStateWithLifecycle()
     var pickingUser by remember { mutableStateOf(false) }
+    var dmError by remember { mutableStateOf<UiError?>(null) }
     val groups = remember(channels) { groupChannels(channels) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -151,12 +157,28 @@ fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit
         UserPickerDialog(
             session = session,
             title = stringResource(Res.string.dm_pick_title),
-            users = users.values.filter { it.id != session.userId && !it.banned }.sortedBy { it.displayName.lowercase() },
+            users = users.values.filter { it.id != session.userId && !it.banned && it.id !in blocked }.sortedBy { it.displayName.lowercase() },
             onDismiss = { pickingUser = false },
             onPick = { user ->
                 pickingUser = false
-                scope.launch { runCatching { chat.openDm(user.id) }.onSuccess(onOpen) }
+                scope.launch {
+                    val channelId = try {
+                        chat.openDm(user.id)
+                    } catch (e: Throwable) {
+                        // Um bloqueio de quem foi escolhido, ou qualquer outra recusa, aparece em vez de sumir.
+                        dmError = e.toUiError() // relança o cancelamento
+                        return@launch
+                    }
+                    onOpen(channelId)
+                }
             },
+        )
+    }
+    dmError?.let { error ->
+        AlertDialog(
+            onDismissRequest = { dmError = null },
+            text = { Text(error.text()) },
+            confirmButton = { TextButton(onClick = { dmError = null }) { Text(stringResource(Res.string.action_close)) } },
         )
     }
 }

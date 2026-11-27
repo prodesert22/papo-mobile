@@ -5,6 +5,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.PapoClient
+import chat.papo.mobile.media.ImageReducer
 import chat.papo.mobile.media.PlayableMedia
 import chat.papo.mobile.media.PlaybackFailure
 import chat.papo.mobile.voice.VideoTrackHandle
@@ -80,6 +81,17 @@ interface PlatformUi {
      */
     @Composable
     fun rememberMediaPicker(maxItems: Int, onPicked: (List<OutgoingFile>) -> Unit): () -> Unit
+
+    /**
+     * Devolve a ação que abre o seletor de fotos do sistema só com imagens, que dispensa a permissão de armazenamento, para
+     * escolher o avatar ou o banner. [onPicked] recebe a imagem escolhida descrita como um [OutgoingFile] (nada copiado);
+     * se o usuário desiste, não é chamado.
+     */
+    @Composable
+    fun rememberImagePicker(onPicked: (OutgoingFile) -> Unit): () -> Unit
+
+    /** Quem prepara a imagem escolhida para o perfil, em memória e fora da thread principal. */
+    val imageReducer: ImageReducer
 
     /**
      * O player do YouTube embutido, que toca o vídeo [videoId] (um id já validado por `isYouTubeId`) assim que entra na

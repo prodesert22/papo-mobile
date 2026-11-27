@@ -1,3 +1,5 @@
+<div align="center">
+
 # Papo Mobile
 
 [![CI](https://github.com/prodesert22/papo-mobile/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/prodesert22/papo-mobile/actions/workflows/ci.yml)
@@ -8,6 +10,8 @@
 [![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)](#compilar)
 
 [Read in English](README.md)
+
+</div>
 
 Cliente Android do [Papo](https://github.com/prodesert22/papo-backend), um
 serviço de chat auto-hospedado com texto, voz e vídeo. Entre em vários servidores

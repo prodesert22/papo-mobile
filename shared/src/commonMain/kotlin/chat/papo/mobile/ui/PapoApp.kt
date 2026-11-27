@@ -3,7 +3,6 @@ package chat.papo.mobile.ui
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -77,12 +76,18 @@ import chat.papo.mobile.ui.home.rememberConversationPanelState
 import chat.papo.mobile.ui.home.step
 import chat.papo.mobile.ui.lock.LockScreen
 import chat.papo.mobile.ui.members.MembersDrawer
+import chat.papo.mobile.ui.profile.EditProfileScreen
+import chat.papo.mobile.ui.profile.EditProfileViewModel
 import chat.papo.mobile.ui.profile.ProfileScreen
 import chat.papo.mobile.ui.profile.ProfileViewModel
 import chat.papo.mobile.ui.search.SearchScreen
 import chat.papo.mobile.ui.search.SearchViewModel
 import chat.papo.mobile.ui.settings.AccountSettingsScreen
 import chat.papo.mobile.ui.settings.AppSettingsScreen
+import chat.papo.mobile.ui.settings.BlockedUsersScreen
+import chat.papo.mobile.ui.settings.BlockedUsersViewModel
+import chat.papo.mobile.ui.settings.ChangePasswordScreen
+import chat.papo.mobile.ui.settings.ChangePasswordViewModel
 import chat.papo.mobile.ui.switcher.QuickSwitcherScreen
 import chat.papo.mobile.ui.switcher.QuickSwitcherViewModel
 import chat.papo.mobile.ui.theme.PapoTheme
@@ -94,9 +99,6 @@ import org.jetbrains.compose.resources.stringResource
 
 /** O deslize de uma tela que entra ou sai sozinha (um toque, o botão de voltar). */
 private val ScreenSlide = tween<IntOffset>(durationMillis = 300, easing = FastOutSlowInEasing)
-
-/** O deslize conduzido pelo gesto de voltar: linear, para a tela andar na mesma proporção do dedo. */
-private val ScreenFollow = tween<IntOffset>(durationMillis = 300, easing = LinearEasing)
 
 @Serializable
 private data object HomeRoute
@@ -120,6 +122,18 @@ private data class SearchRoute(val accountId: String, val channelId: String? = n
 /** Perfil de [userId], um usuário da conta [accountId]. */
 @Serializable
 private data class ProfileRoute(val accountId: String, val userId: String)
+
+/** Os usuários que a conta [accountId] bloqueou. */
+@Serializable
+private data class BlockedRoute(val accountId: String)
+
+/** A troca da senha da conta [accountId]. */
+@Serializable
+private data class PasswordRoute(val accountId: String)
+
+/** Edição do próprio perfil da conta [accountId]. */
+@Serializable
+private data class EditProfileRoute(val accountId: String)
 
 /** Troca rápida entre as conversas de todas as contas; [accountId] e [channelId] são a conversa de onde veio, se houve. */
 @Serializable
@@ -201,7 +215,8 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
     ReopenChatOnReturn(session, panel, navController, openChat)
 
     // Uma tela nova entra deslizando da borda direita por cima da anterior, que fica parada embaixo, e sai pelo mesmo
-    // caminho. No gesto de voltar ela acompanha o dedo; o padrão da biblioteca era encolher a tela para o centro.
+    // caminho. No gesto de voltar nada se mexe enquanto o dedo está na tela: a saída só desliza depois que a volta é
+    // confirmada (o app não usa o gesto previsivo do Android, ver `enableOnBackInvokedCallback` no manifesto).
     NavHost(
         navController,
         startDestination = HomeRoute,
@@ -210,8 +225,6 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
         exitTransition = { ExitTransition.KeepUntilTransitionsFinished },
         popEnterTransition = { EnterTransition.None },
         popExitTransition = { slideOutHorizontally(ScreenSlide) { it } },
-        predictivePopEnterTransition = { EnterTransition.None },
-        predictivePopExitTransition = { slideOutHorizontally(ScreenFollow) { it } },
     ) {
         composable<HomeRoute> {
             if (accounts.isEmpty()) {
@@ -239,6 +252,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                             onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
                             onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
                             onSearch = { navController.navigate(SearchRoute(it.id)) },
+                            onEditProfile = { navController.navigate(EditProfileRoute(it.id)) },
                             onSwitch = { navController.navigate(SwitcherRoute()) },
                             onAppSettings = { navController.navigate(AppSettingsRoute) },
                             content = { account ->
@@ -294,7 +308,23 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                     onBack = { navController.popBackStack() },
                     // Veio desta conversa (o título da conversa direta leva ao perfil) ou da lista: ela abre no painel.
                     onOpenChat = { channelId -> openChat(route.accountId, ParkedChat(channelId)) },
+                    onEdit = { navController.navigate(EditProfileRoute(route.accountId)) },
                 )
+            }
+        }
+        composable<EditProfileRoute> { entry ->
+            val route = entry.toRoute<EditProfileRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                val reducer = LocalPlatformUi.current.imageReducer
+                // A sessão entra na chave: o que se edita numa sessão nunca vai para outra.
+                val vm = viewModel(key = "edit-profile/${route.accountId}/${accountSession.hashCode()}") {
+                    EditProfileViewModel(accountSession, reducer)
+                }
+                EditProfileScreen(accountSession, vm, onBack = { navController.popBackStack() })
             }
         }
         composable<SearchRoute> { entry ->
@@ -325,7 +355,46 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
             )
         }
         composable<AccountSettingsRoute> { entry ->
-            AccountSettingsScreen(session, entry.toRoute<AccountSettingsRoute>().accountId, onBack = { navController.popBackStack() })
+            val accountId = entry.toRoute<AccountSettingsRoute>().accountId
+            AccountSettingsScreen(
+                session,
+                accountId,
+                onBack = { navController.popBackStack() },
+                onOpenBlocked = { navController.navigate(BlockedRoute(accountId)) },
+                onOpenPassword = { navController.navigate(PasswordRoute(accountId)) },
+                onEditProfile = { navController.navigate(EditProfileRoute(accountId)) },
+            )
+        }
+        composable<PasswordRoute> { entry ->
+            val route = entry.toRoute<PasswordRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                // A sessão entra na chave: nada de uma troca de senha passa para outra conta.
+                val vm = viewModel(key = "password/${route.accountId}/${accountSession.hashCode()}") {
+                    ChangePasswordViewModel(accountSession, endSession = { session.accounts.endSession(route.accountId) })
+                }
+                ChangePasswordScreen(
+                    vm,
+                    onBack = { navController.popBackStack() },
+                    // A sessão acabou: a tela principal mostra a conta como expirada e leva ao "Entrar de novo".
+                    onDone = { navController.popBackStack(HomeRoute, inclusive = false) },
+                )
+            }
+        }
+        composable<BlockedRoute> { entry ->
+            val route = entry.toRoute<BlockedRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                // A sessão entra na chave: a lista de uma conta nunca aparece em outra.
+                val vm = viewModel(key = "blocked/${route.accountId}/${accountSession.hashCode()}") { BlockedUsersViewModel(accountSession.blocks) }
+                BlockedUsersScreen(accountSession, vm, onBack = { navController.popBackStack() })
+            }
         }
         composable<AppSettingsRoute> {
             AppSettingsScreen(lock, appVersion, onBack = { navController.popBackStack() })

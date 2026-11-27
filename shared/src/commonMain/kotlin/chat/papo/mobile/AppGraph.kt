@@ -24,6 +24,7 @@ import chat.papo.mobile.security.WebPlayerData
 import chat.papo.mobile.voice.CallManager
 import chat.papo.mobile.voice.VoiceEngineFactory
 import io.ktor.client.engine.HttpClientEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -69,6 +70,14 @@ class AppSession internal constructor(
     override suspend fun close() {
         calls.leave()
         audio?.release()
+        // Um rótulo ou cor escolhido há instantes ainda pode esperar o escritor; falhar aqui não pode deixar o registro aberto.
+        try {
+            accounts.flushAppearance()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // perde só a última escolha
+        }
         accounts.close()
         scope.cancel()
         registry.close()

@@ -12,6 +12,12 @@ release notes in [releases/](../releases/) describe each version's changes.
 - A nickname and a color for each account, to tell them apart.
 - Closed servers, which ask for the server password before you sign in.
 - Sessions that renew themselves, and a list of connected devices to sign out.
+- The server's details in the account settings: name, icon, whether it is
+  public or closed, owner, and how many members, channels and roles it has.
+- Change your password from the account settings, or reset it with a link from
+  the sign-in screen. The link's address usually belongs to the website, not
+  to the server's API, so the app shows both and asks before sending when they
+  differ.
 - A quick switcher that finds any conversation of any of your accounts, with
   mentions and unread conversations first.
 
@@ -108,6 +114,21 @@ release notes in [releases/](../releases/) describe each version's changes.
 - A member list for the server: the button at the top of a channel opens a panel
   from the right edge with everyone grouped by presence and a search by name.
   Tap a person to open their profile.
+- Edit your own profile: nickname, status message, description and typing
+  phrase, with your avatar and banner chosen from the gallery through a pencil button
+  on each image, laid out like a profile card. A picked picture opens an editor where you
+  move, zoom and rotate it under a fixed frame (square for the avatar, 3:1 for the
+  banner); the app then crops and shrinks it on the phone, drops the location it carries, and
+  shows the result of each change. You can also remove your banner, and choose
+  Available, Away or Busy from the profile editor or from your own profile, each
+  with a disc in the color of the status.
+- The top of the channel list shows your avatar, your name and the color of your
+  status; tap it to edit your profile.
+- Block people from their profile, and list or unblock them in the account
+  settings. Blocking removes the direct conversation and stops direct messages
+  in both directions; their messages in channels stay visible, and unblocking
+  does not bring the conversation back. The new conversation list hides the
+  people you blocked and says so when the other person blocked you.
 - Messages sent by a webhook carry an **APP** badge next to the name and show
   the webhook's avatar.
 
@@ -123,8 +144,15 @@ release notes in [releases/](../releases/) describe each version's changes.
 ## Current limitations
 
 - No push notifications: messages arrive only while the app is open.
-- No notification inbox, profile editing, user preferences, blocking or server
-  administration.
+- No notification inbox, user preferences or server administration.
+- Your avatar cannot be removed once set, only replaced, and an animated avatar or
+  banner is not cropped: it goes as it is when it fits the size limits and is
+  refused otherwise; there is no "invisible"
+  status.
+- Changing your password ends every session of the account, this one included,
+  and the server does not check the current password, so the app only asks you
+  to confirm. The check on the new password in the app is basic (8 characters, a
+  capital letter and a symbol); the server may ask for more.
 - The member list shows everyone on the server, not only the people who can read
   the channel you are in.
 - A webhook's avatar is shown only when it is stored on the server. A message

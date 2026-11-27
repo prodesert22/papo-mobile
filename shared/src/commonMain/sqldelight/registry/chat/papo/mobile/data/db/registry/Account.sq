@@ -46,8 +46,11 @@ UPDATE account SET username = ?, nickname = ? WHERE id = ?;
 updateServer:
 UPDATE account SET server_name = ?, server_icon = ? WHERE id = ?;
 
-updateAppearance:
-UPDATE account SET label = ?, color = ? WHERE id = ?;
+updateLabel:
+UPDATE account SET label = ? WHERE id = ?;
+
+updateColor:
+UPDATE account SET color = ? WHERE id = ?;
 
 delete:
 DELETE FROM account WHERE id = ?;

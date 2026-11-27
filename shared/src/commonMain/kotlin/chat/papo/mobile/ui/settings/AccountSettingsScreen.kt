@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
@@ -56,6 +58,8 @@ import chat.papo.mobile.core.formatDateTime
 import chat.papo.mobile.core.parseInstant
 import chat.papo.mobile.data.api.ConnectionDto
 import chat.papo.mobile.resources.Res
+import chat.papo.mobile.resources.account_blocked_users
+import chat.papo.mobile.resources.account_change_password
 import chat.papo.mobile.resources.account_color
 import chat.papo.mobile.resources.account_color_none
 import chat.papo.mobile.resources.account_device_drop
@@ -71,6 +75,7 @@ import chat.papo.mobile.resources.account_remove
 import chat.papo.mobile.resources.account_remove_body
 import chat.papo.mobile.resources.account_remove_confirm
 import chat.papo.mobile.resources.account_remove_title
+import chat.papo.mobile.resources.account_security
 import chat.papo.mobile.resources.account_settings
 import chat.papo.mobile.resources.action_back
 import chat.papo.mobile.resources.action_cancel
@@ -79,14 +84,23 @@ import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.readableOn
 import chat.papo.mobile.ui.components.text
 import chat.papo.mobile.ui.components.toUiError
+import chat.papo.mobile.ui.profile.ProfileSettingsSection
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> Unit) {
+fun AccountSettingsScreen(
+    session: AppSession,
+    accountId: String,
+    onBack: () -> Unit,
+    onOpenBlocked: () -> Unit,
+    onOpenPassword: () -> Unit,
+    onEditProfile: () -> Unit,
+) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val account = accounts.firstOrNull { it.id == accountId }
+    val accountSession = session.accounts.sessionMap.collectAsStateWithLifecycle().value[accountId]
     val scope = rememberCoroutineScope()
     var confirmRemove by remember { mutableStateOf(false) }
     var confirmDropAll by remember { mutableStateOf(false) }
@@ -130,22 +144,33 @@ fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> 
                 }
             }
 
-            LabelField(account) { label -> scope.launch { session.accounts.setAppearance(account.id, label, account.color) } }
+            // Sem sessão aberta (conta expirada) não há perfil a editar.
+            accountSession?.let { ProfileSettingsSection(it, onEditProfile) }
+
+            LabelField(account) { label -> session.accounts.setLabel(account.id, label) }
             Spacer(Modifier.height(20.dp))
             Text(stringResource(Res.string.account_color), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(10.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 ColorSwatch(null, selected = account.color == null, stringResource(Res.string.account_color_none)) {
-                    scope.launch { session.accounts.setAppearance(account.id, account.label, null) }
+                    session.accounts.setColor(account.id, null)
                 }
                 AccountColors.forEach { argb ->
                     ColorSwatch(Color(argb), selected = account.color == argb, label = null) {
-                        scope.launch { session.accounts.setAppearance(account.id, account.label, argb) }
+                        session.accounts.setColor(account.id, argb)
                     }
                 }
             }
 
+            Spacer(Modifier.height(28.dp))
+            ServerSection(session.accounts, account)
+
             if (!account.sessionExpired) {
+                Spacer(Modifier.height(28.dp))
+                Text(stringResource(Res.string.account_security), style = MaterialTheme.typography.titleMedium)
+                SettingsLink(stringResource(Res.string.account_blocked_users), onOpenBlocked)
+                SettingsLink(stringResource(Res.string.account_change_password), onOpenPassword)
+
                 Spacer(Modifier.height(28.dp))
                 Text(stringResource(Res.string.account_devices), style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(4.dp))
@@ -224,6 +249,18 @@ fun AccountSettingsScreen(session: AppSession, accountId: String, onBack: () -> 
                 }
             },
         )
+    }
+}
+
+/** Uma linha que leva a outra tela. */
+@Composable
+private fun SettingsLink(title: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

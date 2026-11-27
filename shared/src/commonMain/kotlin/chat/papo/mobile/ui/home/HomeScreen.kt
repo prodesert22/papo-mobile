@@ -27,13 +27,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,25 +46,21 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.papo.mobile.AppSession
 import chat.papo.mobile.account.Account
 import chat.papo.mobile.chat.readableChannels
 import chat.papo.mobile.resources.Res
-import chat.papo.mobile.resources.account_settings
 import chat.papo.mobile.resources.rail_add
 import chat.papo.mobile.resources.rail_settings
 import chat.papo.mobile.resources.rail_unread
-import chat.papo.mobile.resources.search_title
 import chat.papo.mobile.resources.security_alert_body
 import chat.papo.mobile.resources.security_alert_dismiss
 import chat.papo.mobile.resources.security_alert_title
 import chat.papo.mobile.resources.session_expired_action
 import chat.papo.mobile.resources.session_expired_body
 import chat.papo.mobile.resources.session_expired_title
-import chat.papo.mobile.resources.switcher_title
 import chat.papo.mobile.ui.components.AccountAvatar
 import chat.papo.mobile.ui.theme.LocalPapoColors
 import org.jetbrains.compose.resources.stringResource
@@ -81,6 +73,8 @@ fun HomeScreen(
     onReauthenticate: (Account) -> Unit,
     onAccountSettings: (Account) -> Unit,
     onSearch: (Account) -> Unit,
+    /** Abre a edição do perfil da conta. */
+    onEditProfile: (Account) -> Unit,
     /** Troca rápida de conversa; vale para todas as contas, não só a ativa. */
     onSwitch: () -> Unit,
     onAppSettings: () -> Unit,
@@ -89,6 +83,7 @@ fun HomeScreen(
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val activeId by session.accounts.activeId.collectAsStateWithLifecycle()
     val alerts by session.accounts.securityAlerts.collectAsStateWithLifecycle()
+    val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
     val active = accounts.firstOrNull { it.id == activeId } ?: accounts.firstOrNull()
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -109,10 +104,13 @@ fun HomeScreen(
             ) {
                 AccountHeader(
                     account = active,
+                    // Sem sessão aberta (conta expirada) não há avatar nem perfil a editar.
+                    accountSession = if (active.sessionExpired) null else sessions[active.id],
                     // Sem sessão não há o que buscar: a conta precisa entrar de novo antes.
                     onSearch = if (active.sessionExpired) null else ({ onSearch(active) }),
                     onSwitch = onSwitch,
                     onSettings = { onAccountSettings(active) },
+                    onEditProfile = { onEditProfile(active) },
                 )
                 if (active.sessionExpired) {
                     Notice(
@@ -228,33 +226,6 @@ private fun RailAction(icon: ImageVector, label: String, onClick: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = label, tint = colors.onRail)
-        }
-    }
-}
-
-@Composable
-private fun AccountHeader(account: Account, onSearch: (() -> Unit)?, onSwitch: () -> Unit, onSettings: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(account.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                account.handle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        IconButton(onClick = onSwitch) {
-            Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(Res.string.switcher_title))
-        }
-        if (onSearch != null) {
-            IconButton(onClick = onSearch) {
-                Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.search_title))
-            }
-        }
-        IconButton(onClick = onSettings) {
-            Icon(Icons.Filled.Tune, contentDescription = stringResource(Res.string.account_settings))
         }
     }
 }

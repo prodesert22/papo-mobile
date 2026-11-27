@@ -29,9 +29,37 @@ data class UserProfileDto(
     val description: String? = null,
     val status: String? = null,
     @SerialName("status_message") val statusMessage: String? = null,
+    /** Frase de digitação personalizada, ou null. */
+    val typing: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     val roles: List<RoleSummaryDto> = emptyList(),
 )
+
+/** Corpo de `PUT /users/{id}`: os três campos são obrigatórios; [typing] nulo não muda o valor atual. */
+@Serializable
+data class UpdateProfileRequest(
+    val nickname: String,
+    val status: String,
+    val description: String,
+    val typing: String? = null,
+)
+
+@Serializable
+data class UpdateAvatarRequest(val avatar: String, @SerialName("avatar_format") val avatarFormat: String)
+
+/** [banner] vazio, com [bannerFormat] vazio, remove o banner. */
+@Serializable
+data class UpdateBannerRequest(val banner: String, @SerialName("banner_format") val bannerFormat: String)
+
+/** [status] `away`, `busy` ou nulo (disponível). Nulo sai como `{}`: o servidor lê o campo ausente como nulo. */
+@Serializable
+data class UpdateStatusRequest(val status: String?)
+
+@Serializable
+data class BlocksResponse(val users: List<UserSummaryDto> = emptyList())
+
+@Serializable
+data class ChangePasswordRequest(val password: String)
 
 @Serializable
 data class ChannelLastMessageDto(
