@@ -13,8 +13,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.IconCompat
 import chat.papo.mobile.chat.ConversationKind
 import chat.papo.mobile.chat.ConversationNotification
+import chat.papo.mobile.chat.NotificationLine
 import chat.papo.mobile.chat.SystemNotifier
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.notif_system_channel_dms
@@ -22,6 +24,8 @@ import chat.papo.mobile.resources.notif_system_channel_mentions
 import chat.papo.mobile.resources.notif_system_channel_messages
 import chat.papo.mobile.resources.notif_system_channel_push
 import chat.papo.mobile.resources.notif_system_summary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
 import java.util.concurrent.ConcurrentHashMap
 
@@ -60,7 +64,8 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
             notification.kind == ConversationKind.Dm -> channelId(notification.accountId, DMS)
             else -> channelId(notification.accountId, MENTIONS)
         }
-        manager.notify(tag(notification.accountId, notification.conversationId), NOTIFICATION_ID, conversation(notification, channel))
+        val people = withContext(Dispatchers.Default) { peopleOf(notification) }
+        manager.notify(tag(notification.accountId, notification.conversationId), NOTIFICATION_ID, conversation(notification, channel, people))
         postSummaryIfAbsent(notification)
     }
 
@@ -93,7 +98,24 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
         labels.remove(accountId)
     }
 
-    private fun conversation(n: ConversationNotification, channel: String): android.app.Notification {
+    /**
+     * Quem escreveu cada linha, uma `Person` por autor: com a chave dele (o Android junta as linhas de quem tem a mesma
+     * chave) e a imagem em círculo, se ela veio. Sem imagem o sistema desenha a inicial do nome.
+     */
+    private fun peopleOf(n: ConversationNotification): Map<String, Person> {
+        val people = HashMap<String, Person>()
+        for (line in n.messages) {
+            people.getOrPut(personKey(line)) {
+                val builder = Person.Builder().setName(line.author)
+                line.authorKey?.let(builder::setKey)
+                line.avatar?.let { NotificationAvatarIcon.circle(it.image) }?.let { builder.setIcon(IconCompat.createWithBitmap(it)) }
+                builder.build()
+            }
+        }
+        return people
+    }
+
+    private fun conversation(n: ConversationNotification, channel: String, people: Map<String, Person>): android.app.Notification {
         val now = System.currentTimeMillis()
         // O "eu" do estilo só precisa de um nome; as mensagens aqui são sempre de outras pessoas.
         val style = NotificationCompat.MessagingStyle(Person.Builder().setName(n.accountLabel).build())
@@ -101,7 +123,7 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
             style.setConversationTitle("#" + n.title).setGroupConversation(true)
         }
         for (line in n.messages) {
-            style.addMessage(line.text, line.at?.toEpochMilliseconds() ?: now, Person.Builder().setName(line.author).build())
+            style.addMessage(line.text, line.at?.toEpochMilliseconds() ?: now, people.getValue(personKey(line)))
         }
         val last = n.messages.last()
         val builder = NotificationCompat.Builder(app, channel)
@@ -183,6 +205,7 @@ class AndroidSystemNotifier(context: Context, @param:DrawableRes private val sma
         /** Uma notificação por etiqueta: a etiqueta já distingue a conversa, então o número é fixo. */
         const val NOTIFICATION_ID = 1
 
+        fun personKey(line: NotificationLine) = line.authorKey ?: line.author
         fun groupId(accountId: String) = "papo.$accountId"
         fun groupKey(accountId: String) = "papo.$accountId"
         fun channelId(accountId: String, kind: String) = "papo.$accountId.$kind"

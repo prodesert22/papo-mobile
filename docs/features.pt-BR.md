@@ -165,12 +165,16 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   conta, seguindo essas configurações. Tocar numa delas abre a mensagem, depois
   do desbloqueio quando o bloqueio do app está ligado. Cada conta tem os próprios
   canais de notificação do Android (menções e respostas, mensagens diretas,
-  mensagens), onde dá para mudar o som e a vibração.
+  mensagens), onde dá para mudar o som e a vibração. Cada mensagem mostra a foto
+  do autor, ou a do webhook, quando o app a obtém em cerca de dois segundos; senão
+  a notificação mostra a inicial e não espera. Uma foto de outro site nunca é
+  buscada.
 - Notificações push com o app fechado ou em segundo plano, quando o servidor tem
   o push ligado. O Android as mostra sozinho, então silenciar, o nível de
   notificação e suprimir `@everyone` ou as menções não valem para elas, e o
   texto segue a configuração de prévia do servidor. Tocar numa delas abre o app,
   depois do desbloqueio quando o bloqueio do app está ligado, e então a conversa.
+  Elas não têm a foto do autor: seria preciso o servidor enviá-la.
   O push não diz de que servidor nem de que conta é, então o app abre a conta
   ativa se ela tem aquela conversa e, senão, a primeira conta que a tem. Duas
   contas do mesmo servidor não recebem push as duas no mesmo celular: o servidor

@@ -7,12 +7,29 @@ import kotlin.time.Instant
 /** Uma conversa é um canal ou uma conversa direta; muda o canal do Android em que a notificação sai e o título dela. */
 enum class ConversationKind { Channel, Dm }
 
+/**
+ * A imagem de quem escreveu, como o servidor da conta a entregou (PNG, JPEG, etc., sem reduzir): quem mostra a decodifica
+ * e a reduz. Só vive na memória; nunca vai para o disco (regra 8). Compara pelo conteúdo.
+ */
+class NotificationAvatar(val image: ByteArray) {
+    override fun equals(other: Any?): Boolean = other is NotificationAvatar && image.contentEquals(other.image)
+
+    override fun hashCode(): Int = image.contentHashCode()
+}
+
 /** Uma mensagem na notificação: quem a enviou, o texto simples (sem marcação) e quando. */
 data class NotificationLine(
     val author: String,
     val text: String,
     /** O instante da mensagem; sem ele (data ilegível) quem mostra usa a hora de agora. */
     val at: Instant?,
+    /**
+     * Quem escreveu, de um jeito que não muda de uma mensagem para outra (usuário, ou webhook e nome); duas linhas com a
+     * mesma chave são da mesma pessoa. Nulo quando o autor é desconhecido.
+     */
+    val authorKey: String? = null,
+    /** A imagem do autor, se o app a tinha a tempo; sem ela quem mostra usa a inicial do nome. */
+    val avatar: NotificationAvatar? = null,
 )
 
 /**
