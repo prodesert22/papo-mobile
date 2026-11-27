@@ -191,8 +191,10 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   web nem em outro celular. Conversas diretas não têm nível no servidor, só
   silenciar.
 - A contagem de menções lê até 500 notificações por conta e mostra "99+" além
-  disso. Notificações lidas em outro aparelho se atualizam quando o app
-  reconecta ou volta para a frente. Um canal em "nada" no servidor não recebe
+  disso. O que você lê em outro aparelho só chega ao celular quando o app
+  reconecta ou volta para a frente, porque o servidor não avisa; uma notificação
+  de push que já está na barra fica lá até você abrir ou dispensar. Um canal em
+  "nada" no servidor não recebe
   notificações dele, então fica sem número.
 - Sem administração do servidor.
 - O avatar não pode ser removido depois de definido, só trocado, e avatar ou banner

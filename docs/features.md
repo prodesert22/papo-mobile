@@ -189,8 +189,10 @@ release notes in [releases/](../releases/) describe each version's changes.
   phone: the server does not store them, so they do not follow you to the web or
   to another phone. Direct conversations have no level on the server, only mute.
 - The mention count reads up to 500 notifications per account and shows "99+"
-  beyond that. Notifications read on another device update when the app
-  reconnects or comes back to the front. A channel set to "nothing" on the server
+  beyond that. Reading on another device reaches the phone only when the app
+  reconnects or comes back to the front, because the server does not announce
+  it; a push notification already in the shade stays until you open or dismiss
+  it. A channel set to "nothing" on the server
   gets no notifications from it, so it shows no count.
 - No server administration.
 - Your avatar cannot be removed once set, only replaced, and an animated avatar or
