@@ -49,8 +49,12 @@
   messages notify (all, mentions only or nothing), mute for 15 minutes up to 24
   hours or until you turn it back on, and hide `@everyone` or direct mentions.
   Channels use the server's choices until you change them. A muted channel is
-  dimmed and loses its new-message dot, but its mention count stays. For now
-  these settings stay on this phone.
+  dimmed and loses its new-message dot, but its mention count stays.
+- A channel's notification level is saved on the server, so the terminal and
+  web clients follow it, unless you turn off "Sincronizar com o servidor" for
+  that channel or for the whole server: then the phone keeps its own level and
+  the other clients keep theirs. Mute and hiding `@everyone` or mentions stay on
+  this phone.
 - The conversation's search and pinned messages moved into the three-dot menu at
   the top, next to the new notification settings, so the conversation name has
   room again on narrow screens.

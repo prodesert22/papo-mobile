@@ -158,18 +158,23 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   diretas. As conversas diretas também podem ser silenciadas.
 - Silenciar tira o círculo de mensagem nova e esmaece o canal, mas as menções
   continuam contando. Suprimir `@everyone` ou as menções as tira da contagem.
+- O nível de notificação do canal fica salvo no servidor e é o mesmo nos outros
+  clientes do Papo. Desligue "Sincronizar com o servidor" num canal ou no
+  servidor inteiro para manter um nível diferente neste celular.
 
 ## Limitações atuais
 
 - Ainda sem notificações do sistema: nada aparece fora do app, e as mensagens
   só chegam com ele aberto. As configurações de notificação já valem para as
   contagens e vão valer para as notificações do sistema quando elas chegarem.
-- As configurações de notificação ficam neste celular: o servidor ainda não as
-  guarda, então elas não seguem você no web nem em outro celular.
+- Silenciar, o nível geral do servidor e suprimir `@everyone` ou as menções
+  ficam neste celular: o servidor não os guarda, então eles não seguem você no
+  web nem em outro celular. Conversas diretas não têm nível no servidor, só
+  silenciar.
 - A contagem de menções lê até 500 notificações por conta e mostra "99+" além
   disso. Notificações lidas em outro aparelho se atualizam quando o app
-  reconecta ou volta para a frente. Um canal posto em "nada" pelo cliente web não
-  recebe notificações do servidor, então fica sem número.
+  reconecta ou volta para a frente. Um canal em "nada" no servidor não recebe
+  notificações dele, então fica sem número.
 - Sem administração do servidor.
 - O avatar não pode ser removido depois de definido, só trocado, e avatar ou banner
   animado não é recortado: vai como está quando cabe nos limites de tamanho e é

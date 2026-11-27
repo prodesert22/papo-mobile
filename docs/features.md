@@ -157,18 +157,22 @@ release notes in [releases/](../releases/) describe each version's changes.
   hide `@everyone` or direct mentions. Direct conversations can be muted too.
 - Muting removes the new-message dot and dims the channel, but mentions still
   count. Hiding `@everyone` or mentions removes them from the count.
+- A channel's notification level is saved on the server and shared with the
+  other Papo clients. Turn off "Sincronizar com o servidor" for a channel or for
+  the whole server to keep a different level on this phone.
 
 ## Current limitations
 
 - No system notifications yet: nothing appears outside the app, and messages
   arrive only while it is open. The notification settings already apply to the
   counts and will apply to system notifications when they arrive.
-- The notification settings stay on this phone: the server does not store them
-  yet, so they do not follow you to the web or to another phone.
+- Mute, the server-wide level and hiding `@everyone` or mentions stay on this
+  phone: the server does not store them, so they do not follow you to the web or
+  to another phone. Direct conversations have no level on the server, only mute.
 - The mention count reads up to 500 notifications per account and shows "99+"
   beyond that. Notifications read on another device update when the app
-  reconnects or comes back to the front. A channel set to "nothing" in the web
-  client gets no notifications from the server, so it shows no count.
+  reconnects or comes back to the front. A channel set to "nothing" on the server
+  gets no notifications from it, so it shows no count.
 - No server administration.
 - Your avatar cannot be removed once set, only replaced, and an animated avatar or
   banner is not cropped: it goes as it is when it fits the size limits and is
