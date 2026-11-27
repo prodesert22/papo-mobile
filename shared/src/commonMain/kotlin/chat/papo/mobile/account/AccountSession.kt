@@ -2,6 +2,7 @@ package chat.papo.mobile.account
 
 import app.cash.sqldelight.db.SqlDriver
 import chat.papo.mobile.chat.AccessStore
+import chat.papo.mobile.chat.AuthorAvatars
 import chat.papo.mobile.chat.BlockList
 import chat.papo.mobile.chat.Channel
 import chat.papo.mobile.chat.ChannelNotificationLevels
@@ -20,6 +21,7 @@ import chat.papo.mobile.chat.RecentEmojis
 import chat.papo.mobile.chat.RecentSearchFilters
 import chat.papo.mobile.chat.SystemNotifications
 import chat.papo.mobile.chat.WebhookAvatars
+import chat.papo.mobile.chat.avatarMediaName
 import chat.papo.mobile.chat.profileStamp
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AuthApi
@@ -87,6 +89,8 @@ class AccountSession(
         userId, inbox.state, chat.dms, combine(chat.channels, chat.access) { list, access -> readableChannels(list, access, userId) },
         notificationPrefs, scope,
     )
+    /** Avatares dos webhooks: um pedido ao servidor por sessão, depois o cache de mídia cifrado da conta. */
+    val webhookAvatars = WebhookAvatars(api, media, scope)
     /** Decide quais mensagens do tempo real viram notificação do sistema; só existe se a plataforma notifica. */
     private val dispatcher = notifications?.let { system ->
         NotificationDispatcher(
@@ -102,6 +106,15 @@ class AccountSession(
                 override fun dm(id: String): Dm? = chat.dms.value.firstOrNull { it.id == id }
                 override fun userName(id: String): String? = chat.users.value[id]?.displayName
             },
+            avatars = object : AuthorAvatars {
+                // O mesmo nome e o mesmo pedido da imagem do usuário na conversa: o cache de mídia da conta a guarda cifrada.
+                override suspend fun ofUser(userId: String): ByteArray? {
+                    val user = chat.users.value[userId] ?: return null
+                    return media.get(avatarMediaName(userId, user.avatarVersion), holdFailures = true) { api.avatar(userId) }
+                }
+
+                override suspend fun ofWebhook(webhookId: String): ByteArray? = webhookAvatars.get(webhookId)
+            },
             viewing = chat.viewingChannel,
             mentionCount = { id -> mentions.mentions.value.let { it.perChannel[id] ?: it.perDm[id] ?: 0 } },
             notifier = system.notifier,
@@ -113,8 +126,6 @@ class AccountSession(
     val push: PushRegistration? = pushTokens?.let { tokens ->
         PushRegistration(PushApi(client), tokens, db.metaQueries, scope, io, hasSession = { client.cookies.get() != null })
     }
-    /** Avatares dos webhooks: um pedido ao servidor por sessão, depois o cache de mídia cifrado da conta. */
-    val webhookAvatars = WebhookAvatars(api, media, scope)
     /** Quem esta conta bloqueou; a lista é desta sessão e não vale para outra conta. */
     val blocks = BlockList(api, db.chatQueries, ws.state, scope, io)
     /** Perfis lidos nesta sessão; a leitura vale enquanto a presença, o apelido e o avatar do usuário não mudam. */

@@ -1,5 +1,6 @@
 package chat.papo.mobile
 
+import chat.papo.mobile.chat.AuthorAvatars
 import chat.papo.mobile.chat.Channel
 import chat.papo.mobile.chat.ChannelType
 import chat.papo.mobile.chat.ConversationDirectory
@@ -9,6 +10,7 @@ import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.InboxState
 import chat.papo.mobile.chat.InboxView
 import chat.papo.mobile.chat.Mute
+import chat.papo.mobile.chat.NotificationAvatar
 import chat.papo.mobile.chat.NotificationDispatcher
 import chat.papo.mobile.chat.NotificationItem
 import chat.papo.mobile.chat.NotificationLevel
@@ -21,6 +23,7 @@ import chat.papo.mobile.data.api.ExternalAuthorDto
 import chat.papo.mobile.data.db.account.AccountDb
 import chat.papo.mobile.data.ws.WsEvent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,8 +35,11 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 private const val ANA = "u-ana"
@@ -105,11 +111,37 @@ class NotificationDispatcherTest {
         override fun userName(id: String): String? = names[id]
     }
 
+    /** As imagens de mentira: o que cada pedido pediu, quanto demora e se falha. */
+    private class FakeAvatars : AuthorAvatars {
+        val users = HashMap<String, ByteArray>()
+        val webhooks = HashMap<String, ByteArray>()
+        val requests = ArrayList<String>()
+        var wait = Duration.ZERO
+        var failure: Exception? = null
+
+        override suspend fun ofUser(userId: String): ByteArray? {
+            requests += "user:$userId"
+            return answer(users[userId])
+        }
+
+        override suspend fun ofWebhook(webhookId: String): ByteArray? {
+            requests += "webhook:$webhookId"
+            return answer(webhooks[webhookId])
+        }
+
+        private suspend fun answer(image: ByteArray?): ByteArray? {
+            delay(wait)
+            failure?.let { throw it }
+            return image
+        }
+    }
+
     private class Fixture(scope: TestScope, db: AccountDb, val accountId: String, val me: String, val notifier: FakeNotifier) {
         val events = MutableSharedFlow<WsEvent>(extraBufferCapacity = 64)
         val marks = MutableSharedFlow<ReadMark>(extraBufferCapacity = 64)
         val inbox = FakeInbox()
         val directory = Directory()
+        val avatars = FakeAvatars()
         val viewing = MutableStateFlow<String?>(null)
         var unread = HashMap<String, Int>()
         var label = "Servidor · @eu"
@@ -125,6 +157,7 @@ class NotificationDispatcherTest {
             inbox = inbox,
             prefs = prefs,
             directory = directory,
+            avatars = avatars,
             viewing = viewing,
             mentionCount = { unread[it] ?: 0 },
             notifier = notifier,
@@ -159,7 +192,8 @@ class NotificationDispatcherTest {
         attachments: List<AttachmentDto> = emptyList(),
         at: String = "2026-01-01T10:00:00Z",
         external: ExternalAuthorDto? = null,
-    ) = WsEvent.MessageCreated(id, channel, author, null, external, content, null, attachments, at)
+        webhook: String? = null,
+    ) = WsEvent.MessageCreated(id, channel, author, webhook, external, content, null, attachments, at)
 
     private fun announce(messageId: String) = WsEvent.NewNotification("n-$messageId", ana, messageId, "oi")
 
@@ -884,5 +918,225 @@ class NotificationDispatcherTest {
         runCurrent()
 
         assertEquals(1, f.notifier.posts.size)
+    }
+
+    // Imagem de quem escreveu
+
+    private val image = byteArrayOf(1, 2, 3)
+
+    @Test
+    fun mensagemDeUsuarioLevaAImagemDele() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+
+        f.send(message("m1", content = mention))
+        runCurrent()
+
+        val line = f.notifier.posts.single().messages.single()
+        assertEquals(NotificationAvatar(image), line.avatar)
+        assertEquals("u:$ana", line.authorKey)
+        assertEquals(listOf("user:$ana"), f.avatars.requests)
+    }
+
+    @Test
+    fun conversaDiretaLevaAImagemDeQuemEscreveu() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+
+        f.send(message("m1", channel = "d1"))
+        runCurrent()
+
+        assertEquals(NotificationAvatar(image), f.notifier.posts.single().messages.single().avatar)
+    }
+
+    @Test
+    fun mensagemDeWebhookLevaAImagemDoWebhookPeloCaminhoDoServidor() = runTest {
+        val f = fixture()
+        f.avatars.webhooks["wh-1"] = image
+
+        f.send(message("m1", author = null, content = mention, webhook = "wh-1", external = ExternalAuthorDto("Robô", "/webhooks/wh-1/avatar")))
+        runCurrent()
+
+        val line = f.notifier.posts.single().messages.single()
+        assertEquals("Robô", line.author)
+        assertEquals(NotificationAvatar(image), line.avatar)
+        assertEquals("w:wh-1/Robô", line.authorKey)
+        assertEquals(listOf("webhook:wh-1"), f.avatars.requests)
+    }
+
+    @Test
+    fun webhookComEnderecoDeTerceiroNaoPedeImagemENotificaNaHoraSemElaEmRelogioParado() = runTest {
+        val f = fixture()
+        f.avatars.webhooks["wh-1"] = image
+        f.avatars.wait = 10.seconds
+
+        f.send(message("m1", author = null, content = mention, webhook = "wh-1", external = ExternalAuthorDto("Robô", "https://outro.site/a.png")))
+        runCurrent()
+
+        assertNull(f.notifier.posts.single().messages.single().avatar)
+        assertTrue(f.avatars.requests.isEmpty())
+    }
+
+    @Test
+    fun webhookComCaminhoDeOutroWebhookOuSemEnderecoNaoPedeImagem() = runTest {
+        val f = fixture()
+
+        f.send(message("m1", author = null, content = mention, webhook = "wh-1", external = ExternalAuthorDto("Robô", "/webhooks/wh-2/avatar")))
+        f.send(message("m2", author = null, content = mention, webhook = "wh-1", external = ExternalAuthorDto("Robô", null), at = "2026-01-01T10:00:01Z"))
+        f.send(message("m3", author = null, content = mention, webhook = "wh-1", external = null, at = "2026-01-01T10:00:02Z"))
+        runCurrent()
+        advanceTimeBy(window)
+        runCurrent()
+
+        assertTrue(f.avatars.requests.isEmpty())
+        assertTrue(f.notifier.posts.isNotEmpty())
+        assertTrue(f.notifier.posts.last().messages.all { it.avatar == null })
+    }
+
+    @Test
+    fun autorSemIdentidadeNaoPedeImagem() = runTest {
+        val f = fixture()
+
+        f.send(message("m1", channel = "d1", author = null, external = ExternalAuthorDto(name = "Robô")))
+        runCurrent()
+
+        val line = f.notifier.posts.single().messages.single()
+        assertNull(line.authorKey)
+        assertNull(line.avatar)
+        assertTrue(f.avatars.requests.isEmpty())
+    }
+
+    @Test
+    fun imagemQueDemoraNotificaSemElaQuandoOPrazoAcaba() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+        f.avatars.wait = 10.seconds
+
+        f.send(message("m1", content = mention))
+        runCurrent()
+        advanceTimeBy(NotificationDispatcher.AVATAR_WAIT - 1.milliseconds)
+        runCurrent()
+        assertTrue(f.notifier.posts.isEmpty(), "ainda dentro do prazo da imagem")
+
+        advanceTimeBy(1.milliseconds)
+        runCurrent()
+
+        val line = f.notifier.posts.single().messages.single()
+        assertNull(line.avatar)
+        assertEquals("u:$ana", line.authorKey)
+    }
+
+    @Test
+    fun imagemQueChegaDentroDoPrazoVaiNaNotificacao() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+        f.avatars.wait = NotificationDispatcher.AVATAR_WAIT - 1.milliseconds
+
+        f.send(message("m1", content = mention))
+        runCurrent()
+        assertTrue(f.notifier.posts.isEmpty())
+        advanceTimeBy(NotificationDispatcher.AVATAR_WAIT)
+        runCurrent()
+
+        assertEquals(NotificationAvatar(image), f.notifier.posts.single().messages.single().avatar)
+    }
+
+    @Test
+    fun falhaAoBuscarAImagemNotificaSemElaNaHora() = runTest {
+        val f = fixture()
+        f.avatars.failure = java.io.IOException("sem rede")
+
+        f.send(message("m1", content = mention))
+        runCurrent()
+
+        assertNull(f.notifier.posts.single().messages.single().avatar)
+    }
+
+    @Test
+    fun autorSemImagemNoServidorNotificaSemElaNaHora() = runTest {
+        val f = fixture()
+
+        f.send(message("m1", content = mention))
+        runCurrent()
+
+        assertNull(f.notifier.posts.single().messages.single().avatar)
+        assertEquals(listOf("user:$ana"), f.avatars.requests)
+    }
+
+    @Test
+    fun aImagemDeUmAutorEPedidaUmaVezPorConversaEVaiEmTodasAsLinhasDele() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+
+        f.send(message("m1", content = mention))
+        runCurrent()
+        advanceTimeBy(NotificationDispatcher.MIN_UPDATE_INTERVAL)
+        f.send(message("m2", content = mention, at = "2026-01-01T10:00:01Z"))
+        runCurrent()
+
+        val post = f.notifier.posts.last()
+        assertEquals(2, post.messages.size)
+        assertTrue(post.messages.all { it.avatar == NotificationAvatar(image) && it.authorKey == "u:$ana" })
+        assertEquals(1, f.avatars.requests.size)
+    }
+
+    @Test
+    fun mensagemApagadaEnquantoEsperaAImagemNaoNotifica() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+        f.avatars.wait = 1.seconds
+
+        f.send(message("m1", content = mention))
+        runCurrent()
+        f.send(WsEvent.MessageDeleted("m1", "c1"))
+        advanceTimeBy(1.seconds)
+        runCurrent()
+
+        assertTrue(f.notifier.posts.isEmpty())
+    }
+
+    @Test
+    fun mensagemDeConversaDiretaApagadaEnquantoEsperaAImagemNaoNotifica() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+        f.avatars.wait = 1.seconds
+
+        f.send(message("m1", channel = "d1"))
+        runCurrent()
+        f.send(WsEvent.MessageDeleted("m1", "d1"))
+        advanceTimeBy(1.seconds)
+        runCurrent()
+
+        assertTrue(f.notifier.posts.isEmpty())
+    }
+
+    @Test
+    fun conversaDiretaAbertaEnquantoEsperaAImagemNaoNotifica() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+        f.avatars.wait = 1.seconds
+
+        f.send(message("m1", channel = "d1"))
+        runCurrent()
+        f.viewing.value = "d1"
+        advanceTimeBy(1.seconds)
+        runCurrent()
+
+        assertTrue(f.notifier.posts.isEmpty())
+    }
+
+    @Test
+    fun canalAbertoEnquantoEsperaAImagemNaoNotifica() = runTest {
+        val f = fixture()
+        f.avatars.users[ana] = image
+        f.avatars.wait = 1.seconds
+
+        f.send(message("m1", content = mention))
+        runCurrent()
+        f.viewing.value = "c1"
+        advanceTimeBy(1.seconds)
+        runCurrent()
+
+        assertTrue(f.notifier.posts.isEmpty())
     }
 }

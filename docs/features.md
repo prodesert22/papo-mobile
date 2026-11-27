@@ -164,12 +164,16 @@ release notes in [releases/](../releases/) describe each version's changes.
   and grouped by account, following those settings. Tapping one opens the
   message, after the unlock when the app lock is on. Each account has its own
   Android notification channels (mentions and replies, direct messages,
-  messages), where you can change the sound and vibration.
+  messages), where you can change the sound and vibration. Each message shows
+  its author's picture, or the webhook's, when the app gets it within about two
+  seconds; otherwise the notification shows the initial and does not wait. A
+  picture on another site is never fetched.
 - Push notifications with the app closed or in the background, when the server
   has push turned on. Android shows them by itself, so mute, the notification
   level and hiding `@everyone` or mentions do not apply to them, and the text
   follows the server's preview setting. Tapping one opens the app, after the
-  unlock when the app lock is on, and then the conversation. The push does not
+  unlock when the app lock is on, and then the conversation. They have no author
+  picture: that would need the server to send it. The push does not
   say which server or account it is for, so the app opens the active account if
   it has that conversation and otherwise the first account that has it. Two
   accounts on the same server cannot both receive pushes on one phone: the

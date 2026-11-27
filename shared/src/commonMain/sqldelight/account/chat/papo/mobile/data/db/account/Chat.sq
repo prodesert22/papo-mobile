@@ -171,6 +171,10 @@ UPDATE dm SET last_message_id = ?, last_message_at = ?, last_message_text = ?, l
 setDmRead:
 UPDATE dm SET last_read_message = ?, unread_count = 0 WHERE id = ?;
 
+-- Uma mensagem não lida deixou de existir: sai da contagem, sem mexer no ponto de leitura.
+dropDmUnread:
+UPDATE dm SET unread_count = MAX(unread_count - 1, 0) WHERE id = ?;
+
 -- Mensagens
 
 upsertMessage:

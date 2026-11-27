@@ -608,7 +608,9 @@ class ChatStore(
 
     suspend fun delete(messageId: String) {
         reportingForbidden { api.deleteMessage(messageId) }
-        withContext(io) { q.deleteMessage(messageId) }
+        withContext(io) {
+            q.transaction { removeMessage(messageId, q.selectMessage(messageId).executeAsOneOrNull()?.channel_id) }
+        }
     }
 
     suspend fun toggleReaction(message: Message, emojiId: String?, unicode: String?) {
@@ -802,7 +804,7 @@ class ChatStore(
                 if (fresh && event.authorId == myUserId) queue.confirm(event.channelId, event.content, event.replyTo, event.attachments.size)
             }
             is WsEvent.MessageEdited -> withContext(io) { q.editMessage(event.content, event.editedAt, event.id) }
-            is WsEvent.MessageDeleted -> withContext(io) { q.deleteMessage(event.id) }
+            is WsEvent.MessageDeleted -> withContext(io) { removeMessage(event.id, event.channelId) }
             is WsEvent.ReactionUpdated -> withContext(io) {
                 reactionLock.withLock {
                     val row = q.selectMessage(event.messageId).executeAsOneOrNull() ?: return@withContext
@@ -908,6 +910,36 @@ class ChatStore(
         if (mine) {
             q.setChannelRead(messageId, channelId)
             q.setDmRead(messageId, channelId)
+        }
+    }
+
+    /**
+     * Apaga a mensagem do banco. Se ela era a última do canal ou da conversa direta, a prévia passa a ser a
+     * mais nova que sobrou, senão o canal ficaria apontando para uma mensagem que não existe e pareceria não lido.
+     * Só dentro de [io].
+     */
+    private fun removeMessage(messageId: String, channelId: String?) = q.transaction {
+        q.deleteMessage(messageId)
+        if (channelId != null) refreshLastMessage(channelId, messageId)
+    }
+
+    private fun refreshLastMessage(channelId: String, deletedId: String) {
+        val channel = q.selectChannel(channelId).executeAsOneOrNull()?.takeIf { it.last_message_id == deletedId }
+        val dm = q.selectDm(channelId).executeAsOneOrNull()?.takeIf { it.last_message_id == deletedId }
+        if (channel == null && dm == null) return
+        // Longe do fim do histórico a mais nova guardada é antiga demais para valer como última: a prévia fica vazia
+        // até a próxima leitura da lista de canais.
+        val next = if (detachedNow(channelId)) null else q.newestMessage(channelId).executeAsOneOrNull()
+        val text = next?.let { preview(it.content, decodeList(AttachmentDto.serializer(), it.attachments)) }
+        val author = next?.author_id?.let { q.selectUser(it).executeAsOneOrNull()?.username }
+        if (channel != null) {
+            q.setChannelLastMessage(next?.id, next?.created_at, text, author, channelId)
+            // O ponto de leitura só anda se estava na apagada: o que não foi lido continua não lido.
+            if (channel.last_read_message == deletedId) q.setChannelRead(next?.id, channelId)
+        }
+        if (dm != null) {
+            q.setDmLastMessage(next?.id, next?.created_at, text, author, 0L, channelId)
+            if (dm.last_read_message == deletedId) q.setDmRead(next?.id, channelId) else if (dm.unread_count > 0) q.dropDmUnread(channelId)
         }
     }
 
