@@ -53,6 +53,7 @@ import chat.papo.mobile.chat.PendingStatus
 import chat.papo.mobile.chat.SendFailure
 import chat.papo.mobile.chat.UnicodeEmojiCatalog
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.pendingContinuesGroup
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.resources.Res
@@ -92,6 +93,8 @@ fun PendingMessages(
     emojiIds: Map<String, String>,
     unicodeEmojis: UnicodeEmojiCatalog?,
     repliedTo: (String) -> Message?,
+    /** A mensagem confirmada mais nova da conversa, logo acima da primeira em saída; nula sem nenhuma. */
+    newest: Message?,
     onRetry: (localId: String, confirmedDuplicate: Boolean) -> Unit,
     onWithdraw: (localId: String) -> Unit,
 ) {
@@ -109,7 +112,9 @@ fun PendingMessages(
                 emojiIds = emojiIds,
                 unicodeEmojis = unicodeEmojis,
                 repliedTo = message.replyToId?.let(repliedTo),
-                compact = index > 0,
+                // A primeira continua o grupo da última mensagem confirmada quando ela é do mesmo autor, como ficará
+                // depois de enviada; as seguintes são sempre a sequência da primeira.
+                compact = index > 0 || pendingContinuesGroup(newest, message, session.userId),
                 onOpenActions = { actionsFor = message.localId },
             )
         }

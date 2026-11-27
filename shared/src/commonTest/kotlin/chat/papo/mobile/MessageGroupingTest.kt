@@ -1,7 +1,9 @@
 package chat.papo.mobile
 
 import chat.papo.mobile.chat.Message
+import chat.papo.mobile.chat.PendingMessage
 import chat.papo.mobile.chat.continuesGroup
+import chat.papo.mobile.chat.pendingContinuesGroup
 import chat.papo.mobile.core.parseInstant
 import chat.papo.mobile.data.api.ExternalAuthorDto
 import kotlinx.datetime.TimeZone
@@ -162,5 +164,65 @@ class MessageGroupingTest {
     fun semFusoInformadoUsaODoAparelho() {
         // Meio-dia e cinco minutos depois: não cruzam a meia-noite em fuso nenhum.
         assertTrue(continuesGroup(message("2026-11-25T12:00:00Z"), message("2026-11-25T12:05:00Z")))
+    }
+
+    // Mensagem em saída logo abaixo da última confirmada
+
+    private fun pending(at: String, replyTo: String? = null) = PendingMessage(
+        localId = "local-$at",
+        channelId = "c1",
+        content = "oi",
+        replyToId = replyTo,
+        files = emptyList(),
+        enqueuedAt = parseInstant(at)!!,
+    )
+
+    private fun pendingContinues(newest: Message?, outgoing: PendingMessage) = pendingContinuesGroup(newest, outgoing, me = "ana", zone = utc)
+
+    @Test
+    fun saindoLogoDepoisDaMinhaUltimaMensagemSegueOGrupoSemAvatar() {
+        assertTrue(pendingContinues(message("2026-11-27T12:00:00Z"), pending("2026-11-27T12:09:00Z")))
+    }
+
+    @Test
+    fun saindoDepoisDaMensagemDeOutraPessoaMostraOAvatar() {
+        assertFalse(pendingContinues(message("2026-11-27T12:00:00Z", authorId = "bia"), pending("2026-11-27T12:01:00Z")))
+    }
+
+    @Test
+    fun conversaSemMensagemConfirmadaMostraOAvatar() {
+        assertFalse(pendingContinues(null, pending("2026-11-27T12:01:00Z")))
+    }
+
+    @Test
+    fun respostaEmSaidaMostraOAvatarComoAConfirmada() {
+        assertFalse(pendingContinues(message("2026-11-27T12:00:00Z"), pending("2026-11-27T12:01:00Z", replyTo = "m1")))
+    }
+
+    @Test
+    fun maisDeDezMinutosDepoisMostraOAvatar() {
+        assertTrue(pendingContinues(message("2026-11-27T12:00:00Z"), pending("2026-11-27T12:10:00Z")))
+        assertFalse(pendingContinues(message("2026-11-27T12:00:00Z"), pending("2026-11-27T12:10:01Z")))
+    }
+
+    @Test
+    fun aViradaDoDiaMostraOAvatar() {
+        assertFalse(pendingContinues(message("2026-11-27T23:58:00Z"), pending("2026-11-28T00:01:00Z")))
+    }
+
+    @Test
+    fun mensagemDeWebhookNaoAgrupaComAMinha() {
+        assertFalse(pendingContinues(message("2026-11-27T12:00:00Z", webhookId = "w1", webhookName = "Bot"), pending("2026-11-27T12:01:00Z")))
+    }
+
+    @Test
+    fun ultimaMensagemSemHorarioMostraOAvatar() {
+        assertFalse(pendingContinues(message(null), pending("2026-11-27T12:01:00Z")))
+    }
+
+    @Test
+    fun relogioDoAparelhoAtrasadoMostraOAvatar() {
+        // A fila marcou um horário anterior ao da última mensagem do servidor: a ordem não é confiável.
+        assertFalse(pendingContinues(message("2026-11-27T12:05:00Z"), pending("2026-11-27T12:00:00Z")))
     }
 }
