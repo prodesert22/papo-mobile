@@ -40,3 +40,17 @@ internal fun messageMediaKeys(attachments: List<AttachmentDto>, embeds: List<Emb
     }
     return keys
 }
+
+/** Até que tamanho a lista baixa o GIF original para animá-lo quando a miniatura do servidor veio parada. */
+const val LIST_GIF_MAX_BYTES = 8L * 1024 * 1024
+
+/**
+ * Se a lista deve desenhar o original do [attachment] em vez da miniatura: o anexo é um GIF, a miniatura não pode
+ * animar ([thumbnailMayAnimate] falso) e o original tem tamanho conhecido de até [LIST_GIF_MAX_BYTES]. O servidor gera
+ * miniatura animada de um GIF, mas a troca por uma imagem parada (o primeiro quadro, em WebP) quando o GIF tem quadros
+ * ou área demais; sem isto o GIF ficaria parado na conversa e só animaria na tela cheia.
+ */
+fun listUsesOriginalGif(attachment: AttachmentDto, thumbnailMayAnimate: Boolean): Boolean =
+    !thumbnailMayAnimate &&
+        attachment.mimeType.equals("image/gif", ignoreCase = true) &&
+        attachment.sizeBytes in 1..LIST_GIF_MAX_BYTES

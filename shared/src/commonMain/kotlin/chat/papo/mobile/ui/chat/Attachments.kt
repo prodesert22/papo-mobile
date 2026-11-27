@@ -43,8 +43,10 @@ import chat.papo.mobile.chat.Message
 import chat.papo.mobile.data.api.AttachmentDto
 import chat.papo.mobile.media.ModerationView
 import chat.papo.mobile.media.aspectOrNull
+import chat.papo.mobile.media.attachmentOriginalKey
 import chat.papo.mobile.media.attachmentThumbKey
 import chat.papo.mobile.media.guardGone
+import chat.papo.mobile.media.listUsesOriginalGif
 import chat.papo.mobile.media.moderationView
 import chat.papo.mobile.media.playableAttachment
 import chat.papo.mobile.media.playableAudio
@@ -117,8 +119,8 @@ internal fun BlockedAttachment() {
 private const val THUMBNAIL_PX = 640
 
 /**
- * A miniatura de uma imagem anexada. Um GIF anima em laço (a miniatura que o servidor gera de um GIF também é um GIF) e
- * leva o selo **GIF**, mesmo com as animações do sistema removidas, quando ele fica no primeiro quadro. Anexo sensível
+ * A miniatura de uma imagem anexada. Um GIF anima em laço (a miniatura que o servidor gera de um GIF também é um GIF; quando
+ * ela vem parada, o original anima no lugar, [listUsesOriginalGif]) e leva o selo **GIF**, mesmo com as animações do sistema removidas, quando ele fica no primeiro quadro. Anexo sensível
  * fica escondido, sem pedir nada, até o toque; virar sensível depois de aberto esconde de novo. Se o servidor responde 410
  * à miniatura, o anexo foi bloqueado ([guardGone]) e o aviso o substitui.
  */
@@ -128,7 +130,7 @@ internal fun ImageAttachment(session: AccountSession, messageId: String, attachm
     var revealed by remember(attachment.id, sensitive) { mutableStateOf(!sensitive) }
     val ratio = aspectOrNull(attachment.thumbnailWidth, attachment.thumbnailHeight) ?: (4f / 3f)
     val name = attachmentThumbKey(attachment.id)
-    val image = if (revealed) {
+    val thumbnail = if (revealed) {
         rememberMediaPainter(session, name, THUMBNAIL_PX, animate = true) {
             session.guardGone(messageId, attachment.id) { session.api.attachmentThumbnail(attachment.id) }
         }.value
@@ -136,9 +138,21 @@ internal fun ImageAttachment(session: AccountSession, messageId: String, attachm
         null
     }
     // O formato vem dos bytes (não do MIME do servidor) e só se lê depois que a imagem chegou, já no cache.
-    val isGif by produceState(false, image) {
-        value = image != null && session.media.peek(name)?.let { sniffImage(it).mayAnimate } == true
+    val thumbnailMayAnimate by produceState<Boolean?>(null, thumbnail) {
+        value = if (thumbnail == null) null else session.media.peek(name)?.let { sniffImage(it).mayAnimate } == true
     }
+    // Miniatura parada de um GIF (o servidor desiste da animada quando o GIF é grande): a lista anima o original, o mesmo
+    // que o visualizador abre, e mostra a miniatura enquanto ele chega.
+    // Enquanto a miniatura não chegou (nulo) ainda não se sabe: nada é buscado.
+    val original = if (listUsesOriginalGif(attachment, thumbnailMayAnimate ?: true)) {
+        rememberMediaPainter(session, attachmentOriginalKey(attachment.id), THUMBNAIL_PX, animate = true) {
+            session.guardGone(messageId, attachment.id) { session.api.attachment(attachment.id) }
+        }.value
+    } else {
+        null
+    }
+    val image = original ?: thumbnail
+    val isGif = thumbnailMayAnimate == true || (thumbnail != null && attachment.mimeType.equals("image/gif", ignoreCase = true))
     // A proporção vem dos metadados: a caixa já nasce do tamanho certo e a lista não pula ao carregar.
     Box(
         Modifier
