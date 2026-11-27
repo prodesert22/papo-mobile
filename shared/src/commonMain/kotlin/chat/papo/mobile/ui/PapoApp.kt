@@ -379,12 +379,16 @@ private fun Unlocked(
         composable<AddServerRoute> { entry ->
             val route = entry.toRoute<AddServerRoute>()
             val vm = viewModel { AddServerViewModel(session.accounts, route.address, route.username) }
-            AddServerScreen(
-                viewModel = vm,
-                canLeave = true,
-                onLeave = { navController.popBackStack() },
-                onDone = { navController.popBackStack(HomeRoute, inclusive = false) },
-            )
+            // Entrar num servidor não é de conta nenhuma: o tema é sempre o do app, mesmo sobre uma conta com tema próprio.
+            val appTheme by graph.theme.spec.collectAsStateWithLifecycle()
+            PapoTheme(appTheme) {
+                AddServerScreen(
+                    viewModel = vm,
+                    canLeave = true,
+                    onLeave = { navController.popBackStack() },
+                    onDone = { navController.popBackStack(HomeRoute, inclusive = false) },
+                )
+            }
         }
         composable<ProfileRoute> { entry ->
             val route = entry.toRoute<ProfileRoute>()
@@ -454,9 +458,11 @@ private fun Unlocked(
             val route = entry.toRoute<SettingsRoute>()
             // A conta pedida, se ainda existe; senão a aba Servidor não tem o que mostrar.
             val accountId = route.accountId?.takeIf { id -> accounts.any { it.id == id } }
+            val appTheme by graph.theme.spec.collectAsStateWithLifecycle()
             SettingsScreen(
                 session = session,
                 appVersion = appVersion,
+                appTheme = appTheme,
                 accountId = accountId,
                 initialTab = if (route.serverTab && accountId != null) SettingsTab.Server else SettingsTab.App,
                 nav = SettingsNavigation(
@@ -464,7 +470,7 @@ private fun Unlocked(
                     appearance = { navController.navigate(AppearanceRoute) },
                     security = { navController.navigate(SecurityRoute) },
                     deviceData = { navController.navigate(DeviceDataRoute) },
-                    about = {},
+                    about = { navController.navigate(AboutRoute) },
                     editProfile = { navController.navigate(EditProfileRoute(it)) },
                     accountLocal = { navController.navigate(AccountLocalRoute(it)) },
                     serverTheme = { navController.navigate(ServerThemeRoute(it)) },

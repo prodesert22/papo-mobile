@@ -62,7 +62,6 @@ import chat.papo.mobile.resources.settings_account_local_summary
 import chat.papo.mobile.resources.settings_android_notifications
 import chat.papo.mobile.resources.settings_android_notifications_summary
 import chat.papo.mobile.resources.settings_appearance
-import chat.papo.mobile.resources.settings_appearance_summary
 import chat.papo.mobile.resources.settings_blocked_summary
 import chat.papo.mobile.resources.settings_devices_summary
 import chat.papo.mobile.resources.settings_password_summary
@@ -81,6 +80,8 @@ import chat.papo.mobile.resources.settings_title
 import chat.papo.mobile.resources.settings_version
 import chat.papo.mobile.ui.components.AccountAvatar
 import chat.papo.mobile.ui.components.LocalNotificationPermission
+import chat.papo.mobile.ui.settings.appearance.themeSummary
+import chat.papo.mobile.ui.theme.ThemeSpec
 import org.jetbrains.compose.resources.stringResource
 
 /** As abas da tela de configurações: as do aparelho e as da conta (servidor). */
@@ -114,6 +115,8 @@ class SettingsNavigation(
 fun SettingsScreen(
     session: AppSession,
     appVersion: String,
+    /** O tema do app, para o resumo do item Aparência. */
+    appTheme: ThemeSpec,
     accountId: String?,
     initialTab: SettingsTab,
     nav: SettingsNavigation,
@@ -156,14 +159,14 @@ fun SettingsScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             when {
                 tab == SettingsTab.Server && accountId != null -> ServerTab(session, accountId, nav)
-                else -> AppTab(appVersion, nav)
+                else -> AppTab(appVersion, appTheme, nav)
             }
         }
     }
 }
 
 @Composable
-private fun AppTab(appVersion: String, nav: SettingsNavigation) {
+private fun AppTab(appVersion: String, appTheme: ThemeSpec, nav: SettingsNavigation) {
     val permission = LocalNotificationPermission.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         appEntries(systemSettings = permission != null).forEach { entry ->
@@ -171,7 +174,7 @@ private fun AppTab(appVersion: String, nav: SettingsNavigation) {
                 AppEntry.Appearance -> SettingsItem(
                     Icons.Filled.Palette,
                     stringResource(Res.string.settings_appearance),
-                    stringResource(Res.string.settings_appearance_summary),
+                    themeSummary(appTheme),
                     nav.appearance,
                 )
                 AppEntry.Security -> SettingsItem(

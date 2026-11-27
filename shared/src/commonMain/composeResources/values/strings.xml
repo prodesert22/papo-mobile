@@ -79,7 +79,6 @@
     <!-- Editar perfil -->
     <string name="profile_edit_action">Editar perfil</string>
     <string name="profile_edit_title">Editar perfil</string>
-    <string name="profile_edit_row_title">Perfil e status</string>
     <string name="profile_edit_row_body">Apelido, frase de status, descrição, avatar e banner.</string>
     <string name="profile_edit_nickname">Apelido</string>
     <string name="profile_edit_status_message">Frase de status</string>
@@ -650,7 +649,6 @@
     <!-- 0.9.0 · trilha A: configurações e segurança -->
     <string name="settings_android_notifications">Notificações do Android</string>
     <string name="settings_android_notifications_summary">Som, vibração e canais no sistema</string>
-    <string name="settings_appearance_summary">Tema, modo escuro e cores</string>
     <string name="settings_privacy_summary">Bloqueio, capturas de tela e notificações</string>
     <string name="settings_storage_summary">Como o Papo guarda os seus dados</string>
     <string name="settings_about">Sobre o Papo Mobile</string>
