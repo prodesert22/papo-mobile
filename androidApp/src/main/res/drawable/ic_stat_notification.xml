@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone das notificações na barra de status: o balão do ícone do app, de uma cor só, com os dois pontos vazados. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="52"
+    android:viewportHeight="52">
+    <group
+        android:translateX="-28"
+        android:translateY="-31">
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M38,36h32a10,10 0,0 1,10 10v16a10,10 0,0 1,-10 10H52l-11,9v-9h-3a10,10 0,0 1,-10 -10V46a10,10 0,0 1,10 -10zM46,54m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0M62,54m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    </group>
+</vector>

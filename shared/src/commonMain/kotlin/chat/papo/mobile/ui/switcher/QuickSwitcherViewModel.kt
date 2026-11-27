@@ -51,9 +51,9 @@ private fun sources(accounts: AccountManager): Flow<List<SwitchSource>> =
             combine(
                 open.map { (account, session) ->
                     val chat = session.chat
-                    combine(chat.channels, chat.access, chat.dms, chat.users) { channels, permissions, dms, users ->
+                    combine(chat.channels, chat.access, chat.dms, chat.users, session.mentions.mentionedChannels) { channels, permissions, dms, users, mentioned ->
                         val readable = readableChannels(channels, permissions, session.userId)
-                        SwitchSource(account.id, account.title, session.userId, readable, dms, users)
+                        SwitchSource(account.id, account.title, session.userId, readable, dms, users, mentioned)
                     }
                 },
             ) { it.toList() }

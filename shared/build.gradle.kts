@@ -63,6 +63,10 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.coroutines.android)
+            implementation(libs.coroutines.play.services)
+            // Só o token do FCM (`AndroidPushTokens`); a BoM fixa a versão, como no app.
+            implementation(project.dependencies.platform(libs.firebase.bom))
+            implementation(libs.firebase.messaging)
             implementation(libs.androidx.core.ktx)
             implementation(libs.androidx.biometric)
             implementation(libs.androidx.activity.compose)

@@ -171,6 +171,10 @@ UPDATE dm SET last_message_id = ?, last_message_at = ?, last_message_text = ?, l
 setDmRead:
 UPDATE dm SET last_read_message = ?, unread_count = 0 WHERE id = ?;
 
+-- Uma mensagem não lida deixou de existir: sai da contagem, sem mexer no ponto de leitura.
+dropDmUnread:
+UPDATE dm SET unread_count = MAX(unread_count - 1, 0) WHERE id = ?;
+
 -- Mensagens
 
 upsertMessage:
@@ -198,6 +202,10 @@ SELECT * FROM message WHERE id = ?;
 
 countMessagesIn:
 SELECT COUNT(*) FROM message WHERE id IN ?;
+
+-- Só a posição (instante e id) de várias mensagens, sem ler o conteúdo.
+selectMessagePositions:
+SELECT id, created_us FROM message WHERE id IN ?;
 
 oldestMessage:
 SELECT * FROM message WHERE channel_id = ? ORDER BY created_us ASC, id ASC LIMIT 1;

@@ -1,5 +1,6 @@
 package chat.papo.mobile
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -9,6 +10,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import chat.papo.mobile.platform.AndroidPlatformUi
+import chat.papo.mobile.platform.NotificationIntents
 import chat.papo.mobile.ui.PapoApp
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -31,8 +33,26 @@ class MainActivity : FragmentActivity() {
             }
         }
 
+        // Só na primeira criação: girar o aparelho recria a activity com o mesmo intent, e o toque não pode valer duas vezes.
+        if (savedInstanceState == null) openFromNotification(intent)
+
         val platformUi = AndroidPlatformUi(this)
         setContent { PapoApp(app.graph, platformUi) }
+    }
+
+    /** Um toque numa notificação com o app já aberto chega aqui (a activity aceita o intent no topo da pilha). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openFromNotification(intent)
+    }
+
+    /**
+     * O pedido fica na fila do grafo até a tela principal atendê-lo, depois do bloqueio e do carregamento das contas. Vem de
+     * uma notificação do app ou de um push que o Android mostrou sozinho (só com o canal; a conta se escolhe depois).
+     */
+    private fun openFromNotification(intent: Intent?) {
+        (NotificationIntents.parse(intent) ?: NotificationIntents.parsePush(intent))?.let(app.graph.notificationOpens::submit)
     }
 
     override fun onDestroy() {

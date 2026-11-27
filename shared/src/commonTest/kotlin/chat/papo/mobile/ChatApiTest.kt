@@ -594,6 +594,155 @@ class ChatApiTest {
     }
 
     @Test
+    fun caixaDeNotificacoesPedeDescEMandaOCursorSoComSince() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) {
+            json(
+                """{"notifications":[
+                    {"id":"n2","message_id":"m2","channel_id":"c1","author_id":"u2","message_content":"oi @mention(<@u1>)","read":false,"created_at":"2026-01-01T00:00:02.5Z"},
+                    {"id":"n1","message_id":"m1","channel_id":"c2","webhook_id":"w1","external_author":{"name":"CI","avatar_url":"/webhooks/w1/avatar"},"message_content":"build","read":true,"created_at":"2026-01-01T00:00:01Z"}
+                ],"has_more":true}""",
+            )
+        }
+
+        val page = api.notifications("u1")
+        api.notifications("u1", since = "2026-01-01T00:00:01Z", lastId = "n1")
+        api.notifications("u1", since = "2026-01-01T00:00:02.5Z")
+        api.notifications("u1", lastId = "n1")
+
+        assertTrue(page.hasMore)
+        assertEquals(listOf("n2", "n1"), page.notifications.map { it.id })
+        val first = page.notifications[0]
+        assertEquals(listOf("m2", "c1", "u2", null, "oi @mention(<@u1>)", false, "2026-01-01T00:00:02.5Z"),
+            listOf(first.messageId, first.channelId, first.authorId, first.webhookId, first.messageContent, first.read, first.createdAt))
+        val webhook = page.notifications[1]
+        assertEquals("CI", webhook.externalAuthor?.name)
+        assertNull(webhook.authorId)
+        assertTrue(webhook.read)
+        assertTrue(seen.all { it.request.method == HttpMethod.Get && it.request.url.encodedPath == "/users/u1/notifications" })
+        assertEquals("desc", seen[0].request.url.parameters["order"])
+        assertEquals(setOf("order"), seen[0].request.url.parameters.names()) // sem cursor na primeira página
+        assertEquals("2026-01-01T00:00:01Z", seen[1].request.url.parameters["since"])
+        assertEquals("n1", seen[1].request.url.parameters["last_id"])
+        // `since` sozinho são só as mais novas; `last_id` sem `since` o servidor ignora, e o cliente nem o manda.
+        assertNull(seen[2].request.url.parameters["last_id"])
+        assertEquals("2026-01-01T00:00:02.5Z", seen[2].request.url.parameters["since"])
+        assertEquals(setOf("order"), seen[3].request.url.parameters.names())
+    }
+
+    @Test
+    fun caixaDeNotificacoesComCamposAusentesOuNovosNaoQuebra() = runTest {
+        val api = api(mutableListOf()) {
+            json("""{"notifications":[{"id":"n1","message_id":"m1","channel_id":"c1","author_id":null,"created_at":"x","campo_novo":1}]}""")
+        }
+        val page = api.notifications("u1")
+        assertFalse(page.hasMore)
+        val item = page.notifications.single()
+        assertEquals("", item.messageContent)
+        assertFalse(item.read)
+        assertNull(item.authorId)
+        assertEquals(emptyList(), api(mutableListOf()) { json("""{"notifications":null}""") }.notifications("u1").notifications)
+    }
+
+    @Test
+    fun caixaDeNotificacoesRecusadaViraErroDoServidor() = runTest {
+        val api = api(mutableListOf()) { json("""{"type":"t","title":"Proibido","status":403}""", HttpStatusCode.Forbidden) }
+        assertTrue(assertFailsWith<ApiException> { api.notifications("u2") }.isForbidden)
+    }
+
+    @Test
+    fun marcarNotificacoesComoLidasMandaOsIdsNoCorpo() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) { json("""{"updated":2}""") }
+
+        val result = api.markNotificationsRead("u1", listOf("n1", "n2"))
+
+        assertEquals(2, result.updated)
+        val recorded = seen.single()
+        assertEquals(HttpMethod.Put, recorded.request.method)
+        assertEquals("/users/u1/read_notification", recorded.request.url.encodedPath)
+        assertEquals("""{"notification_ids":["n1","n2"]}""", recorded.body)
+    }
+
+    @Test
+    fun marcarNotificacoesNaoAceitaListaVaziaNemMaisDeMil() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) { json("""{"updated":1}""") }
+
+        assertFailsWith<IllegalArgumentException> { api.markNotificationsRead("u1", emptyList()) }
+        assertFailsWith<IllegalArgumentException> { api.markNotificationsRead("u1", List(1001) { "n$it" }) }
+        api.markNotificationsRead("u1", List(1000) { "n$it" })
+        assertEquals(1, seen.size) // só o de mil saiu
+    }
+
+    @Test
+    fun marcarNotificacoesSemLinhaNenhumaE404ComoErroDoServidor() = runTest {
+        val api = api(mutableListOf()) { json("""{"type":"t","title":"Não encontrado","status":404}""", HttpStatusCode.NotFound) }
+        assertTrue(assertFailsWith<ApiException> { api.markNotificationsRead("u1", listOf("n1")) }.isNotFound)
+    }
+
+    @Test
+    fun nivelDeNotificacaoDoCanalVaiEmPostComUmCampoEVoltaOQueOServidorGuardou() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) {
+            json("""{"user_id":"u1","channel_id":"c1","notification_settings":"off","updated_at":"2026-01-01T00:00:00Z","extra":1}""")
+        }
+
+        val saved = api.setChannelNotification("c1", "u1", "off")
+
+        assertEquals("c1", saved.channelId)
+        assertEquals("u1", saved.userId)
+        assertEquals("off", saved.notificationSettings)
+        assertEquals("2026-01-01T00:00:00Z", saved.updatedAt)
+        val recorded = seen.single()
+        assertEquals(HttpMethod.Post, recorded.request.method)
+        assertEquals("/channels/c1/user/u1/settings", recorded.request.url.encodedPath)
+        assertEquals("""{"notification_settings":"off"}""", recorded.body)
+    }
+
+    @Test
+    fun nivelDeNotificacaoRecusadoViraErroDoServidorComOCodigo() = runTest {
+        for (status in listOf(HttpStatusCode.Forbidden, HttpStatusCode.NotFound, HttpStatusCode.BadRequest, HttpStatusCode.TooManyRequests)) {
+            val api = api(mutableListOf()) { json("""{"type":"t","title":"Erro","status":${status.value}}""", status) }
+            assertEquals(status.value, assertFailsWith<ApiException> { api.setChannelNotification("c1", "u1", "all") }.status)
+        }
+    }
+
+    @Test
+    fun respostaSemOsCamposTrazTudoNulo() = runTest {
+        val saved = api(mutableListOf()) { json("{}") }.setChannelNotification("c1", "u1", "all")
+        assertNull(saved.notificationSettings)
+        assertNull(saved.channelId)
+    }
+
+    @Test
+    fun conversaDiretaPorIdLeUmaConversaQueNaoEstaNaLista() = runTest {
+        val seen = mutableListOf<Recorded>()
+        val api = api(seen) {
+            json("""{"id":"d1","user":{"id":"u2","username":"bia"},"created_at":"2026-01-01T00:00:00Z","unread_count":3}""")
+        }
+
+        val dm = api.dm("d1")
+
+        assertEquals("d1", dm.id)
+        assertEquals("u2", dm.user.id)
+        assertEquals(3, dm.unreadCount)
+        assertEquals(HttpMethod.Get, seen.single().request.method)
+        assertEquals("/dms/d1", seen.single().request.url.encodedPath)
+    }
+
+    @Test
+    fun conversaDiretaBloqueadaOuInexistenteViraErroDoServidor() = runTest {
+        val blocked = api(mutableListOf()) {
+            json("""{"type":"https://papo.test/errors/dm-blocked","title":"Bloqueada","status":403}""", HttpStatusCode.Forbidden)
+        }
+        val missing = api(mutableListOf()) { json("""{"type":"t","title":"Não encontrada","status":404}""", HttpStatusCode.NotFound) }
+
+        assertTrue(assertFailsWith<ApiException> { blocked.dm("d1") }.isForbidden)
+        assertTrue(assertFailsWith<ApiException> { missing.dm("d1") }.isNotFound)
+    }
+
+    @Test
     fun datasNoFusoPedido() {
         val instant = parseInstant("2026-03-05T23:07:09.5Z")!!
         val saoPaulo = TimeZone.of("America/Sao_Paulo") // UTC-3

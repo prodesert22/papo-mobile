@@ -2,12 +2,19 @@ package chat.papo.mobile
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import chat.papo.mobile.account.AccountManager
+import chat.papo.mobile.account.AccountResources
 import chat.papo.mobile.account.AccountStore
 import chat.papo.mobile.account.AddAccountResult
 import chat.papo.mobile.account.InvalidServerUrl
+import chat.papo.mobile.chat.ConversationNotification
+import chat.papo.mobile.chat.NotificationTexts
+import chat.papo.mobile.chat.SystemNotifications
+import chat.papo.mobile.chat.SystemNotifier
 import chat.papo.mobile.core.AppDispatchers
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.db.registry.RegistryDb
+import chat.papo.mobile.data.db.account.AccountDb
+import chat.papo.mobile.push.PushTokens
 import chat.papo.mobile.security.AppPrefs
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -43,6 +50,9 @@ internal class FakeBackend(private val serverPassword: String? = null) {
     var serverName: String? = null
     var serverIcon: String? = null
     var serverDown = false
+
+    /** O que o servidor viu de push e de saída, na ordem: `PUT ana tok`, `DELETE ana tok`, `logout ana`. */
+    val pushLog = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     val engine = MockEngine { request ->
         val host = request.url.host
@@ -115,7 +125,17 @@ internal class FakeBackend(private val serverPassword: String? = null) {
                     else -> problem(HttpStatusCode.Gone, "link inválido")
                 }
             }
+            "/users/me/push-device" -> {
+                val user = cookie?.substringAfterLast('-')
+                if (cookie?.startsWith("jwt-$host-") != true) {
+                    denied("Token ausente")
+                } else {
+                    pushLog += "${request.method.value} $user ${field("token")}"
+                    respond("", HttpStatusCode.NoContent)
+                }
+            }
             "/auth/logout" -> {
+                pushLog += "logout ${cookie?.substringAfterLast('-')}"
                 loggedOut += cookie.orEmpty()
                 respond("", HttpStatusCode.NoContent, headersOf(HttpHeaders.SetCookie, "Auth=; Max-Age=0"))
             }
@@ -138,18 +158,23 @@ class AccountManagerTest {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { RegistryDb.Schema.create(it) }
         val prefs = Prefs()
         val deleted = mutableListOf<String>()
+
+        /** O banco e o cache que cada conta recebeu ao abrir a sessão, por id da conta. */
+        val opened = mutableMapOf<String, AccountResources>()
         private val dispatcher = StandardTestDispatcher(scope.testScheduler)
         private val dispatchers = AppDispatchers(dispatcher, dispatcher, dispatcher)
         val store = AccountStore(RegistryDb(driver), dispatcher)
 
-        fun manager(scope: TestScope) = AccountManager(
+        fun manager(scope: TestScope, notifications: SystemNotifications? = null, pushTokens: PushTokens? = null) = AccountManager(
             store = store,
             engine = backend.engine,
             prefs = prefs,
             dispatchers = dispatchers,
             scope = scope.backgroundScope,
-            openResources = { TestResources.inMemory(dispatcher) },
+            openResources = { id -> TestResources.inMemory(dispatcher).also { opened[id] = it } },
             deleteLocalData = { deleted += it },
+            notifications = notifications,
+            pushTokens = pushTokens,
         ).also { it.setForeground(false) } // sem tempo real: o motor falso não fala WebSocket
     }
 
@@ -257,6 +282,170 @@ class AccountManagerTest {
         assertEquals(listOf(ana.account.id), manager.accounts.value.map { it.id })
         assertNull(manager.session(bia.account.id))
         assertEquals(ana.account.id, manager.activeId.value)
+    }
+
+    @Test
+    fun removerContaTiraAsNotificacoesDoSistemaSoDela() = runTest {
+        val removed = mutableListOf<String>()
+        val notifier = object : SystemNotifier {
+            override fun isPermissionGranted() = true
+            override suspend fun post(notification: ConversationNotification) = Unit
+            override fun cancelConversation(accountId: String, conversationId: String) = Unit
+            override fun cancelAccount(accountId: String) = Unit
+            override fun removeAccount(accountId: String) {
+                removed += accountId
+            }
+        }
+        val f = Fixture(this)
+        val manager = f.manager(this, SystemNotifications(notifier, NotificationTexts("Anexo", "usuário", "Nova mensagem"))).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+
+        manager.remove(bia.account.id)
+        runCurrent()
+
+        assertEquals(listOf(bia.account.id), removed)
+        assertEquals(listOf(ana.account.id), manager.accounts.value.map { it.id })
+    }
+
+    // Push com o app fechado
+
+    @Test
+    fun removerContaTiraOAparelhoDoServidorAntesDoLogoutEComOCookieDela() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this, pushTokens = FakeTokens()).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        manager.session(ana.account.id)!!.push!!.start()
+        runCurrent()
+        TestResources.waitUntil { f.backend.pushLog.size == 1 }
+
+        manager.remove(ana.account.id)
+
+        assertEquals(listOf("PUT ana tok-1", "DELETE ana tok-1", "logout ana"), f.backend.pushLog)
+    }
+
+    @Test
+    fun duasContasDoMesmoServidorRegistramCadaUmaComASuaSessao() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this, pushTokens = FakeTokens()).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+
+        manager.session(ana.account.id)!!.push!!.start()
+        manager.session(bia.account.id)!!.push!!.start()
+        runCurrent()
+        TestResources.waitUntil { f.backend.pushLog.size == 2 }
+
+        // O servidor guarda o token como único e o PUT passa o dono: quem registra por último recebe (limitação do backend).
+        assertEquals(setOf("PUT ana tok-1", "PUT bia tok-1"), f.backend.pushLog.toSet())
+    }
+
+    @Test
+    fun sairDeUmaContaFazAOutraDoMesmoServidorRegistrarDeNovo() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this, pushTokens = FakeTokens()).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+        manager.session(ana.account.id)!!.push!!.start()
+        manager.session(bia.account.id)!!.push!!.start()
+        runCurrent()
+        TestResources.waitUntil { f.backend.pushLog.size == 2 }
+        runCurrent()
+
+        manager.remove(bia.account.id)
+        runCurrent()
+        TestResources.waitUntil { f.backend.pushLog.size == 5 }
+
+        assertEquals(listOf("DELETE bia tok-1", "logout bia", "PUT ana tok-1"), f.backend.pushLog.drop(2))
+    }
+
+    @Test
+    fun sairDeUmaContaNaoMexeNoRegistroDeContaDeOutroServidor() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this, pushTokens = FakeTokens()).also { it.load() }
+        val ana = manager.begin(manager.probe("um.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("dois.test")).login("bia", "Senha@456")
+        manager.session(ana.account.id)!!.push!!.start()
+        runCurrent()
+        TestResources.waitUntil { f.backend.pushLog.size == 1 }
+        runCurrent()
+
+        manager.remove(bia.account.id)
+        runCurrent()
+
+        // `bia` nunca registrou nada: o `DELETE` dela tenta o token de agora, e `ana` (outro servidor) não é tocada.
+        assertEquals(listOf("PUT ana tok-1", "DELETE bia tok-1", "logout bia"), f.backend.pushLog)
+    }
+
+    // Conta que abre o toque numa notificação de push
+
+    private fun Fixture.addChannel(accountId: String, channelId: String) {
+        AccountDb(opened.getValue(accountId).driver).chatQueries.upsertChannel(channelId, "geral", "text", 0, null, null, null, null, null, null, null, null)
+    }
+
+    private fun Fixture.addDm(accountId: String, dmId: String) {
+        AccountDb(opened.getValue(accountId).driver).chatQueries.upsertDm(dmId, "u2", "2026-01-01T00:00:00Z", null, null, null, null, null, 0)
+    }
+
+    @Test
+    fun pushDeUmCanalQueSoUmaContaTemAbreNessaConta() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+        runCurrent()
+        f.addChannel(ana.account.id, "canal-1")
+
+        assertEquals(ana.account.id, manager.pushTargetAccount("canal-1"))
+        // A ativa é a `bia` (a última a entrar), e mesmo assim a conversa é da `ana`.
+        assertEquals(bia.account.id, manager.activeId.value)
+    }
+
+    @Test
+    fun pushDeUmaConversaDiretaTambemAcha() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        runCurrent()
+        f.addDm(ana.account.id, "dm-1")
+
+        assertEquals(ana.account.id, manager.pushTargetAccount("dm-1"))
+    }
+
+    @Test
+    fun pushDeUmaConversaQueNenhumaContaTemNaoAbreNada() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        runCurrent()
+        f.addChannel(ana.account.id, "canal-1")
+
+        assertNull(manager.pushTargetAccount("canal-outro"))
+    }
+
+    @Test
+    fun semContasNenhumaConversaEAchada() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+
+        assertNull(manager.pushTargetAccount("canal-1"))
+    }
+
+    @Test
+    fun pushDeUmCanalDeVariasContasPrefereAAtivaEDepoisAPrimeira() = runTest {
+        val f = Fixture(this)
+        val manager = f.manager(this).also { it.load() }
+        val ana = manager.begin(manager.probe("papo.test")).login("ana", "Senha@123")
+        val bia = manager.begin(manager.probe("papo.test")).login("bia", "Senha@456")
+        val caio = manager.begin(manager.probe("outro.test")).login("ana", "Senha@123")
+        runCurrent()
+        for (account in listOf(ana, bia, caio)) f.addChannel(account.account.id, "canal-1")
+
+        manager.select(bia.account.id)
+        assertEquals(bia.account.id, manager.pushTargetAccount("canal-1"))
+
+        manager.select(null)
+        assertEquals(ana.account.id, manager.pushTargetAccount("canal-1"))
     }
 
     @Test

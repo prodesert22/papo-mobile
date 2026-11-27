@@ -5,6 +5,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import chat.papo.mobile.platform.ActivityHolder
+import chat.papo.mobile.platform.AndroidPushTokens
 import chat.papo.mobile.platform.CallService
 import chat.papo.mobile.platform.createAndroidGraph
 
@@ -13,9 +14,14 @@ class PapoApplication : Application() {
     lateinit var graph: AppGraph
         private set
 
+    /** O token do FCM; o serviço de push o alimenta e as contas o leem. Só existe depois de [onCreate] (precisa do contexto). */
+    lateinit var pushTokens: AndroidPushTokens
+        private set
+
     override fun onCreate() {
         super.onCreate()
-        graph = createAndroidGraph(this, activities)
+        pushTokens = AndroidPushTokens(this)
+        graph = createAndroidGraph(this, activities, R.drawable.ic_stat_notification, pushTokens)
         CallService.hangupHandler = { graph.currentSession()?.calls?.leave() }
 
         // O bloqueio automático conta o tempo com o app inteiro fora da tela,

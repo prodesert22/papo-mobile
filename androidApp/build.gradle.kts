@@ -9,6 +9,15 @@ kotlin {
     jvmToolchain(21)
 }
 
+// O push usa o projeto Firebase do app, descrito em `androidApp/google-services.json` (fora do git: ver .gitignore). Quem
+// compila sem o arquivo continua com um app que funciona, só sem push; por isso o plugin só entra quando o arquivo existe.
+// O arquivo é lido por `providers.fileContents`, e não por `File.exists()`, para o cache de configuração notar quando ele
+// aparece ou some; o plugin precisa ser aplicado aqui, na configuração, antes do bloco `android`.
+val hasGoogleServices = providers.fileContents(layout.projectDirectory.file("google-services.json")).asBytes.isPresent
+if (hasGoogleServices) {
+    apply(plugin = libs.plugins.google.services.get().pluginId)
+}
+
 // A versão do app vem de `papo.version` (gradle.properties): major.minor.patch, com
 // `-beta.N` opcional. `tools/release.py` aplica a mesma regra; o CI confere se os dois batem.
 val papoVersion: String = providers.gradleProperty("papo.version").get().trim()
@@ -107,6 +116,9 @@ dependencies {
     implementation(libs.androidx.fragment)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.coroutines.android)
+    // O serviço que recebe o token e as mensagens do FCM mora aqui, junto do manifesto que o declara.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
     implementation(libs.compose.runtime)
     implementation(libs.compose.ui)
 

@@ -65,6 +65,8 @@ fun AccountAvatar(
     size: Dp = 48.dp,
     unread: Boolean = false,
     unreadColor: Color = Color.Unspecified,
+    /** O número vermelho de menções da conta (`badgeText`); no lugar do ponto de não lida. */
+    mentions: String? = null,
 ) {
     val accent = account.accentColor()
     val corner by animateDpAsState(if (selected) size * 0.3f else size / 2)
@@ -113,8 +115,16 @@ fun AccountAvatar(
         // Um ponto no canto: vermelho se a sessão caiu, na cor de destaque se há algo não lido.
         val dot = when {
             account.sessionExpired -> MaterialTheme.colorScheme.error
+            mentions != null -> null
             unread -> unreadColor
             else -> null
+        }
+        if (mentions != null && !account.sessionExpired) {
+            MentionBadge(
+                mentions,
+                Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp).background(ringBackground, RoundedCornerShape(10.dp)).padding(2.dp),
+                minHeight = 18.dp,
+            )
         }
         if (dot != null) {
             Box(

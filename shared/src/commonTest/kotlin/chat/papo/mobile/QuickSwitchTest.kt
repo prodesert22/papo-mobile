@@ -60,7 +60,8 @@ class QuickSwitchTest {
         channels: List<Channel> = emptyList(),
         dms: List<Dm> = emptyList(),
         users: List<User> = emptyList(),
-    ) = SwitchSource(accountId, label, myUserId, channels, dms, users.associateBy { it.id })
+        mentioned: Set<String>? = null,
+    ) = SwitchSource(accountId, label, myUserId, channels, dms, users.associateBy { it.id }, mentioned)
 
     private fun names(entries: List<SwitchEntry>) = entries.map { it.name }
 
@@ -438,5 +439,69 @@ class QuickSwitchTest {
             val expectedLabel = if (entry.accountId == "casa") "Casa" else "Trabalho"
             assertEquals(expectedLabel, entry.accountLabel)
         }
+    }
+
+    // Menções reais, da caixa de notificações
+
+    @Test
+    fun comACaixaLidaMencaoEOQueElaConta() {
+        val entries = switchEntries(
+            listOf(
+                source(
+                    channels = listOf(
+                        // A heurística diria menção (a última mensagem cita o usuário), mas a caixa não a conta: foi suprimida ou lida.
+                        channel("so-texto", unread = true, text = mention(me)),
+                        channel("contado", unread = true, text = "sem citar ninguém"),
+                        channel("lido-com-mencao", at = "2026-01-01T10:00:00Z"),
+                    ),
+                    mentioned = setOf("contado", "lido-com-mencao"),
+                ),
+            ),
+        )
+
+        val byName = entries.associateBy { it.name }
+        assertFalse(byName.getValue("so-texto").mention)
+        assertTrue(byName.getValue("contado").mention)
+        assertTrue(byName.getValue("lido-com-mencao").mention)
+        // As menções contadas vêm antes (a de atividade conhecida na frente da outra), depois a não lida sem menção.
+        assertEquals(listOf("lido-com-mencao", "contado", "so-texto"), names(entries))
+    }
+
+    @Test
+    fun caixaLidaSemMencoesNaoDeixaNenhumaPelaHeuristica() {
+        val entries = switchEntries(listOf(source(channels = listOf(channel("c", unread = true, text = mention(me))), mentioned = emptySet())))
+
+        assertFalse(entries.single().mention)
+        assertTrue(entries.single().unread)
+    }
+
+    @Test
+    fun semACaixaLidaVaiAHeuristicaAntiga() {
+        val entries = switchEntries(listOf(source(channels = listOf(channel("c", unread = true, text = mention(me))), mentioned = null)))
+
+        assertTrue(entries.single().mention)
+    }
+
+    @Test
+    fun asMencoesReaisNaoMisturamContas() {
+        val entries = switchEntries(
+            listOf(
+                source(accountId = "a", label = "Um", channels = listOf(channel("c1", name = "geral")), mentioned = setOf("c1")),
+                // O mesmo id de canal em outra conta, sem menção contada nela e com a caixa ainda sem ler.
+                source(accountId = "b", label = "Dois", channels = listOf(channel("c1", name = "geral")), mentioned = emptySet()),
+                source(accountId = "c", label = "Tres", channels = listOf(channel("c1", name = "geral")), mentioned = null),
+            ),
+        )
+
+        assertEquals(listOf("a" to true, "b" to false, "c" to false), entries.map { it.accountId to it.mention })
+    }
+
+    @Test
+    fun aConversaDiretaSegueOUnreadCountComACaixaLida() {
+        val entries = switchEntries(
+            listOf(source(dms = listOf(dm("d1", other, unread = 2)), users = listOf(user(other, "bia")), mentioned = emptySet())),
+        )
+
+        assertTrue(entries.single().mention)
     }
 }

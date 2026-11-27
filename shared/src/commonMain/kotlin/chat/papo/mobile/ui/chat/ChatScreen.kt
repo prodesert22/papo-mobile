@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -55,6 +57,8 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -154,6 +158,8 @@ import chat.papo.mobile.resources.channels_join_call
 import chat.papo.mobile.resources.chat_editing
 import chat.papo.mobile.resources.chat_emoji
 import chat.papo.mobile.resources.msg_react_more
+import chat.papo.mobile.resources.notif_more_options
+import chat.papo.mobile.resources.notif_open
 import chat.papo.mobile.resources.chat_empty
 import chat.papo.mobile.resources.chat_empty_read_only
 import chat.papo.mobile.resources.chat_focus_missing
@@ -214,6 +220,8 @@ import chat.papo.mobile.ui.media.ViewingMedia
 import chat.papo.mobile.ui.media.YouTubeViewer
 import chat.papo.mobile.ui.media.findOpenVideo
 import chat.papo.mobile.ui.media.findOpenYouTube
+import chat.papo.mobile.ui.notifications.ChannelNotificationSheet
+import chat.papo.mobile.ui.notifications.DmNotificationSheet
 import chat.papo.mobile.ui.settings.ConfirmDialog
 import kotlinx.coroutines.delay
 import kotlin.math.max
@@ -289,6 +297,9 @@ fun ChatScreen(
 
     val isVoice = channel?.type == ChannelType.Voice
     val isDm = dms.any { it.id == viewModel.channelId }
+    // O menu ⋮ e a folha de notificações da conversa (canal ou DM).
+    var moreMenu by remember { mutableStateOf(false) }
+    var notificationsOpen by rememberSaveable { mutableStateOf(false) }
     val draft = viewModel.draft
     // O rascunho vai para o banco quando a tela sai de cena: outra tela por cima, app em segundo plano ou fim da conversa.
     // O compositor avisa as mudanças do campo no quadro seguinte; a última tecla antes de sair não pode ficar de fora.
@@ -475,17 +486,46 @@ fun ChatScreen(
                     IconButton(onClick = onSwitch) {
                         Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(Res.string.switcher_title))
                     }
-                    IconButton(onClick = onSearch) {
-                        Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.chat_search))
-                    }
-                    if (pinnedListOffered(access, isDm, channel?.type)) {
-                        IconButton(onClick = viewModel::showPinned) {
-                            Icon(Icons.Filled.PushPin, contentDescription = stringResource(Res.string.chat_pinned))
-                        }
-                    }
                     if (!isDm) {
                         IconButton(onClick = onOpenMembers) {
                             Icon(Icons.Filled.Group, contentDescription = stringResource(Res.string.members_open))
+                        }
+                    }
+                    // Busca, fixadas e notificações ficam no menu: com tudo solto na barra, o título some em 360 dp.
+                    Box {
+                        IconButton(onClick = { moreMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(Res.string.notif_more_options))
+                        }
+                        DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.chat_search)) },
+                                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                                onClick = {
+                                    moreMenu = false
+                                    onSearch()
+                                },
+                            )
+                            if (pinnedListOffered(access, isDm, channel?.type)) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.chat_pinned)) },
+                                    leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                                    onClick = {
+                                        moreMenu = false
+                                        viewModel.showPinned()
+                                    },
+                                )
+                            }
+                            // Sem o canal ou a DM lidos ainda não há o que configurar.
+                            if (channel != null || isDm) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.notif_open)) },
+                                    leadingIcon = { Icon(Icons.Filled.Notifications, contentDescription = null) },
+                                    onClick = {
+                                        moreMenu = false
+                                        notificationsOpen = true
+                                    },
+                                )
+                            }
                         }
                     }
                 },
@@ -762,6 +802,14 @@ fun ChatScreen(
         }
     }
     state.pinnedList?.takeUnless { access.readDenied }?.let { PinnedSheet(session, it, users, viewModel::hidePinned) }
+    if (notificationsOpen) {
+        val closeNotifications = { notificationsOpen = false }
+        when {
+            channel != null -> ChannelNotificationSheet(session.notificationPrefs, channel, closeNotifications)
+            isDm -> DmNotificationSheet(session.notificationPrefs, viewModel.channelId, dmUser?.displayName.orEmpty(), closeNotifications)
+            else -> LaunchedEffect(Unit) { closeNotifications() }
+        }
+    }
 }
 
 /** Quem reagiu a uma mensagem, pedido pela bolinha em que se tocou ou pela folha de ações (a primeira). */

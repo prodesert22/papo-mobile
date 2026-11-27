@@ -89,6 +89,18 @@ class ParkedChatsTest {
     }
 
     @Test
+    fun estadoSalvoGuardaSeOInstanteEAproximado() {
+        val aproximada = ParkedChat("canal-cafe", MessageTarget("msg-7", "2026-01-05T10:00:00.003Z", approximate = true))
+        val chats = ParkedChats.Empty.opened(contaBia, aproximada).opened(contaAna, cafe)
+
+        val restored = ParkedChats.decode(chats.encode())
+
+        assertEquals(true, restored[contaBia]?.target?.approximate)
+        assertEquals(false, restored[contaAna]?.target?.approximate)
+        assertEquals(chats, restored)
+    }
+
+    @Test
     fun estadoSalvoVazioVoltaVazio() {
         assertEquals(ParkedChats.Empty, ParkedChats.decode(emptyList()))
         assertEquals(emptyList(), ParkedChats.Empty.encode())
@@ -97,7 +109,7 @@ class ParkedChatsTest {
     @Test
     fun estadoSalvoIncompletoEDescartado() {
         // Sobram dois campos do último grupo: ele não vale, e o primeiro continua valendo.
-        val saved = ParkedChats.Empty.opened(contaAna, geral).encode() + listOf(contaBia, "canal-x")
+        val saved = ParkedChats.Empty.opened(contaAna, geral).encode() + listOf(contaBia, "canal-x", "")
 
         val restored = ParkedChats.decode(saved)
 
@@ -107,15 +119,15 @@ class ParkedChatsTest {
 
     @Test
     fun estadoSalvoSemContaOuSemCanalEDescartado() {
-        val saved = listOf("", "canal", "", "", contaAna, "", "", "")
+        val saved = listOf("", "canal", "", "", "", contaAna, "", "", "", "")
 
         assertEquals(ParkedChats.Empty, ParkedChats.decode(saved))
     }
 
     @Test
     fun mensagemPedidaSoValeComIdEInstanteJuntos() {
-        val semInstante = listOf(contaAna, "canal-geral", "msg-1", "")
-        val semId = listOf(contaBia, "canal-cafe", "", "2026-01-05T10:00:00Z")
+        val semInstante = listOf(contaAna, "canal-geral", "msg-1", "", "")
+        val semId = listOf(contaBia, "canal-cafe", "", "2026-01-05T10:00:00Z", "")
 
         val restored = ParkedChats.decode(semInstante + semId)
 

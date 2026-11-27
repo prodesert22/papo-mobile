@@ -47,6 +47,9 @@ class ChatApi(private val client: PapoClient) {
             setBody(OpenDmRequest(userId))
         }.bodyOrThrow()
 
+    /** Uma conversa direta do usuário, por id: serve a uma que não está na lista (fechada) e que uma notificação aponta. */
+    suspend fun dm(dmId: String): DirectConversationDto = http.get { url(path("/dms/$dmId")) }.bodyOrThrow()
+
     suspend fun closeDm(dmId: String) = http.delete { url(path("/dms/$dmId")) }.requireSuccess()
 
     suspend fun users(since: String? = null, lastId: String? = null): UsersPage =
@@ -207,6 +210,46 @@ class ChatApi(private val client: PapoClient) {
             setBody(MarkReadRequest(messageId))
         }.requireSuccess()
 
+    /**
+     * Uma página da caixa de notificações, da mais nova à mais antiga, de até 100 linhas. [since] com [lastId] é o
+     * cursor `(created_at, id)` da última linha da página anterior (as que vêm antes dele); [since] sozinho traz só as
+     * criadas depois dele. [lastId] sem [since] o servidor ignora, então não é enviado.
+     */
+    suspend fun notifications(userId: String, since: String? = null, lastId: String? = null): NotificationListDto =
+        http.get {
+            url(path("/users/$userId/notifications"))
+            parameter("order", "desc")
+            if (since != null) {
+                parameter("since", since)
+                lastId?.let { parameter("last_id", it) }
+            }
+        }.bodyOrThrow()
+
+    /**
+     * Marca de 1 a 1000 notificações como lidas. O servidor responde 404 quando nenhuma linha casou (todas já
+     * estavam lidas, ou sumiram com a mensagem): quem chama decide se isso é um erro.
+     */
+    suspend fun markNotificationsRead(userId: String, ids: List<String>): MarkNotificationsReadResponse {
+        require(ids.size in 1..MAX_NOTIFICATION_IDS) { "O servidor aceita de 1 a $MAX_NOTIFICATION_IDS ids: ${ids.size}" }
+        return http.put {
+            url(path("/users/$userId/read_notification"))
+            contentType(ContentType.Application.Json)
+            setBody(MarkNotificationsReadRequest(ids))
+        }.bodyOrThrow()
+    }
+
+    /**
+     * Grava o nível de notificação de [userId] (só a própria conta) em [channelId]: `all`, `only_mentions` ou `off`. O
+     * servidor guarda um nível por canal e usuário; silêncio e supressão não existem nele. Muda o que ele registra e
+     * notifica daqui para frente, no web e no TUI também.
+     */
+    suspend fun setChannelNotification(channelId: String, userId: String, mode: String): ChannelUserSettingDto =
+        http.post {
+            url(path("/channels/$channelId/user/$userId/settings"))
+            contentType(ContentType.Application.Json)
+            setBody(UpdateChannelUserSettingRequest(mode))
+        }.bodyOrThrow()
+
     suspend fun pin(channelId: String, messageId: String) =
         http.post { url(path("/channels/$channelId/messages/$messageId/pin")) }.requireSuccess()
 
@@ -339,3 +382,6 @@ private fun Throwable.fileFailure(): FileUnavailableException? =
     generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH).filterIsInstance<FileUnavailableException>().firstOrNull()
 
 private const val MAX_CAUSE_DEPTH = 10
+
+/** Limite de ids de uma chamada a `PUT /users/{id}/read_notification`. */
+const val MAX_NOTIFICATION_IDS = 1000

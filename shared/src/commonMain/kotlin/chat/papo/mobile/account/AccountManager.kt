@@ -1,5 +1,8 @@
 package chat.papo.mobile.account
 
+import chat.papo.mobile.chat.MentionTotal
+import chat.papo.mobile.chat.SystemNotifications
+import chat.papo.mobile.chat.totalOf
 import chat.papo.mobile.core.AppDispatchers
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.AuthApi
@@ -8,9 +11,13 @@ import chat.papo.mobile.data.api.MemoryCookieStore
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.api.ServerDto
 import chat.papo.mobile.media.VideoPosterExtractor
+import chat.papo.mobile.push.PushTokens
+import chat.papo.mobile.push.accountForPush
 import chat.papo.mobile.security.AppPrefs
 import io.ktor.client.engine.HttpClientEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
@@ -18,6 +25,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -58,6 +68,10 @@ class AccountManager(
     private val openResources: (accountId: String) -> AccountResources,
     private val deleteLocalData: (accountId: String) -> Unit,
     private val posterExtractor: VideoPosterExtractor? = null,
+    /** As notificações do sistema; nulo onde a plataforma ainda não as tem. */
+    private val notifications: SystemNotifications? = null,
+    /** O token de push do aparelho; nulo onde a plataforma ainda não tem push, e então nenhuma conta o registra. */
+    private val pushTokens: PushTokens? = null,
 ) {
     private var foreground = true
 
@@ -85,6 +99,17 @@ class AccountManager(
     fun session(accountId: String): AccountSession? = sessions.value[accountId]
 
     val sessionMap: StateFlow<Map<String, AccountSession>> = sessions.asStateFlow()
+
+    /**
+     * As menções não lidas de todas as contas com sessão, para o selo do ícone do app. Cada conta entra com o próprio
+     * número, calculado só com a caixa, as conversas e as configurações dela (regra 4): nada de uma conta passa a outra.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val mentionTotal: StateFlow<MentionTotal> = sessions
+        .flatMapLatest { map ->
+            if (map.isEmpty()) flowOf(MentionTotal()) else combine(map.values.map { it.mentions.mentions }) { totalOf(it.asList()) }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, MentionTotal())
 
     suspend fun load() = mutex.withLock {
         val stored = store.all()
@@ -156,6 +181,24 @@ class AccountManager(
     }
 
     /**
+     * A conta que abre o toque numa notificação de push do canal ou da conversa [conversationId] (ver [accountForPush]):
+     * só as contas deste aparelho que já conhecem a conversa, pelo banco delas. Nulo se nenhuma a conhece.
+     */
+    suspend fun pushTargetAccount(conversationId: String): String? {
+        val holders = accounts.value.map { it.id }.filter { id ->
+            val chat = sessions.value[id]?.chat ?: return@filter false
+            try {
+                chat.hasConversation(conversationId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false // banco de uma conta que não abriu: ela só fica de fora
+            }
+        }
+        return accountForPush(holders, activeId.value)
+    }
+
+    /**
      * A sessão de [accountId] acabou do lado do servidor (a troca de senha encerra todas, inclusive esta): desliga o
      * tempo real e marca a conta como expirada, para a tela principal levar ao "Entrar de novo". Não chama
      * `POST /auth/logout` (a sessão já não vale) nem sobe o alerta de violação, que é de outro caso. Os dados da conta
@@ -173,10 +216,16 @@ class AccountManager(
         pendingColors.update { it - accountId }
         val session = sessions.value[accountId]
         if (session != null) {
+            // Antes de sair: sem o cookie o servidor não reconheceria quem pede para tirar o aparelho.
+            session.push?.unregister()
             runCatching { session.auth.logout() }
             session.close()
             sessions.value = sessions.value - accountId
+            // O servidor guarda o token por servidor inteiro: o que tirei pode ter sido o registro de outra conta daqui.
+            sessions.value.values.filter { it.client.server == session.client.server }.forEach { it.push?.registerAgain() }
         }
+        // Com ou sem sessão: as notificações e os canais do sistema são desta conta e não podem sobrar (regra 4).
+        notifications?.notifier?.removeAccount(accountId)
         withContext(NonCancellable) {
             store.delete(accountId)
             withContext(dispatchers.io) { deleteLocalData(accountId) }
@@ -198,9 +247,18 @@ class AccountManager(
         val sessionScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext.job))
         val cookies = StoredCookie(account.id, cookie)
         val client = PapoClient(engine, account.server, cookies)
-        val session = AccountSession(account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io, dispatchers.background, posterExtractor)
+        val session = AccountSession(
+            account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io, dispatchers.background, posterExtractor,
+            notifications, accountLabel = { notificationLabel(account) }, pushTokens = pushTokens,
+        )
         if (foreground) session.start()
         return session
+    }
+
+    /** O nome da conta nas notificações: o rótulo de agora (o usuário pode trocá-lo) e `@usuário`. */
+    private fun notificationLabel(original: Account): String {
+        val current = accounts.value.firstOrNull { it.id == original.id } ?: original
+        return "${current.title} · @${current.username}"
     }
 
     /** Com o app fora da tela o tempo real é desligado; ao voltar, religa e ressincroniza. */

@@ -41,8 +41,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Mensagem que a conversa deve mostrar ao abrir, como um resultado de busca, com o instante dela dado pelo servidor. */
-data class MessageTarget(val id: String, val createdAtIso: String)
+/**
+ * Mensagem que a conversa deve mostrar ao abrir, como um resultado de busca, com o instante dela dado pelo servidor.
+ * Com [approximate], [createdAtIso] é o de uma notificação, um pouco depois do da mensagem (ver `ChatStore.locate`).
+ */
+data class MessageTarget(val id: String, val createdAtIso: String, val approximate: Boolean = false)
 
 data class ChatUiState(
     val replyTo: Message? = null,
@@ -135,7 +138,7 @@ class ChatViewModel(
 
     private suspend fun locate(target: MessageTarget) {
         var located: Located? = null
-        attempt { located = chat.locate(channelId, target.id, target.createdAtIso) }
+        attempt { located = chat.locate(channelId, target.id, target.createdAtIso, target.approximate) }
         settle(target.id, located)
     }
 

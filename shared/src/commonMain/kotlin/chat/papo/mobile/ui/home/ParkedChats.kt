@@ -24,9 +24,12 @@ class ParkedChats private constructor(private val byAccount: Map<String, ParkedC
         return if (kept.size == byAccount.size) this else ParkedChats(kept)
     }
 
-    /** Os campos de cada conversa, em fila, para o estado salvo: conta, canal, id da mensagem e instante dela (vazios sem mensagem). */
+    /** Os campos de cada conversa, em fila, para o estado salvo: conta, canal, id da mensagem, instante dela (vazios sem mensagem) e `~` se o instante é aproximado. */
     fun encode(): List<String> = byAccount.flatMap { (accountId, chat) ->
-        listOf(accountId, chat.channelId, chat.target?.id.orEmpty(), chat.target?.createdAtIso.orEmpty())
+        listOf(
+            accountId, chat.channelId, chat.target?.id.orEmpty(), chat.target?.createdAtIso.orEmpty(),
+            if (chat.target?.approximate == true) APPROXIMATE else "",
+        )
     }
 
     override fun equals(other: Any?): Boolean = other is ParkedChats && byAccount == other.byAccount
@@ -38,7 +41,8 @@ class ParkedChats private constructor(private val byAccount: Map<String, ParkedC
     companion object {
         val Empty = ParkedChats(emptyMap())
 
-        private const val FIELDS = 4
+        private const val FIELDS = 5
+        private const val APPROXIMATE = "~"
 
         /** O inverso de [encode]. O que vier incompleto ou sem conta e canal é descartado: um estado salvo estragado vira lista vazia. */
         fun decode(values: List<String>): ParkedChats {
@@ -46,7 +50,7 @@ class ParkedChats private constructor(private val byAccount: Map<String, ParkedC
             for (fields in values.chunked(FIELDS)) {
                 if (fields.size < FIELDS || fields[0].isEmpty() || fields[1].isEmpty()) continue
                 // A mensagem pedida só vale com o id e o instante juntos.
-                val target = if (fields[2].isNotEmpty() && fields[3].isNotEmpty()) MessageTarget(fields[2], fields[3]) else null
+                val target = if (fields[2].isNotEmpty() && fields[3].isNotEmpty()) MessageTarget(fields[2], fields[3], fields[4] == APPROXIMATE) else null
                 byAccount[fields[0]] = ParkedChat(fields[1], target)
             }
             return if (byAccount.isEmpty()) Empty else ParkedChats(byAccount)

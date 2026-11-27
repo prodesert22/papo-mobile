@@ -44,7 +44,10 @@ import androidx.navigation.toRoute
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.AppSession
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.account.Account
 import chat.papo.mobile.chat.Channel
+import chat.papo.mobile.chat.NotificationOpenRequests
+import chat.papo.mobile.chat.NotificationPermissionPrompt
 import chat.papo.mobile.chat.OpenConversation
 import chat.papo.mobile.media.AudioTrack
 import chat.papo.mobile.resources.Res
@@ -63,7 +66,9 @@ import chat.papo.mobile.ui.chat.ChatViewModel
 import chat.papo.mobile.ui.chat.MessageTarget
 import chat.papo.mobile.ui.components.AudioBar
 import chat.papo.mobile.ui.components.LocalAudioPlayback
+import chat.papo.mobile.ui.components.LocalNotificationPermission
 import chat.papo.mobile.ui.components.LocalPlatformUi
+import chat.papo.mobile.ui.components.NotificationPermissionExplainer
 import chat.papo.mobile.ui.components.PlatformUi
 import chat.papo.mobile.ui.home.ConversationPanelHost
 import chat.papo.mobile.ui.home.ConversationPanelState
@@ -82,6 +87,9 @@ import chat.papo.mobile.ui.profile.ProfileScreen
 import chat.papo.mobile.ui.profile.ProfileViewModel
 import chat.papo.mobile.ui.search.SearchScreen
 import chat.papo.mobile.ui.search.SearchViewModel
+import chat.papo.mobile.ui.notifications.AccountNotificationsScreen
+import chat.papo.mobile.ui.notifications.InboxScreen
+import chat.papo.mobile.ui.notifications.InboxViewModel
 import chat.papo.mobile.ui.settings.AccountSettingsScreen
 import chat.papo.mobile.ui.settings.AppSettingsScreen
 import chat.papo.mobile.ui.settings.BlockedUsersScreen
@@ -127,6 +135,14 @@ private data class ProfileRoute(val accountId: String, val userId: String)
 @Serializable
 private data class BlockedRoute(val accountId: String)
 
+/** As notificações da conta [accountId]: nível, supressão, silêncio e sincronização. */
+@Serializable
+private data class NotificationsRoute(val accountId: String)
+
+/** A caixa de notificações (menções, respostas, mensagens diretas) da conta [accountId]. */
+@Serializable
+private data class InboxRoute(val accountId: String)
+
 /** A troca da senha da conta [accountId]. */
 @Serializable
 private data class PasswordRoute(val accountId: String)
@@ -151,7 +167,7 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
     // Fica fora da tela principal para sobreviver a girar o aparelho; é esvaziado ao travar.
     val chatStores = viewModel { ParkedChatStores() }
 
-    CompositionLocalProvider(LocalPlatformUi provides platformUi) {
+    CompositionLocalProvider(LocalPlatformUi provides platformUi, LocalNotificationPermission provides graph.notificationPermission) {
       PapoTheme {
         when (val current = state) {
             LockState.Starting -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
@@ -162,7 +178,9 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
             }
             is LockState.Unlocked -> {
                 val session = current.session as AppSession
-                CompositionLocalProvider(LocalAudioPlayback provides session.audio) { Unlocked(session, graph.lock, graph.appVersion, chatStores) }
+                CompositionLocalProvider(LocalAudioPlayback provides session.audio) {
+                    Unlocked(session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
+                }
             }
         }
         if (wiped) {
@@ -180,7 +198,14 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
 }
 
 @Composable
-private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, chatStores: ParkedChatStores) {
+private fun Unlocked(
+    session: AppSession,
+    lock: AppLock,
+    appVersion: String,
+    chatStores: ParkedChatStores,
+    notificationPrompt: NotificationPermissionPrompt?,
+    notificationOpens: NotificationOpenRequests,
+) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val loaded by session.accounts.loaded.collectAsStateWithLifecycle()
     val navController = rememberNavController()
@@ -211,8 +236,11 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
         navController.popBackStack(HomeRoute, inclusive = false)
         panel.open(accountId, chat)
     }
+    OpenFromNotification(notificationOpens, accounts, session.accounts::pushTargetAccount, openChat)
     OpenTopChatOnStart(session, panel, navController, openChat)
     ReopenChatOnReturn(session, panel, navController, openChat)
+    // Só com uma conta: sem ela ainda não há do que avisar, e a primeira tela é a de entrar no servidor.
+    if (notificationPrompt != null && accounts.isNotEmpty()) NotificationPermissionExplainer(notificationPrompt)
 
     // Uma tela nova entra deslizando da borda direita por cima da anterior, que fica parada embaixo, e sai pelo mesmo
     // caminho. No gesto de voltar nada se mexe enquanto o dedo está na tela: a saída só desliza depois que a volta é
@@ -252,6 +280,7 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                             onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
                             onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
                             onSearch = { navController.navigate(SearchRoute(it.id)) },
+                            onInbox = { navController.navigate(InboxRoute(it.id)) },
                             onEditProfile = { navController.navigate(EditProfileRoute(it.id)) },
                             onSwitch = { navController.navigate(SwitcherRoute()) },
                             onAppSettings = { navController.navigate(AppSettingsRoute) },
@@ -363,7 +392,36 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                 onOpenBlocked = { navController.navigate(BlockedRoute(accountId)) },
                 onOpenPassword = { navController.navigate(PasswordRoute(accountId)) },
                 onEditProfile = { navController.navigate(EditProfileRoute(accountId)) },
+                onOpenNotifications = { navController.navigate(NotificationsRoute(accountId)) },
             )
+        }
+        composable<NotificationsRoute> { entry ->
+            val route = entry.toRoute<NotificationsRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                AccountNotificationsScreen(accountSession.notificationPrefs, onBack = { navController.popBackStack() })
+            }
+        }
+        composable<InboxRoute> { entry ->
+            val route = entry.toRoute<InboxRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                // A sessão entra na chave: o que uma caixa mostra nunca aparece em outra conta.
+                val vm = viewModel(key = "inbox/${route.accountId}/${accountSession.hashCode()}") { InboxViewModel(accountSession) }
+                InboxScreen(
+                    session = accountSession,
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onOpenSettings = { navController.navigate(NotificationsRoute(route.accountId)) },
+                    onOpen = { channelId, target -> openChat(route.accountId, ParkedChat(channelId, target)) },
+                )
+            }
         }
         composable<PasswordRoute> { entry ->
             val route = entry.toRoute<PasswordRoute>()
@@ -410,6 +468,34 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                 onOpen = { target -> openChat(target.accountId, ParkedChat(target.channelId)) },
             )
         }
+    }
+}
+
+/**
+ * Atende o toque numa notificação: abre a conversa pedida, na mensagem se o pedido a trouxe, pelo mesmo [openChat] dos
+ * outros pedidos de abrir conversa. O pedido espera aqui até o app estar destravado e as contas carregadas. Se a conta
+ * não existe (saiu depois da notificação), o pedido é descartado sem abrir nada. Vem antes da abertura automática: a
+ * conversa estacionada por ele a faz desistir de abrir o canal do topo.
+ *
+ * Um pedido sem conta é o de um push que o Android mostrou sozinho: [pushTarget] diz qual conta tem a conversa, e sem
+ * nenhuma o app só fica aberto.
+ */
+@Composable
+private fun OpenFromNotification(
+    requests: NotificationOpenRequests,
+    accounts: List<Account>,
+    pushTarget: suspend (conversationId: String) -> String?,
+    openChat: (accountId: String, chat: ParkedChat) -> Unit,
+) {
+    val request by requests.pending.collectAsStateWithLifecycle()
+    val current = request ?: return
+    LaunchedEffect(current) {
+        val accountId = current.accountId ?: pushTarget(current.conversationId)
+        if (accountId != null && accounts.any { it.id == accountId }) {
+            val target = current.target?.let { MessageTarget(it.messageId, it.createdAt, it.approximate) }
+            openChat(accountId, ParkedChat(current.conversationId, target))
+        }
+        requests.consume(current)
     }
 }
 

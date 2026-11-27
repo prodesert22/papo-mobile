@@ -142,11 +142,61 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   chamada.
 - A chamada continua quando você sai do app, com uma notificação para desligar.
 
+## Notificações
+
+- Caixa de notificações para cada conta, aberta pelo sino no topo da lista de
+  canais: menções, respostas às suas mensagens, `@everyone` e mensagens diretas,
+  com o motivo de cada uma. Abrir uma leva à mensagem e a marca como lida; dá
+  também para marcar como lidas todas as carregadas.
+- Número de menções em vermelho ao lado de cada canal e conversa direta, em cada
+  conta na barra de servidores e no sino. Um canal com mensagens novas mostra o
+  nome em branco e um círculo à direita.
+- Configurações de notificação para cada servidor e, partindo de "Usar padrão do
+  servidor", para cada canal; segure o canal na lista ou use o menu da conversa.
+  Você escolhe quais mensagens notificam (todas, só menções ou nada), silencia
+  de 15 minutos a 24 horas ou até reativar, e suprime `@everyone` ou as menções
+  diretas. As conversas diretas também podem ser silenciadas.
+- Silenciar tira o círculo de mensagem nova e esmaece o canal, mas as menções
+  continuam contando. Suprimir `@everyone` ou as menções as tira da contagem.
+- O nível de notificação do canal fica salvo no servidor e é o mesmo nos outros
+  clientes do Papo. Desligue "Sincronizar com o servidor" num canal ou no
+  servidor inteiro para manter um nível diferente neste celular.
+- Notificações do sistema na barra do Android, uma por conversa e agrupadas por
+  conta, seguindo essas configurações. Tocar numa delas abre a mensagem, depois
+  do desbloqueio quando o bloqueio do app está ligado. Cada conta tem os próprios
+  canais de notificação do Android (menções e respostas, mensagens diretas,
+  mensagens), onde dá para mudar o som e a vibração. Cada mensagem mostra a foto
+  do autor, ou a do webhook, quando o app a obtém em cerca de dois segundos; senão
+  a notificação mostra a inicial e não espera. Uma foto de outro site nunca é
+  buscada.
+- Notificações push com o app fechado ou em segundo plano, quando o servidor tem
+  o push ligado. O Android as mostra sozinho, então silenciar, o nível de
+  notificação e suprimir `@everyone` ou as menções não valem para elas, e o
+  texto segue a configuração de prévia do servidor. Tocar numa delas abre o app,
+  depois do desbloqueio quando o bloqueio do app está ligado, e então a conversa.
+  Elas não têm a foto do autor: seria preciso o servidor enviá-la.
+  O push não diz de que servidor nem de que conta é, então o app abre a conta
+  ativa se ela tem aquela conversa e, senão, a primeira conta que a tem. Duas
+  contas do mesmo servidor não recebem push as duas no mesmo celular: o servidor
+  guarda uma conta por aparelho, a última que se registrou.
+
 ## Limitações atuais
 
-- Sem notificações push: as mensagens só chegam com o app aberto.
-- Sem caixa de notificações, preferências do usuário e administração do
-  servidor.
+- As notificações que seguem as suas configurações (silenciar, nível,
+  suprimir `@everyone` ou menções) só chegam com o app aberto. Com o app
+  fechado ou em segundo plano chega só o push do servidor, e só se o servidor o
+  tiver ligado.
+- Silenciar, o nível geral do servidor e suprimir `@everyone` ou as menções
+  ficam neste celular: o servidor não os guarda, então eles não seguem você no
+  web nem em outro celular. Conversas diretas não têm nível no servidor, só
+  silenciar.
+- A contagem de menções lê até 500 notificações por conta e mostra "99+" além
+  disso. O que você lê em outro aparelho só chega ao celular quando o app
+  reconecta ou volta para a frente, porque o servidor não avisa; uma notificação
+  de push que já está na barra fica lá até você abrir ou dispensar. Um canal em
+  "nada" no servidor não recebe
+  notificações dele, então fica sem número.
+- Sem administração do servidor.
 - O avatar não pode ser removido depois de definido, só trocado, e avatar ou banner
   animado não é recortado: vai como está quando cabe nos limites de tamanho e é
   recusado quando não cabe; não há status

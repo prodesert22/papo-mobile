@@ -15,6 +15,11 @@ data class SwitchSource(
     val channels: List<Channel>,
     val dms: List<Dm>,
     val users: Map<String, User>,
+    /**
+     * Os canais com menção não lida contada, vindos da caixa de notificações da conta, ou nulo enquanto ela não foi lida.
+     * Sem isso vale a heurística de [switchEntries].
+     */
+    val mentionedChannels: Set<String>? = null,
 )
 
 enum class SwitchKind { Text, Voice, Dm }
@@ -48,9 +53,10 @@ data class OpenConversation(val accountId: String, val channelId: String)
  * recente (comparando os instantes, não os textos) e por fim o nome sem acento. Categorias e a conversa [open] ficam
  * de fora; canais de voz entram, porque têm chat. Canal silenciado (`off`) não conta como não lido.
  *
- * "Menção" usa só o que está carregado, porque ainda não há contagem de menções não lidas por conversa: é uma
- * conversa direta com mensagens não lidas, ou um canal não lido cuja última mensagem menciona o próprio usuário.
- * Se chegou depois uma mensagem sem menção, a menção deixa de contar.
+ * "Menção" é uma conversa direta com mensagens não lidas e, num canal, o que a caixa de notificações da conta conta
+ * como menção não lida ([SwitchSource.mentionedChannels], com a supressão aplicada). Enquanto a caixa não foi lida, vale
+ * a heurística de só usar o que está carregado: um canal não lido cuja última mensagem menciona o próprio usuário; se
+ * chegou depois uma mensagem sem menção, a menção deixa de contar.
  */
 fun switchEntries(sources: List<SwitchSource>, open: OpenConversation? = null): List<SwitchEntry> =
     sources
@@ -100,7 +106,7 @@ private fun SwitchSource.channelEntries(): List<SwitchEntry> = channels
             name = channel.name,
             username = null,
             unread = unread,
-            mention = unread && mentionsUser(channel.lastMessageText, myUserId),
+            mention = if (mentionedChannels != null) channel.id in mentionedChannels else unread && mentionsUser(channel.lastMessageText, myUserId),
             unreadCount = 0,
             lastActivity = parseInstant(channel.lastMessageAt),
         )

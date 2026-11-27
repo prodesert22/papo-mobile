@@ -11,6 +11,7 @@ import chat.papo.mobile.data.api.DirectConversationDto
 import chat.papo.mobile.data.api.EmbedDto
 import chat.papo.mobile.data.api.ExternalAuthorDto
 import chat.papo.mobile.data.api.MessageDto
+import chat.papo.mobile.data.api.MessageListResponse
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.api.PapoJson
 import chat.papo.mobile.data.api.ReactionRequest
@@ -28,9 +29,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
@@ -145,10 +150,21 @@ class ChatStore(
      */
     val channelsSynced: StateFlow<Boolean> = _channelsSynced.asStateFlow()
 
+    private val _readMarks = MutableSharedFlow<ReadMark>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /**
+     * Cada leitura que o servidor aceitou (`PUT /channels/{id}/read`). Ele marca as notificações do canal até a mensagem
+     * e não avisa por evento; quem guarda cópia delas aplica o mesmo aqui ([markReadUpTo]).
+     */
+    val readMarks: SharedFlow<ReadMark> = _readMarks.asSharedFlow()
+
     val connection: StateFlow<WsState> get() = ws.state
 
     private val hasOlder = HashMap<String, Boolean>()
-    private var viewing: String? = null
+    private val _viewing = MutableStateFlow<String?>(null)
+
+    /** O canal que está na tela agora, ou nulo. As notificações do sistema não avisam da conversa que já se lê. */
+    val viewingChannel: StateFlow<String?> = _viewing.asStateFlow()
     private var lastTypingSent: Pair<String, TimeMark>? = null
     private var lastActivitySent: TimeMark? = null
     private val typingMarks = HashMap<Pair<String, String>, TimeMark>()
@@ -173,17 +189,17 @@ class ChatStore(
         runSync()
         // Quem lê um trecho antigo fica onde está; o fim do histórico vem quando voltar para ele. Canal que
         // a leitura nega nem é pedido: seria um 403 certo.
-        viewing?.let { if (!isDetached(it) && !readDenied(it)) runCatching { refreshLatest(it) } }
+        _viewing.value?.let { if (!isDetached(it) && !readDenied(it)) runCatching { refreshLatest(it) } }
     }
 
     /** Canal que está na tela agora; mensagens dele não contam como não lidas. */
     fun setViewing(channelId: String?) {
-        viewing = channelId
+        _viewing.value = channelId
     }
 
     /** [channelId] deixou de estar na tela. Só vale se ele ainda é o que está: outro, já marcado depois, fica. */
     fun clearViewing(channelId: String) {
-        if (viewing == channelId) viewing = null
+        if (_viewing.value == channelId) _viewing.value = null
     }
 
     suspend fun runSync() {
@@ -269,6 +285,9 @@ class ChatStore(
         permissions.applyChannels(channelList)
         withContext(io) { q.transaction { storeChannels(channelList) } }
     }
+
+    /** Relê os canais para conferir uma mudança que pode ter chegado ao servidor. Falha como qualquer leitura; nada é reenviado. */
+    suspend fun reloadChannels() = refreshChannels()
 
     /**
      * Pede a releitura das permissões depois de um 403: o que o app sabia ficou velho (um `PUT /roles` não
@@ -401,9 +420,15 @@ class ChatStore(
      * um buraco entre eles, e o trecho guardado dá lugar à vizinhança: o canal
      * fica marcado em [detached] até [loadNewer] ou [refreshLatest] o levarem de
      * volta ao fim do histórico.
+     *
+     * Com [approximate], [createdAtIso] é o de uma notificação, que sai um pouco depois da mensagem: uma página
+     * decrescente a partir dele (com o id da mensagem como desempate) a contém, e o instante exato dela, lido ali,
+     * leva ao mesmo caminho acima. Quando a mensagem é a mais nova do canal, essa página já termina nela, e é
+     * ela que vira o trecho guardado. Se a página não a traz, ela foi apagada: [Located.Missing].
      */
-    suspend fun locate(channelId: String, messageId: String, createdAtIso: String): Located {
+    suspend fun locate(channelId: String, messageId: String, createdAtIso: String, approximate: Boolean = false): Located {
         position(channelId, messageId)?.let { return Located.Found(it) }
+        if (approximate) return locateFromNotification(channelId, messageId, createdAtIso)
         val after = reportingForbidden {
             api.messages(channelId, since = createdAtIso, lastId = messageId, order = "asc", limit = AROUND_NEWER)
         }
@@ -411,6 +436,23 @@ class ChatStore(
         val next = after.messages.firstOrNull() ?: return Located.Missing
         val before = reportingForbidden { api.messages(channelId, since = next.createdAt, lastId = next.id, limit = PAGE_SIZE) }
         if (before.messages.none { it.id == messageId }) return Located.Missing
+        return joinAround(channelId, messageId, before, after)
+    }
+
+    private suspend fun locateFromNotification(channelId: String, messageId: String, notifiedAtIso: String): Located {
+        val before = reportingForbidden { api.messages(channelId, since = notifiedAtIso, lastId = messageId, limit = PAGE_SIZE) }
+        val message = before.messages.firstOrNull { it.id == messageId } ?: return Located.Missing
+        val after = reportingForbidden {
+            api.messages(channelId, since = message.createdAt, lastId = messageId, order = "asc", limit = AROUND_NEWER)
+        }
+        return joinAround(channelId, messageId, before, after)
+    }
+
+    /**
+     * Grava a vizinhança de uma mensagem: [before] é a página decrescente que a contém e [after], a crescente que
+     * vem depois dela. Ver [locate] para o que acontece com o trecho que já estava guardado.
+     */
+    private suspend fun joinAround(channelId: String, messageId: String, before: MessageListResponse, after: MessageListResponse): Located {
         val around = before.messages + after.messages
         withContext(io) {
             q.transaction {
@@ -566,7 +608,9 @@ class ChatStore(
 
     suspend fun delete(messageId: String) {
         reportingForbidden { api.deleteMessage(messageId) }
-        withContext(io) { q.deleteMessage(messageId) }
+        withContext(io) {
+            q.transaction { removeMessage(messageId, q.selectMessage(messageId).executeAsOneOrNull()?.channel_id) }
+        }
     }
 
     suspend fun toggleReaction(message: Message, emojiId: String?, unicode: String?) {
@@ -588,17 +632,34 @@ class ChatStore(
     }
 
     suspend fun markRead(channelId: String, messageId: String) {
+        var createdAt: String? = null
         val alreadyRead = withContext(io) {
             val channel = q.selectChannel(channelId).executeAsOneOrNull()
             val dm = q.selectDm(channelId).executeAsOneOrNull()
             val read = (channel?.last_read_message ?: dm?.last_read_message) == messageId && (dm?.unread_count ?: 0L) == 0L
+            createdAt = q.selectMessage(messageId).executeAsOneOrNull()?.created_at
             q.transaction {
                 q.setChannelRead(messageId, channelId)
                 q.setDmRead(messageId, channelId)
             }
             read
         }
-        if (!alreadyRead) api.markRead(channelId, messageId)
+        if (alreadyRead) return
+        api.markRead(channelId, messageId)
+        _readMarks.tryEmit(ReadMark(channelId, messageId, createdAt))
+    }
+
+    /** O aparelho já conhece [id] como canal ou conversa direta desta conta. Lê o banco (sem rede nem a lista em memória). */
+    suspend fun hasConversation(id: String): Boolean = withContext(io) {
+        q.selectChannel(id).executeAsOneOrNull() != null || q.selectDm(id).executeAsOneOrNull() != null
+    }
+
+    /** Onde estão as mensagens guardadas de [ids]; as que o aparelho não tem ficam de fora. */
+    suspend fun storedPositions(ids: Collection<String>): Map<String, MessagePosition> {
+        if (ids.isEmpty()) return emptyMap()
+        return withContext(io) {
+            q.selectMessagePositions(ids.toList()).executeAsList().associate { it.id to MessagePosition(it.created_us, it.id) }
+        }
     }
 
     // Pins
@@ -625,6 +686,15 @@ class ChatStore(
         val dm = api.openDm(userId)
         withContext(io) { q.transaction { upsert(dm) } }
         return dm.id
+    }
+
+    /**
+     * Uma conversa direta que o aparelho não tem (uma que foi fechada, de onde uma notificação veio): lê por id e a
+     * guarda, para a conversa abrir. Lança o que o servidor responder: 403 `dm-blocked` com bloqueio, 404 sem ela.
+     */
+    suspend fun adoptDm(dmId: String) {
+        val dm = api.dm(dmId)
+        withContext(io) { q.transaction { upsert(dm) } }
     }
 
     suspend fun closeDm(dmId: String) {
@@ -734,7 +804,7 @@ class ChatStore(
                 if (fresh && event.authorId == myUserId) queue.confirm(event.channelId, event.content, event.replyTo, event.attachments.size)
             }
             is WsEvent.MessageEdited -> withContext(io) { q.editMessage(event.content, event.editedAt, event.id) }
-            is WsEvent.MessageDeleted -> withContext(io) { q.deleteMessage(event.id) }
+            is WsEvent.MessageDeleted -> withContext(io) { removeMessage(event.id, event.channelId) }
             is WsEvent.ReactionUpdated -> withContext(io) {
                 reactionLock.withLock {
                     val row = q.selectMessage(event.messageId).executeAsOneOrNull() ?: return@withContext
@@ -835,11 +905,41 @@ class ChatStore(
         val author = authorId?.let { q.selectUser(it).executeAsOneOrNull()?.username }
         q.setChannelLastMessage(messageId, createdAt, text, author, channelId)
         val mine = authorId == myUserId
-        val unseen = if (mine || viewing == channelId) 0L else 1L
+        val unseen = if (mine || _viewing.value == channelId) 0L else 1L
         q.setDmLastMessage(messageId, createdAt, text, author, unseen, channelId)
         if (mine) {
             q.setChannelRead(messageId, channelId)
             q.setDmRead(messageId, channelId)
+        }
+    }
+
+    /**
+     * Apaga a mensagem do banco. Se ela era a última do canal ou da conversa direta, a prévia passa a ser a
+     * mais nova que sobrou, senão o canal ficaria apontando para uma mensagem que não existe e pareceria não lido.
+     * Só dentro de [io].
+     */
+    private fun removeMessage(messageId: String, channelId: String?) = q.transaction {
+        q.deleteMessage(messageId)
+        if (channelId != null) refreshLastMessage(channelId, messageId)
+    }
+
+    private fun refreshLastMessage(channelId: String, deletedId: String) {
+        val channel = q.selectChannel(channelId).executeAsOneOrNull()?.takeIf { it.last_message_id == deletedId }
+        val dm = q.selectDm(channelId).executeAsOneOrNull()?.takeIf { it.last_message_id == deletedId }
+        if (channel == null && dm == null) return
+        // Longe do fim do histórico a mais nova guardada é antiga demais para valer como última: a prévia fica vazia
+        // até a próxima leitura da lista de canais.
+        val next = if (detachedNow(channelId)) null else q.newestMessage(channelId).executeAsOneOrNull()
+        val text = next?.let { preview(it.content, decodeList(AttachmentDto.serializer(), it.attachments)) }
+        val author = next?.author_id?.let { q.selectUser(it).executeAsOneOrNull()?.username }
+        if (channel != null) {
+            q.setChannelLastMessage(next?.id, next?.created_at, text, author, channelId)
+            // O ponto de leitura só anda se estava na apagada: o que não foi lido continua não lido.
+            if (channel.last_read_message == deletedId) q.setChannelRead(next?.id, channelId)
+        }
+        if (dm != null) {
+            q.setDmLastMessage(next?.id, next?.created_at, text, author, 0L, channelId)
+            if (dm.last_read_message == deletedId) q.setDmRead(next?.id, channelId) else if (dm.unread_count > 0) q.dropDmUnread(channelId)
         }
     }
 
