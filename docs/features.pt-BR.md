@@ -161,12 +161,16 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - O nível de notificação do canal fica salvo no servidor e é o mesmo nos outros
   clientes do Papo. Desligue "Sincronizar com o servidor" num canal ou no
   servidor inteiro para manter um nível diferente neste celular.
+- Notificações do sistema na barra do Android, uma por conversa e agrupadas por
+  conta, seguindo essas configurações. Tocar numa delas abre a mensagem, depois
+  do desbloqueio quando o bloqueio do app está ligado. Cada conta tem os próprios
+  canais de notificação do Android (menções e respostas, mensagens diretas,
+  mensagens), onde dá para mudar o som e a vibração.
 
 ## Limitações atuais
 
-- Ainda sem notificações do sistema: nada aparece fora do app, e as mensagens
-  só chegam com ele aberto. As configurações de notificação já valem para as
-  contagens e vão valer para as notificações do sistema quando elas chegarem.
+- As notificações do sistema só chegam com o app aberto: ainda não há push,
+  então nada chega com o app fechado ou em segundo plano.
 - Silenciar, o nível geral do servidor e suprimir `@everyone` ou as menções
   ficam neste celular: o servidor não os guarda, então eles não seguem você no
   web nem em outro celular. Conversas diretas não têm nível no servidor, só

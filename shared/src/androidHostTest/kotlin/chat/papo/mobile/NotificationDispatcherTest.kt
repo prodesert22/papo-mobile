@@ -204,7 +204,7 @@ class NotificationDispatcherTest {
     @Test
     fun mencaoComONivelNadaNaoNotificaENemEspera() = runTest {
         val f = fixture()
-        f.prefs.updateServer { it.copy(level = NotificationLevel.Nothing) }
+        f.prefs.updateServer { it.copy(sync = false, level = NotificationLevel.Nothing) }
 
         f.send(message("m1", content = mention))
         runCurrent()
@@ -306,7 +306,7 @@ class NotificationDispatcherTest {
     @Test
     fun mensagemComumNotificaComNivelTodasSoDoAparelhoDepoisDaJanela() = runTest {
         val f = fixture()
-        f.prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
+        f.prefs.updateChannel("c1") { it.copy(sync = false, level = NotificationLevel.All) }
 
         f.send(message("m1"))
         runCurrent()
@@ -324,7 +324,7 @@ class NotificationDispatcherTest {
     @Test
     fun mensagemComumComCanalSilenciadoNaoNotificaMesmoComTodas() = runTest {
         val f = fixture()
-        f.prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All, mute = Mute(null)) }
+        f.prefs.updateChannel("c1") { it.copy(sync = false, level = NotificationLevel.All, mute = Mute(null)) }
 
         f.send(message("m1"))
         runCurrent()
@@ -337,7 +337,7 @@ class NotificationDispatcherTest {
     @Test
     fun newNotificationEfemeroSemLinhaViraMensagemComum() = runTest {
         val f = fixture()
-        f.prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
+        f.prefs.updateChannel("c1") { it.copy(sync = false, level = NotificationLevel.All) }
 
         f.send(message("m1"))
         f.send(announce("m1"))
@@ -367,7 +367,7 @@ class NotificationDispatcherTest {
     @Test
     fun leituraDaCaixaQueNuncaTerminaTemLimiteEAMensagemViraComum() = runTest {
         val f = fixture()
-        f.prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
+        f.prefs.updateChannel("c1") { it.copy(sync = false, level = NotificationLevel.All) }
 
         f.send(message("m1"))
         f.send(announce("m1"))
@@ -384,7 +384,7 @@ class NotificationDispatcherTest {
     @Test
     fun leituraQueJaEstavaEmAndamentoNaoServeParaOEvento() = runTest {
         val f = fixture()
-        f.prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
+        f.prefs.updateChannel("c1") { it.copy(sync = false, level = NotificationLevel.All) }
         f.inbox.started.value = 1 // uma leitura começou antes do evento
 
         f.send(message("m1", content = "concordo"))
@@ -508,7 +508,7 @@ class NotificationDispatcherTest {
     @Test
     fun silenciarOServidorNaoCalaAConversaDireta() = runTest {
         val f = fixture()
-        f.prefs.updateServer { it.copy(mute = Mute(null), level = NotificationLevel.Nothing) }
+        f.prefs.updateServer { it.copy(sync = false, mute = Mute(null), level = NotificationLevel.Nothing) }
 
         f.send(message("m1", channel = "d1"))
         runCurrent()
@@ -590,7 +590,7 @@ class NotificationDispatcherTest {
     @Test
     fun asLinhasSaemNaOrdemDeEnvioMesmoQuandoADecisaoFoiOutra() = runTest {
         val f = fixture()
-        f.prefs.updateChannel("c1") { it.copy(level = NotificationLevel.All) }
+        f.prefs.updateChannel("c1") { it.copy(sync = false, level = NotificationLevel.All) }
 
         // A primeira espera a janela da caixa; a segunda é uma menção no texto e decide na hora.
         f.send(message("m1", content = "primeira", at = "2026-01-01T10:00:00Z"))

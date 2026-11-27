@@ -160,12 +160,17 @@ release notes in [releases/](../releases/) describe each version's changes.
 - A channel's notification level is saved on the server and shared with the
   other Papo clients. Turn off "Sincronizar com o servidor" for a channel or for
   the whole server to keep a different level on this phone.
+- System notifications in the Android notification shade, one per conversation
+  and grouped by account, following those settings. Tapping one opens the
+  message, after the unlock when the app lock is on. Each account has its own
+  Android notification channels (mentions and replies, direct messages,
+  messages), where you can change the sound and vibration.
 
 ## Current limitations
 
-- No system notifications yet: nothing appears outside the app, and messages
-  arrive only while it is open. The notification settings already apply to the
-  counts and will apply to system notifications when they arrive.
+- System notifications arrive only while the app is open: there are no push
+  notifications yet, so nothing arrives while the app is closed or in the
+  background.
 - Mute, the server-wide level and hiding `@everyone` or mentions stay on this
   phone: the server does not store them, so they do not follow you to the web or
   to another phone. Direct conversations have no level on the server, only mute.
