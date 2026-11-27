@@ -60,6 +60,9 @@
   settings, when you may change them, above the notification settings.
 - The server bar shows your avatar on each account, instead of the first letter
   of your name.
+- A server without a connection for more than two seconds shows a
+  disconnected icon at the top right of its picture in the server bar and next
+  to its name above the channel list.
 
 ## Fixes
 

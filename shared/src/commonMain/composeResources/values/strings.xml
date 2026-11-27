@@ -792,4 +792,7 @@
     <string name="licenses_open_license">Abrir a licença</string>
     <string name="licenses_open_failed">Não foi possível abrir o link.</string>
     <!-- fim da trilha D -->
+
+    <!-- 0.9.0 · conexão -->
+    <string name="connection_offline">Sem conexão com o servidor</string>
 </resources>

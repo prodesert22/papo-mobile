@@ -73,8 +73,12 @@ fun AccountAvatar(
     mentions: String? = null,
     avatarSession: AccountSession? = null,
     avatarUser: User? = null,
+    /** Sem conexão com o servidor ([rememberOffline]): o ícone toma o canto de cima à direita. */
+    offline: Boolean = false,
 ) {
     val accent = account.accentColor()
+    // Sessão que acabou já tem o ponto vermelho; o ícone de desconectado é para a sessão viva sem conexão.
+    val offlineShown = offline && !account.sessionExpired
     val corner by animateDpAsState(if (selected) size * 0.3f else size / 2)
     val shape = RoundedCornerShape(corner)
     val icon = rememberImage(account.serverIcon)
@@ -128,15 +132,29 @@ fun AccountAvatar(
         val dot = when {
             account.sessionExpired -> MaterialTheme.colorScheme.error
             mentions != null -> null
+            // O ícone de desconectado ocupa o canto do ponto de não lida.
+            offline -> null
             unread -> unreadColor
             else -> null
         }
         if (mentions != null && !account.sessionExpired) {
             MentionBadge(
                 mentions,
-                Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp).background(ringBackground, RoundedCornerShape(10.dp)).padding(2.dp),
+                // Com o ícone de desconectado no canto direito, o número passa para o esquerdo.
+                if (offlineShown) {
+                    Modifier.align(Alignment.TopStart).offset(x = (-6).dp, y = (-4).dp)
+                } else {
+                    Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp)
+                }.background(ringBackground, RoundedCornerShape(10.dp)).padding(2.dp),
                 minHeight = 18.dp,
             )
+        }
+        if (offlineShown) {
+            Box(
+                Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp).background(ringBackground, CircleShape).padding(2.dp),
+            ) {
+                OfflineIcon(size = 16.dp)
+            }
         }
         if (dot != null) {
             Box(

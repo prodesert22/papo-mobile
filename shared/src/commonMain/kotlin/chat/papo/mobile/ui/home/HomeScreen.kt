@@ -72,6 +72,7 @@ import chat.papo.mobile.resources.security_alert_title
 import chat.papo.mobile.resources.session_expired_action
 import chat.papo.mobile.resources.session_expired_body
 import chat.papo.mobile.resources.session_expired_title
+import chat.papo.mobile.ui.components.rememberOffline
 import chat.papo.mobile.ui.components.AccountAvatar
 import chat.papo.mobile.ui.notifications.ServerMuteMenu
 import chat.papo.mobile.ui.theme.LocalPapoColors
@@ -271,6 +272,7 @@ private fun RailItem(account: Account, accountSession: AccountSession?, selected
             mentions = badge.mentions,
             avatarSession = accountSession,
             avatarUser = ownUser,
+            offline = rememberOffline(accountSession),
         )
         if (accountSession != null) ServerMuteMenu(accountSession.notificationPrefs, expanded = muteMenu, onDismiss = { muteMenu = false })
     }

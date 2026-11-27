@@ -23,7 +23,9 @@ release notes in [releases/](../releases/) describe each version's changes.
 - Settings as lists with a short summary of every item, as in Android's own
   settings: the gear at the bottom of the server bar opens the app settings and
   the menu at the top of the channel list opens the server settings of the
-  account. The server bar shows your avatar on each account.
+  account. The server bar shows your avatar on each account, and a
+  disconnected icon on a server without a connection, also next to its name
+  above the channel list.
 
 ## Privacy on the device
 

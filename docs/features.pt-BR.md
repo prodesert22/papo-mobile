@@ -24,7 +24,9 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - Configurações em listas com um resumo curto de cada item, como as do próprio
   Android: a engrenagem no pé da barra de servidores abre as configurações do
   app e o menu no topo da lista de canais abre as configurações do servidor da
-  conta. A barra de servidores mostra o seu avatar em cada conta.
+  conta. A barra de servidores mostra o seu avatar em cada conta e um ícone de
+  desconectado no servidor sem conexão, que também aparece ao lado do nome dele
+  acima da lista de canais.
 
 ## Privacidade no aparelho
 
