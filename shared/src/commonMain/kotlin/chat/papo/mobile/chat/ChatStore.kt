@@ -647,6 +647,11 @@ class ChatStore(
         _readMarks.tryEmit(ReadMark(channelId, messageId, createdAt))
     }
 
+    /** O aparelho já conhece [id] como canal ou conversa direta desta conta. Lê o banco (sem rede nem a lista em memória). */
+    suspend fun hasConversation(id: String): Boolean = withContext(io) {
+        q.selectChannel(id).executeAsOneOrNull() != null || q.selectDm(id).executeAsOneOrNull() != null
+    }
+
     /** Onde estão as mensagens guardadas de [ids]; as que o aparelho não tem ficam de fora. */
     suspend fun storedPositions(ids: Collection<String>): Map<String, MessagePosition> {
         if (ids.isEmpty()) return emptyMap()

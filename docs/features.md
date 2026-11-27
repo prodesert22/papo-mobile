@@ -165,12 +165,22 @@ release notes in [releases/](../releases/) describe each version's changes.
   message, after the unlock when the app lock is on. Each account has its own
   Android notification channels (mentions and replies, direct messages,
   messages), where you can change the sound and vibration.
+- Push notifications with the app closed or in the background, when the server
+  has push turned on. Android shows them by itself, so mute, the notification
+  level and hiding `@everyone` or mentions do not apply to them, and the text
+  follows the server's preview setting. Tapping one opens the app, after the
+  unlock when the app lock is on, and then the conversation. The push does not
+  say which server or account it is for, so the app opens the active account if
+  it has that conversation and otherwise the first account that has it. Two
+  accounts on the same server cannot both receive pushes on one phone: the
+  server keeps one account per device, the last one that registered.
 
 ## Current limitations
 
-- System notifications arrive only while the app is open: there are no push
-  notifications yet, so nothing arrives while the app is closed or in the
-  background.
+- The notifications that follow your settings (mute, level, hiding `@everyone`
+  or mentions) arrive only while the app is open. With the app closed or in the
+  background only the server's push arrives, and only if the server has it
+  turned on.
 - Mute, the server-wide level and hiding `@everyone` or mentions stay on this
   phone: the server does not store them, so they do not follow you to the web or
   to another phone. Direct conversations have no level on the server, only mute.

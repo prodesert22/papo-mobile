@@ -19,6 +19,14 @@ cd papo-mobile
 adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```
 
+Push notifications with the app closed need `androidApp/google-services.json`, the
+client configuration of the app's Firebase project. The file is not in the
+repository (it is git-ignored). Without it the build works and the app runs with push
+off; with it Gradle applies the `google-services` plugin by itself. CI writes it from
+the `GOOGLE_SERVICES_JSON` secret when that is set. The server must have push turned
+on too, and the fake backend only keeps the registration (`/users/me/push-device`)
+without sending any push.
+
 ## Checks
 
 ```sh

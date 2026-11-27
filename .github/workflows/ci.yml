@@ -14,6 +14,10 @@ on:
         description: Commit or tag to test; empty uses the one from the event.
         type: string
         default: ''
+    secrets:
+      GOOGLE_SERVICES_JSON:
+        description: Firebase client config of the app; without it the APKs are built with push off.
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -54,6 +58,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       - name: Accept the Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Write google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          # Without the secret (forks, pull requests from forks) the app builds with push off.
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf %s "$GOOGLE_SERVICES_JSON" > androidApp/google-services.json
+          else
+            echo "GOOGLE_SERVICES_JSON is not set: building without push."
+          fi
       - name: Run unit tests, lint and build the debug APK
         run: ./gradlew :shared:testAndroidHostTest :androidApp:lintDebug :androidApp:assembleDebug --console=plain
       - name: Keep the reports
@@ -82,6 +96,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       - name: Accept the Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Write google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          # Without the secret (forks, pull requests from forks) the app builds with push off.
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf %s "$GOOGLE_SERVICES_JSON" > androidApp/google-services.json
+          else
+            echo "GOOGLE_SERVICES_JSON is not set: building without push."
+          fi
       - name: Enable KVM for the emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

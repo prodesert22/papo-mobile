@@ -85,6 +85,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.identity.outputs.tag }}
+    secrets:
+      GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
 
   build:
     name: Build the APKs
@@ -102,6 +104,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       - name: Accept the Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Write google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          # The release still builds without the secret, but then the app has no push.
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf %s "$GOOGLE_SERVICES_JSON" > androidApp/google-services.json
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON is not set: the APKs are built with push off."
+          fi
       - name: Prepare the release keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}

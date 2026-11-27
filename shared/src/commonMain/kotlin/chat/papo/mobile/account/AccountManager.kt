@@ -11,8 +11,11 @@ import chat.papo.mobile.data.api.MemoryCookieStore
 import chat.papo.mobile.data.api.PapoClient
 import chat.papo.mobile.data.api.ServerDto
 import chat.papo.mobile.media.VideoPosterExtractor
+import chat.papo.mobile.push.PushTokens
+import chat.papo.mobile.push.accountForPush
 import chat.papo.mobile.security.AppPrefs
 import io.ktor.client.engine.HttpClientEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
@@ -67,6 +70,8 @@ class AccountManager(
     private val posterExtractor: VideoPosterExtractor? = null,
     /** As notificações do sistema; nulo onde a plataforma ainda não as tem. */
     private val notifications: SystemNotifications? = null,
+    /** O token de push do aparelho; nulo onde a plataforma ainda não tem push, e então nenhuma conta o registra. */
+    private val pushTokens: PushTokens? = null,
 ) {
     private var foreground = true
 
@@ -176,6 +181,24 @@ class AccountManager(
     }
 
     /**
+     * A conta que abre o toque numa notificação de push do canal ou da conversa [conversationId] (ver [accountForPush]):
+     * só as contas deste aparelho que já conhecem a conversa, pelo banco delas. Nulo se nenhuma a conhece.
+     */
+    suspend fun pushTargetAccount(conversationId: String): String? {
+        val holders = accounts.value.map { it.id }.filter { id ->
+            val chat = sessions.value[id]?.chat ?: return@filter false
+            try {
+                chat.hasConversation(conversationId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false // banco de uma conta que não abriu: ela só fica de fora
+            }
+        }
+        return accountForPush(holders, activeId.value)
+    }
+
+    /**
      * A sessão de [accountId] acabou do lado do servidor (a troca de senha encerra todas, inclusive esta): desliga o
      * tempo real e marca a conta como expirada, para a tela principal levar ao "Entrar de novo". Não chama
      * `POST /auth/logout` (a sessão já não vale) nem sobe o alerta de violação, que é de outro caso. Os dados da conta
@@ -193,9 +216,13 @@ class AccountManager(
         pendingColors.update { it - accountId }
         val session = sessions.value[accountId]
         if (session != null) {
+            // Antes de sair: sem o cookie o servidor não reconheceria quem pede para tirar o aparelho.
+            session.push?.unregister()
             runCatching { session.auth.logout() }
             session.close()
             sessions.value = sessions.value - accountId
+            // O servidor guarda o token por servidor inteiro: o que tirei pode ter sido o registro de outra conta daqui.
+            sessions.value.values.filter { it.client.server == session.client.server }.forEach { it.push?.registerAgain() }
         }
         // Com ou sem sessão: as notificações e os canais do sistema são desta conta e não podem sobrar (regra 4).
         notifications?.notifier?.removeAccount(accountId)
@@ -222,7 +249,7 @@ class AccountManager(
         val client = PapoClient(engine, account.server, cookies)
         val session = AccountSession(
             account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io, dispatchers.background, posterExtractor,
-            notifications, accountLabel = { notificationLabel(account) },
+            notifications, accountLabel = { notificationLabel(account) }, pushTokens = pushTokens,
         )
         if (foreground) session.start()
         return session

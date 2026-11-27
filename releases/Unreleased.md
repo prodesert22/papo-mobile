@@ -66,6 +66,11 @@
   app lock is on. Each account has its own Android notification channels
   (mentions and replies, direct messages, messages). The app asks for the
   notification permission once, on Android 13 or later.
+- Push notifications with the app closed or in the background, when the server
+  has push turned on. Android shows them by itself, so mute, the notification
+  level and hiding `@everyone` or mentions do not apply to them. Tapping one
+  opens the conversation, after the unlock if the app lock is on. Two accounts
+  on the same server cannot both receive pushes on one phone.
 
 ## Fixes
 

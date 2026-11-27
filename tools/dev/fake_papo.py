@@ -131,6 +131,11 @@ Caixa de notificações (sempre ligada; regras lidas no código do servidor real
 /users/{eu}/notifications`, `PUT /users/{eu}/read_notification`, `new_notification` por mensagem, `PUT /channels/{id}/read`
 marcando as linhas do canal, `GET /dms/{id}` e `POST /channels/{id}/user/{eu}/settings` (`all` manda só o evento, com id efêmero;
 `off` não manda nada). Os detalhes estão na região "Notificações" do código. FAKE_NOTIFICATION_PAGE=N muda as 100 linhas por página.
+
+Registro de push (sempre ligado; regras lidas no código do servidor real, não observadas em execução): `PUT` e `DELETE
+/users/me/push-device`. O fake guarda o registro e não manda push nenhum (o FCM não passa por ele). `token` é único no servidor
+inteiro e o `PUT` passa o dono para quem registrou por último, como o `ON CONFLICT (token)` do servidor: duas contas do mesmo
+servidor no mesmo aparelho brigam pelo token. Os detalhes estão na região "Push" do código.
 """
 import base64
 import hashlib
@@ -1619,6 +1624,8 @@ class Handler(BaseHTTPRequestHandler):
                 users.pop(me, None)
             emit({"type": "react_update", "message_id": msg["id"], "emoji_id": key[0], "unicode": key[1], "count": len(users)}, only=audience(msg["channel_id"]))
             return self.send(201 if method == "POST" else 204, {"message_id": msg["id"]} if method == "POST" else None)
+        if serve_push_devices(self, method, path, me, data):
+            return
         if serve_blocks_and_password(self, method, path, me, data):
             return
         if ACCESS["on"] and self.access_write(method, path, data, me):
@@ -2174,6 +2181,59 @@ def seed_notifications():
 
 # ── Notificações: fim ────────────────────────────────────────────────────────────────────────────
 
+
+# ── Push: início ─────────────────────────────────────────────────────────────────────────────────
+# `PUT /users/me/push-device` (upsert) e `DELETE /users/me/push-device`, lidos em `handlers/push_device.go`,
+# `services/push_device.go` e `storage/push_devices.go` do servidor real; não observados em execução. O usuário é sempre o da
+# sessão. `token`: texto, sem espaços nas pontas, de 1 a 1024 bytes (400 fora disso). `platform` do `PUT`: `android` ou `ios`
+# (400). `device_name`: no máximo 32 bytes depois de tirar os espaços das pontas (400; o servidor conta bytes, não caracteres).
+# `provider`: vazio vale `fcm`; o servidor não confere outro valor. O token é a chave: um `PUT` com um token que já existe troca
+# o dono, a plataforma, o provedor e o nome, e reabilita o aparelho. `DELETE`: 204 se o token é do usuário, 404 se não é (nunca
+# existiu ou já é de outro), 400 sem token. Corpo que não é um objeto JSON: 400. O fake só guarda; não manda push.
+
+PUSH_DEVICES = {}       # token -> {user_id, platform, provider, device_name}
+PUSH_TOKEN_MAX = 1024
+PUSH_NAME_MAX = 32
+PUSH_PLATFORMS = ("android", "ios")
+
+
+def serve_push_devices(handler, method, path, me, data):
+    """`PUT` e `DELETE /users/me/push-device`. Devolve False se `path` não é a rota ou o método não é um destes."""
+    if path != "/users/me/push-device" or method not in ("PUT", "DELETE"):
+        return False
+    if not isinstance(data, dict):
+        handler.problem(400, "Parâmetro inválido", "corpo da requisição inválido")
+        return True
+    token = data.get("token")
+    token = token.strip() if isinstance(token, str) else ""
+    if not token or len(token.encode()) > PUSH_TOKEN_MAX:
+        handler.problem(400, "Parâmetro inválido", "campo 'token' é obrigatório e inválido" if method == "PUT" else "campo 'token' é obrigatório")
+        return True
+    if method == "DELETE":
+        with LOCK:
+            mine = PUSH_DEVICES.get(token, {}).get("user_id") == me
+            if mine:
+                del PUSH_DEVICES[token]
+        if mine:
+            handler.send(204)
+        else:
+            handler.problem(404, "Recurso não encontrado", "dispositivo não encontrado")
+        return True
+    platform = data.get("platform")
+    name = data.get("device_name")
+    name = name.strip() if isinstance(name, str) else ""
+    if platform not in PUSH_PLATFORMS:
+        handler.problem(400, "Parâmetro inválido", "campo 'platform' deve ser android ou ios")
+    elif len(name.encode()) > PUSH_NAME_MAX:
+        handler.problem(400, "Parâmetro inválido", "campo 'device_name' excede o tamanho máximo")
+    else:
+        with LOCK:
+            PUSH_DEVICES[token] = {"user_id": me, "platform": platform, "provider": data.get("provider") or "fcm", "device_name": name}
+        handler.send(204)
+    return True
+
+
+# ── Push: fim ────────────────────────────────────────────────────────────────────────────────────
 
 # Limites do `POST /messages` no servidor de verdade (`handlers/messages.go`, `services/attachments.go`, `middleware/bodylimit.go`);
 # a OpenAPI não os traz. O fake os aplica como ele, para o app mostrar o que o servidor diria.

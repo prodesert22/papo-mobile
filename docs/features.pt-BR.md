@@ -166,11 +166,22 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   do desbloqueio quando o bloqueio do app está ligado. Cada conta tem os próprios
   canais de notificação do Android (menções e respostas, mensagens diretas,
   mensagens), onde dá para mudar o som e a vibração.
+- Notificações push com o app fechado ou em segundo plano, quando o servidor tem
+  o push ligado. O Android as mostra sozinho, então silenciar, o nível de
+  notificação e suprimir `@everyone` ou as menções não valem para elas, e o
+  texto segue a configuração de prévia do servidor. Tocar numa delas abre o app,
+  depois do desbloqueio quando o bloqueio do app está ligado, e então a conversa.
+  O push não diz de que servidor nem de que conta é, então o app abre a conta
+  ativa se ela tem aquela conversa e, senão, a primeira conta que a tem. Duas
+  contas do mesmo servidor não recebem push as duas no mesmo celular: o servidor
+  guarda uma conta por aparelho, a última que se registrou.
 
 ## Limitações atuais
 
-- As notificações do sistema só chegam com o app aberto: ainda não há push,
-  então nada chega com o app fechado ou em segundo plano.
+- As notificações que seguem as suas configurações (silenciar, nível,
+  suprimir `@everyone` ou menções) só chegam com o app aberto. Com o app
+  fechado ou em segundo plano chega só o push do servidor, e só se o servidor o
+  tiver ligado.
 - Silenciar, o nível geral do servidor e suprimir `@everyone` ou as menções
   ficam neste celular: o servidor não os guarda, então eles não seguem você no
   web nem em outro celular. Conversas diretas não têm nível no servidor, só

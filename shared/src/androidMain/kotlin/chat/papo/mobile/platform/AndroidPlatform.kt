@@ -28,12 +28,18 @@ private val backgroundDispatcher by lazy {
 
 /**
  * Monta o grafo do app com as implementações Android. [notificationIcon] é o ícone de uma cor das notificações, que mora
- * nos recursos do aplicativo.
+ * nos recursos do aplicativo. [pushTokens] é o mesmo objeto a que o serviço do FCM entrega as trocas de token.
  */
-fun createAndroidGraph(context: Context, activities: ActivityHolder, @DrawableRes notificationIcon: Int): AppGraph {
+fun createAndroidGraph(
+    context: Context,
+    activities: ActivityHolder,
+    @DrawableRes notificationIcon: Int,
+    pushTokens: AndroidPushTokens,
+): AppGraph {
     val app = context.applicationContext
     val crypto = JcaCrypto()
     val requests = ActivityRequests(app, activities)
+    val notifier = AndroidSystemNotifier(app, notificationIcon)
     // O app ainda não criou nenhum WebView: o que um processo encerrado com o player do YouTube aberto deixou sai agora.
     YouTubeWebData.sweepLeftovers(app)
     val graph = AppGraph(
@@ -50,11 +56,14 @@ fun createAndroidGraph(context: Context, activities: ActivityHolder, @DrawableRe
             appVersion = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty(),
             webPlayerData = YouTubeWebData,
             audio = androidAudioEngineFactory(app),
-            notifier = AndroidSystemNotifier(app, notificationIcon),
+            notifier = notifier,
             notificationPermission = AndroidNotificationPermission(app, requests),
+            pushTokens = pushTokens,
         ),
     )
     // O que ficou para outros aplicativos lerem (Compartilhar) não sobrevive ao bloqueio nem ao apagamento dos dados locais.
     graph.scope.launch { graph.lock.state.collect { if (it !is LockState.Unlocked) SharedMedia.store.clear() } }
+    // O Android mostra os pushes sozinho, no canal que o manifesto aponta: ele precisa existir antes da primeira mensagem.
+    if (pushTokens.available) graph.scope.launch { notifier.ensurePushChannel() }
     return graph
 }

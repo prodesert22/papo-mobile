@@ -21,6 +21,7 @@ import chat.papo.mobile.media.AudioEngineFactory
 import chat.papo.mobile.media.AudioPlayback
 import chat.papo.mobile.media.MediaCache
 import chat.papo.mobile.media.VideoPosterExtractor
+import chat.papo.mobile.push.PushTokens
 import chat.papo.mobile.resources.Res
 import chat.papo.mobile.resources.notif_system_attachment
 import chat.papo.mobile.resources.notif_system_empty
@@ -67,6 +68,8 @@ class PlatformDeps(
     val notifier: SystemNotifier? = null,
     /** A permissão de notificar, para a interface pedi-la; null junto com [notifier]. */
     val notificationPermission: NotificationPermission? = null,
+    /** O token de push do aparelho; null onde a plataforma não tem push, e então nenhuma conta registra o aparelho. */
+    val pushTokens: PushTokens? = null,
 )
 
 /** Estado do app desbloqueado: registro de contas aberto e uma sessão por conta. */
@@ -190,6 +193,7 @@ class AppGraph(private val platform: PlatformDeps) {
             },
             posterExtractor = platform.videoPosters,
             notifications = notifications,
+            pushTokens = platform.pushTokens?.takeIf { it.available },
         )
         accounts.load()
         val audio = platform.audio?.let { engines ->

@@ -2,4 +2,6 @@
 <resources>
     <color name="launcher_background">#0F1E24</color>
     <color name="window_background">#F2F6F5</color>
+    <!-- A cor de destaque das notificações que o Android monta sozinho a partir do push (a cor primária do tema escuro). -->
+    <color name="push_notification_color">#FFB238</color>
 </resources>
