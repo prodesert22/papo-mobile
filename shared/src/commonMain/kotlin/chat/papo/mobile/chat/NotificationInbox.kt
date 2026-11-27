@@ -35,6 +35,17 @@ data class InboxState(
 )
 
 /**
+ * O que quem decide notificar precisa da caixa: as linhas e o andamento das leituras, sem poder pedir nenhuma.
+ * [readsStarted] e [readsFinished] contam as leituras da caixa (a que começou e a que terminou, falha incluída): uma
+ * leitura que começa depois de um evento já traz as linhas que ele criou, então basta esperar a seguinte terminar.
+ */
+interface InboxView {
+    val state: StateFlow<InboxState>
+    val readsStarted: StateFlow<Long>
+    val readsFinished: StateFlow<Long>
+}
+
+/**
  * A caixa de notificações de uma conta: uma cópia, só em memória, das linhas que o servidor guarda. O servidor é a
  * fonte e a sessão a recarrega, então nada vai para o disco. É da sessão: duas contas, mesmo no mesmo servidor, têm
  * caixas separadas.
@@ -54,9 +65,15 @@ class NotificationInbox(
     private val readMarks: Flow<ReadMark>,
     private val positionsOf: suspend (Collection<String>) -> Map<String, MessagePosition>,
     private val scope: CoroutineScope,
-) {
+) : InboxView {
     private val _state = MutableStateFlow(InboxState())
-    val state: StateFlow<InboxState> = _state.asStateFlow()
+    override val state: StateFlow<InboxState> = _state.asStateFlow()
+
+    private val _readsStarted = MutableStateFlow(0L)
+    override val readsStarted: StateFlow<Long> = _readsStarted.asStateFlow()
+
+    private val _readsFinished = MutableStateFlow(0L)
+    override val readsFinished: StateFlow<Long> = _readsFinished.asStateFlow()
 
     /** Uma leitura por vez: a resposta de uma nunca passa por cima do que outra acabou de gravar. */
     private val loadLock = Mutex()
@@ -194,6 +211,7 @@ class NotificationInbox(
     /** Roda [block] marcando [InboxState.loading]; uma falha vai para [InboxState.error]. O cancelamento segue adiante. */
     private suspend fun guarded(block: suspend () -> Unit) {
         _state.update { it.copy(loading = true) }
+        _readsStarted.update { it + 1 }
         try {
             block()
         } catch (e: CancellationException) {
@@ -202,6 +220,7 @@ class NotificationInbox(
             _state.update { it.copy(error = e) }
         } finally {
             _state.update { it.copy(loading = false) }
+            _readsFinished.update { it + 1 }
         }
     }
 

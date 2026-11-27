@@ -1,6 +1,7 @@
 package chat.papo.mobile.account
 
 import chat.papo.mobile.chat.MentionTotal
+import chat.papo.mobile.chat.SystemNotifications
 import chat.papo.mobile.chat.totalOf
 import chat.papo.mobile.core.AppDispatchers
 import chat.papo.mobile.data.api.ApiException
@@ -64,6 +65,8 @@ class AccountManager(
     private val openResources: (accountId: String) -> AccountResources,
     private val deleteLocalData: (accountId: String) -> Unit,
     private val posterExtractor: VideoPosterExtractor? = null,
+    /** As notificações do sistema; nulo onde a plataforma ainda não as tem. */
+    private val notifications: SystemNotifications? = null,
 ) {
     private var foreground = true
 
@@ -194,6 +197,8 @@ class AccountManager(
             session.close()
             sessions.value = sessions.value - accountId
         }
+        // Com ou sem sessão: as notificações e os canais do sistema são desta conta e não podem sobrar (regra 4).
+        notifications?.notifier?.removeAccount(accountId)
         withContext(NonCancellable) {
             store.delete(accountId)
             withContext(dispatchers.io) { deleteLocalData(accountId) }
@@ -215,9 +220,18 @@ class AccountManager(
         val sessionScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext.job))
         val cookies = StoredCookie(account.id, cookie)
         val client = PapoClient(engine, account.server, cookies)
-        val session = AccountSession(account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io, dispatchers.background, posterExtractor)
+        val session = AccountSession(
+            account.id, account.userId, client, sessionScope, openResources(account.id), dispatchers.io, dispatchers.background, posterExtractor,
+            notifications, accountLabel = { notificationLabel(account) },
+        )
         if (foreground) session.start()
         return session
+    }
+
+    /** O nome da conta nas notificações: o rótulo de agora (o usuário pode trocá-lo) e `@usuário`. */
+    private fun notificationLabel(original: Account): String {
+        val current = accounts.value.firstOrNull { it.id == original.id } ?: original
+        return "${current.title} · @${current.username}"
     }
 
     /** Com o app fora da tela o tempo real é desligado; ao voltar, religa e ressincroniza. */

@@ -59,6 +59,14 @@
   the top, next to the new notification settings, so the conversation name has
   room again on narrow screens.
 
+- System notifications while the app is open: mentions, replies, `@everyone`
+  and direct messages show in the Android notification shade, one per
+  conversation with the latest messages and grouped by account, following the
+  notification settings. Tapping one opens the message, after the unlock if the
+  app lock is on. Each account has its own Android notification channels
+  (mentions and replies, direct messages, messages). The app asks for the
+  notification permission once, on Android 13 or later.
+
 ## Fixes
 
 - The account nickname no longer loses its last character when you leave the

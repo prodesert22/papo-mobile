@@ -613,6 +613,22 @@
     <string name="mentions_count">Menções não lidas: %1$s</string>
     <string name="rail_mentions">, menções não lidas: %1$s</string>
 
+    <!-- Notificações: sistema -->
+    <string name="notif_system_attachment">Anexo</string>
+    <string name="notif_system_unknown_user">usuário</string>
+    <string name="notif_system_empty">Nova mensagem</string>
+    <string name="notif_system_channel_mentions">Menções e respostas</string>
+    <string name="notif_system_channel_dms">Mensagens diretas</string>
+    <string name="notif_system_channel_messages">Mensagens</string>
+    <string name="notif_system_summary">Novas mensagens</string>
+    <string name="notif_system_permission_title">Notificações do sistema</string>
+    <string name="notif_system_permission_body">O Papo pode avisar de menções, respostas e mensagens diretas na área de notificações do aparelho, enquanto o app estiver aberto. O Android vai pedir a sua permissão.</string>
+    <string name="notif_system_permission_allow">Permitir</string>
+    <string name="notif_system_permission_later">Agora não</string>
+    <string name="notif_system_denied_title">Notificações desligadas no Android</string>
+    <string name="notif_system_denied_body">Sem a permissão, nada do Papo aparece na área de notificações. O número de menções continua no app.</string>
+    <string name="notif_system_open_settings">Abrir configurações do Android</string>
+
     <!-- Recorte da imagem -->
     <string name="crop_title">Editar imagem</string>
     <string name="crop_cancel">Cancelar</string>

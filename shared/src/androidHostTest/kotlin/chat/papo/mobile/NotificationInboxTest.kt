@@ -111,6 +111,33 @@ class NotificationInboxTest {
     }
 
     @Test
+    fun cadaLeituraContaQuandoComecaEQuandoTermina() = runTest {
+        val server = NotificationServer().apply { add("a", 1) }
+        val f = fixture(server)
+        assertEquals(0L, f.inbox.readsStarted.value)
+        assertEquals(0L, f.inbox.readsFinished.value)
+
+        connected(f)
+
+        assertEquals(1L, f.inbox.readsStarted.value)
+        assertEquals(1L, f.inbox.readsFinished.value)
+    }
+
+    @Test
+    fun leituraQueFalhaTambemContaComoTerminada() = runTest {
+        val server = NotificationServer().apply { listStatus = 500 }
+        val f = fixture(server)
+        f.inbox.start()
+        runCurrent()
+
+        f.connection.value = WsState.Connected
+        f.inbox.readsFinished.first { it >= 1 }
+
+        assertEquals(1L, f.inbox.readsStarted.value)
+        assertTrue(f.inbox.state.value.error != null)
+    }
+
+    @Test
     fun comecarDuasVezesNaoLeDuasVezes() = runTest {
         val server = NotificationServer().apply { add("a", 1) }
         val f = fixture(server)

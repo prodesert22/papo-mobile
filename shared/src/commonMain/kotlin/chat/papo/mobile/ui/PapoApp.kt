@@ -44,7 +44,10 @@ import androidx.navigation.toRoute
 import chat.papo.mobile.AppGraph
 import chat.papo.mobile.AppSession
 import chat.papo.mobile.account.AccountSession
+import chat.papo.mobile.account.Account
 import chat.papo.mobile.chat.Channel
+import chat.papo.mobile.chat.NotificationOpenRequests
+import chat.papo.mobile.chat.NotificationPermissionPrompt
 import chat.papo.mobile.chat.OpenConversation
 import chat.papo.mobile.media.AudioTrack
 import chat.papo.mobile.resources.Res
@@ -63,7 +66,9 @@ import chat.papo.mobile.ui.chat.ChatViewModel
 import chat.papo.mobile.ui.chat.MessageTarget
 import chat.papo.mobile.ui.components.AudioBar
 import chat.papo.mobile.ui.components.LocalAudioPlayback
+import chat.papo.mobile.ui.components.LocalNotificationPermission
 import chat.papo.mobile.ui.components.LocalPlatformUi
+import chat.papo.mobile.ui.components.NotificationPermissionExplainer
 import chat.papo.mobile.ui.components.PlatformUi
 import chat.papo.mobile.ui.home.ConversationPanelHost
 import chat.papo.mobile.ui.home.ConversationPanelState
@@ -162,7 +167,7 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
     // Fica fora da tela principal para sobreviver a girar o aparelho; é esvaziado ao travar.
     val chatStores = viewModel { ParkedChatStores() }
 
-    CompositionLocalProvider(LocalPlatformUi provides platformUi) {
+    CompositionLocalProvider(LocalPlatformUi provides platformUi, LocalNotificationPermission provides graph.notificationPermission) {
       PapoTheme {
         when (val current = state) {
             LockState.Starting -> Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
@@ -173,7 +178,9 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
             }
             is LockState.Unlocked -> {
                 val session = current.session as AppSession
-                CompositionLocalProvider(LocalAudioPlayback provides session.audio) { Unlocked(session, graph.lock, graph.appVersion, chatStores) }
+                CompositionLocalProvider(LocalAudioPlayback provides session.audio) {
+                    Unlocked(session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
+                }
             }
         }
         if (wiped) {
@@ -191,7 +198,14 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
 }
 
 @Composable
-private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, chatStores: ParkedChatStores) {
+private fun Unlocked(
+    session: AppSession,
+    lock: AppLock,
+    appVersion: String,
+    chatStores: ParkedChatStores,
+    notificationPrompt: NotificationPermissionPrompt?,
+    notificationOpens: NotificationOpenRequests,
+) {
     val accounts by session.accounts.accounts.collectAsStateWithLifecycle()
     val loaded by session.accounts.loaded.collectAsStateWithLifecycle()
     val navController = rememberNavController()
@@ -222,8 +236,11 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
         navController.popBackStack(HomeRoute, inclusive = false)
         panel.open(accountId, chat)
     }
+    OpenFromNotification(notificationOpens, accounts, openChat)
     OpenTopChatOnStart(session, panel, navController, openChat)
     ReopenChatOnReturn(session, panel, navController, openChat)
+    // Só com uma conta: sem ela ainda não há do que avisar, e a primeira tela é a de entrar no servidor.
+    if (notificationPrompt != null && accounts.isNotEmpty()) NotificationPermissionExplainer(notificationPrompt)
 
     // Uma tela nova entra deslizando da borda direita por cima da anterior, que fica parada embaixo, e sai pelo mesmo
     // caminho. No gesto de voltar nada se mexe enquanto o dedo está na tela: a saída só desliza depois que a volta é
@@ -451,6 +468,29 @@ private fun Unlocked(session: AppSession, lock: AppLock, appVersion: String, cha
                 onOpen = { target -> openChat(target.accountId, ParkedChat(target.channelId)) },
             )
         }
+    }
+}
+
+/**
+ * Atende o toque numa notificação: abre a conversa pedida, na mensagem se o pedido a trouxe, pelo mesmo [openChat] dos
+ * outros pedidos de abrir conversa. O pedido espera aqui até o app estar destravado e as contas carregadas. Se a conta
+ * não existe (saiu depois da notificação), o pedido é descartado sem abrir nada. Vem antes da abertura automática: a
+ * conversa estacionada por ele a faz desistir de abrir o canal do topo.
+ */
+@Composable
+private fun OpenFromNotification(
+    requests: NotificationOpenRequests,
+    accounts: List<Account>,
+    openChat: (accountId: String, chat: ParkedChat) -> Unit,
+) {
+    val request by requests.pending.collectAsStateWithLifecycle()
+    val current = request ?: return
+    LaunchedEffect(current) {
+        if (accounts.any { it.id == current.accountId }) {
+            val target = current.target?.let { MessageTarget(it.messageId, it.createdAt, it.approximate) }
+            openChat(current.accountId, ParkedChat(current.conversationId, target))
+        }
+        requests.consume(current)
     }
 }
 
