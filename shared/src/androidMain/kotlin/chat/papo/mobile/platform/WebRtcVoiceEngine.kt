@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
-import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.projection.MediaProjection
@@ -88,11 +87,10 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     private val _localScreen = MutableStateFlow<VideoTrackHandle?>(null)
     override val localScreen: StateFlow<VideoTrackHandle?> = _localScreen
 
-    private val _outputs = MutableStateFlow<List<AudioOutput>>(emptyList())
-    override val outputs: StateFlow<List<AudioOutput>> = _outputs
-
-    private val _currentOutput = MutableStateFlow<AudioOutput?>(null)
-    override val currentOutput: StateFlow<AudioOutput?> = _currentOutput
+    // Dono dos ouvintes de saída de áudio: começam em startAudioSession e saem em stopAudioSession.
+    private val audioOutputs = AndroidAudioOutputs(context)
+    override val outputs: StateFlow<List<AudioOutput>> get() = audioOutputs.outputs
+    override val currentOutput: StateFlow<AudioOutput?> get() = audioOutputs.current
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var previousAudioMode = AudioManager.MODE_NORMAL
@@ -320,18 +318,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         Unit
     }
 
-    override fun setSpeakerphone(enabled: Boolean) {
-        if (Build.VERSION.SDK_INT >= 31) {
-            val wanted = if (enabled) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
-            val device = audioManager.availableCommunicationDevices.firstOrNull { it.type == wanted }
-            if (device != null) audioManager.setCommunicationDevice(device) else audioManager.clearCommunicationDevice()
-        } else {
-            @Suppress("DEPRECATION")
-            audioManager.isSpeakerphoneOn = enabled
-        }
-    }
-
-    override fun selectOutput(id: String) = Unit
+    override fun selectOutput(id: String) = audioOutputs.select(id)
 
     override fun setRemoteAudioGain(trackId: String, gain: Double) = Unit
 
@@ -428,12 +415,12 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         focusRequest = request
         audioManager.requestAudioFocus(request)
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        setSpeakerphone(true)
+        audioOutputs.start()
     }
 
     private fun stopAudioSession() {
+        runCatching { audioOutputs.stop() }
         runCatching {
-            if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice()
             audioManager.mode = previousAudioMode
             focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         }

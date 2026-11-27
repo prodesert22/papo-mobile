@@ -51,7 +51,6 @@ class CallManagerTest {
         override fun switchCamera() = Unit
         override suspend fun startScreen() = false
         override suspend fun stopScreen() = Unit
-        override fun setSpeakerphone(enabled: Boolean) = Unit
         override val outputs = MutableStateFlow<List<AudioOutput>>(emptyList())
         override val currentOutput = MutableStateFlow<AudioOutput?>(null)
         override fun selectOutput(id: String) = Unit

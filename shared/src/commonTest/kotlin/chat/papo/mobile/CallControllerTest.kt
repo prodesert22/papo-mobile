@@ -4,6 +4,7 @@ import chat.papo.mobile.data.ws.WsCommand
 import chat.papo.mobile.data.ws.WsEvent
 import chat.papo.mobile.data.ws.WsState
 import chat.papo.mobile.voice.AudioOutput
+import chat.papo.mobile.voice.AudioOutputKind
 import chat.papo.mobile.voice.CallController
 import chat.papo.mobile.voice.CallEnd
 import chat.papo.mobile.voice.CallPhase
@@ -106,10 +107,12 @@ class CallControllerTest {
             log += "screen:stop"
         }
 
-        override fun setSpeakerphone(enabled: Boolean) = Unit
         override val outputs = MutableStateFlow<List<AudioOutput>>(emptyList())
         override val currentOutput = MutableStateFlow<AudioOutput?>(null)
-        override fun selectOutput(id: String) = Unit
+        val selected = mutableListOf<String>()
+        override fun selectOutput(id: String) {
+            selected += id
+        }
         override fun setRemoteAudioGain(trackId: String, gain: Double) = Unit
         override fun close() {
             closed = true
@@ -301,5 +304,65 @@ class CallControllerTest {
         advanceTimeBy(13.seconds)
         assertEquals(CallEnd.Failed, f.call.state.value.end)
         assertEquals(WsCommand.VoiceLeave("v1"), f.signal.sent.last())
+    }
+
+    @Test
+    fun estadoEspelhaAsSaidasDoMotor() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        assertTrue(f.call.state.value.outputs.isEmpty())
+        assertEquals(null, f.call.state.value.output)
+
+        val earpiece = AudioOutput("1", AudioOutputKind.Earpiece)
+        val speaker = AudioOutput("2", AudioOutputKind.Speaker)
+        f.engine.outputs.value = listOf(earpiece, speaker)
+        f.engine.currentOutput.value = speaker
+        runCurrent()
+        assertEquals(listOf(earpiece, speaker), f.call.state.value.outputs)
+        assertEquals(speaker, f.call.state.value.output)
+
+        // Fone Bluetooth ligado: o motor troca a saída e a lista, e o estado acompanha.
+        val headset = AudioOutput("3", AudioOutputKind.Bluetooth, "Fone de teste")
+        f.engine.outputs.value = listOf(earpiece, speaker, headset)
+        f.engine.currentOutput.value = headset
+        runCurrent()
+        assertEquals(headset, f.call.state.value.output)
+    }
+
+    @Test
+    fun escolherUmaSaidaChegaAoMotor() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.call.selectOutput("3")
+        assertEquals(listOf("3"), f.engine.selected)
+    }
+
+    @Test
+    fun alternarVaiDoAltoFalanteAoAuricularEVolta() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        val earpiece = AudioOutput("1", AudioOutputKind.Earpiece)
+        val speaker = AudioOutput("2", AudioOutputKind.Speaker)
+        f.engine.outputs.value = listOf(earpiece, speaker)
+        f.engine.currentOutput.value = speaker
+        runCurrent()
+
+        f.call.toggleSpeaker()
+        f.engine.currentOutput.value = earpiece
+        runCurrent()
+        f.call.toggleSpeaker()
+        assertEquals(listOf("1", "2"), f.engine.selected)
+    }
+
+    @Test
+    fun alternarSemSaidasNaoFazNada() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.call.toggleSpeaker()
+        assertTrue(f.engine.selected.isEmpty())
     }
 }

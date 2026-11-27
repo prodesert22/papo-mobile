@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -66,7 +67,6 @@ data class CallState(
     val micMuted: Boolean = true,
     val cameraOn: Boolean = false,
     val screenOn: Boolean = false,
-    val speakerOn: Boolean = true,
     val busy: Boolean = false,
     val videoSlots: Map<Int, VideoKey> = emptyMap(),
     val end: CallEnd? = null,
@@ -153,6 +153,12 @@ class CallController(
                     EngineConnection.Failed -> finish(CallEnd.ConnectionLost)
                     else -> Unit
                 }
+            }
+        }
+        scope.launch {
+            // As saídas de áudio mudam com o aparelho (fone ligado ou tirado): o motor as conta e o estado só as espelha.
+            combine(engine.outputs, engine.currentOutput) { outputs, current -> outputs to current }.collect { (outputs, current) ->
+                _state.update { it.copy(outputs = outputs, output = current) }
             }
         }
         scope.launch { runJoin() }
@@ -249,11 +255,13 @@ class CallController(
         }
     }
 
+    /** Alterna entre o alto-falante e o fone do aparelho; sem as duas saídas não há o que alternar. */
     fun toggleSpeaker() {
-        val on = !_state.value.speakerOn
-        engine.setSpeakerphone(on)
-        _state.update { it.copy(speakerOn = on) }
+        val target = toggleTarget(_state.value.outputs, _state.value.output) ?: return
+        engine.selectOutput(target.id)
     }
+
+    fun selectOutput(id: String) = engine.selectOutput(id)
 
     fun leave() {
         scope.launch { finish(CallEnd.Left) }

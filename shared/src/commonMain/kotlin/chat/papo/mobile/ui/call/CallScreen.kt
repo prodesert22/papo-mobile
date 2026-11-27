@@ -26,7 +26,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Mic
@@ -84,8 +83,6 @@ import chat.papo.mobile.resources.call_reconnecting
 import chat.papo.mobile.resources.call_screen_of
 import chat.papo.mobile.resources.call_screen_off
 import chat.papo.mobile.resources.call_screen_on
-import chat.papo.mobile.resources.call_speaker_off
-import chat.papo.mobile.resources.call_speaker_on
 import chat.papo.mobile.resources.call_switch_camera
 import chat.papo.mobile.resources.call_unmute
 import chat.papo.mobile.resources.call_you
@@ -325,13 +322,7 @@ private fun Controls(controller: CallController, state: CallState) {
             enabled = ready && !state.busy,
             onClick = controller::toggleScreen,
         )
-        ControlButton(
-            icon = if (state.speakerOn) Icons.AutoMirrored.Filled.VolumeUp else Icons.Filled.PhoneInTalk,
-            label = stringResource(if (state.speakerOn) Res.string.call_speaker_off else Res.string.call_speaker_on),
-            active = state.speakerOn,
-            enabled = true,
-            onClick = controller::toggleSpeaker,
-        )
+        OutputButton(controller, state)
         Box(
             Modifier.size(56.dp).clip(CircleShape).background(MaterialTheme.colorScheme.error)
                 .clickable(role = Role.Button, onClick = controller::leave),
@@ -343,7 +334,7 @@ private fun Controls(controller: CallController, state: CallState) {
 }
 
 @Composable
-private fun ControlButton(icon: ImageVector, label: String, active: Boolean, enabled: Boolean, onClick: () -> Unit) {
+internal fun ControlButton(icon: ImageVector, label: String, active: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     Box(
         Modifier
