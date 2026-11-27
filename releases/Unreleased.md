@@ -30,6 +30,11 @@
   a disc with the color of your status (green available, amber away, red busy,
   gray offline) and your name. Tapping that row opens the profile editor.
 
+## Navigation
+
+- The back gesture no longer moves the screen while your finger is still down: the
+  conversation and the other screens only slide out after you confirm going back.
+
 ## Notifications
 
 - A notification inbox for each account, opened from the bell at the top of the
