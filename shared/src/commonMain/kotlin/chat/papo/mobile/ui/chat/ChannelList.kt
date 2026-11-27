@@ -95,7 +95,13 @@ import org.jetbrains.compose.resources.stringResource
 
 /** Lista de conversas diretas e canais (por categoria) da conta ativa. */
 @Composable
-fun ChannelListPane(session: AccountSession, onOpen: (channelId: String) -> Unit, onJoinVoice: (channelId: String) -> Unit) {
+fun ChannelListPane(
+    session: AccountSession,
+    onOpen: (channelId: String) -> Unit,
+    onJoinVoice: (channelId: String) -> Unit,
+    /** Abre as configurações do canal (nome e descrição). Só se oferece a quem tem `manage_channels` ([canManageChannels]). */
+    onOpenChannelSettings: (channelId: String) -> Unit = {},
+) {
     val chat = session.chat
     // Só os canais que a conta pode ver; `allChannels` diz se o servidor tem algum, para a mensagem de lista vazia.
     val allChannels by chat.channels.collectAsStateWithLifecycle()

@@ -90,8 +90,17 @@ import chat.papo.mobile.ui.search.SearchViewModel
 import chat.papo.mobile.ui.notifications.AccountNotificationsScreen
 import chat.papo.mobile.ui.notifications.InboxScreen
 import chat.papo.mobile.ui.notifications.InboxViewModel
-import chat.papo.mobile.ui.settings.AccountSettingsScreen
-import chat.papo.mobile.ui.settings.AppSettingsScreen
+import chat.papo.mobile.ui.channel.ChannelSettingsScreen
+import chat.papo.mobile.ui.settings.AccountLocalScreen
+import chat.papo.mobile.ui.settings.DeviceDataScreen
+import chat.papo.mobile.ui.settings.DevicesScreen
+import chat.papo.mobile.ui.settings.SecurityScreen
+import chat.papo.mobile.ui.settings.ServerInfoScreen
+import chat.papo.mobile.ui.settings.SettingsNavigation
+import chat.papo.mobile.ui.settings.SettingsScreen
+import chat.papo.mobile.ui.settings.SettingsTab
+import chat.papo.mobile.ui.settings.appearance.AppearanceScreen
+import chat.papo.mobile.ui.settings.appearance.ServerThemeScreen
 import chat.papo.mobile.ui.settings.BlockedUsersScreen
 import chat.papo.mobile.ui.settings.BlockedUsersViewModel
 import chat.papo.mobile.ui.settings.ChangePasswordScreen
@@ -114,11 +123,44 @@ private data object HomeRoute
 @Serializable
 private data class AddServerRoute(val address: String? = null, val username: String? = null)
 
+/**
+ * As configurações em abas: Aplicativo e Servidor. [accountId] é a conta da aba Servidor (sem conta, só há a aba
+ * Aplicativo); [serverTab] abre direto nela.
+ */
 @Serializable
-private data class AccountSettingsRoute(val accountId: String)
+private data class SettingsRoute(val accountId: String? = null, val serverTab: Boolean = false)
 
+/** Tema do app: modo (inclusive OLED), predefinição, cores e prévia. */
 @Serializable
-private data object AppSettingsRoute
+private data object AppearanceRoute
+
+/** O tema só do servidor da conta [accountId]: o do app ou um próprio. */
+@Serializable
+private data class ServerThemeRoute(val accountId: String)
+
+/** Bloqueio, capturas de tela e conteúdo das notificações. */
+@Serializable
+private data object SecurityRoute
+
+/** O que fica guardado neste aparelho e como. */
+@Serializable
+private data object DeviceDataRoute
+
+/** Apelido e cor da conta [accountId] neste aparelho. */
+@Serializable
+private data class AccountLocalRoute(val accountId: String)
+
+/** Os aparelhos conectados à conta [accountId]. */
+@Serializable
+private data class DevicesRoute(val accountId: String)
+
+/** O servidor da conta [accountId]: nome, dono, contagens. */
+@Serializable
+private data class ServerInfoRoute(val accountId: String)
+
+/** Configurações do canal [channelId] da conta [accountId] (nome e descrição); só para quem tem `manage_channels`. */
+@Serializable
+private data class ChannelSettingsRoute(val accountId: String, val channelId: String)
 
 @Serializable
 private data object CallRoute
@@ -179,7 +221,7 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
             is LockState.Unlocked -> {
                 val session = current.session as AppSession
                 CompositionLocalProvider(LocalAudioPlayback provides session.audio) {
-                    Unlocked(session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
+                    Unlocked(graph, session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
                 }
             }
         }
@@ -199,6 +241,7 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
 
 @Composable
 private fun Unlocked(
+    graph: AppGraph,
     session: AppSession,
     lock: AppLock,
     appVersion: String,
@@ -278,12 +321,12 @@ private fun Unlocked(
                             session = session,
                             onAddServer = { navController.navigate(AddServerRoute()) },
                             onReauthenticate = { navController.navigate(AddServerRoute(it.server.value, it.username)) },
-                            onAccountSettings = { navController.navigate(AccountSettingsRoute(it.id)) },
+                            onAccountSettings = { navController.navigate(SettingsRoute(it.id, serverTab = true)) },
                             onSearch = { navController.navigate(SearchRoute(it.id)) },
                             onInbox = { navController.navigate(InboxRoute(it.id)) },
                             onEditProfile = { navController.navigate(EditProfileRoute(it.id)) },
                             onSwitch = { navController.navigate(SwitcherRoute()) },
-                            onAppSettings = { navController.navigate(AppSettingsRoute) },
+                            onAppSettings = { navController.navigate(SettingsRoute(selected?.id)) },
                             content = { account ->
                                 sessions[account.id]?.let { accountSession ->
                                     Column {
@@ -295,6 +338,9 @@ private fun Unlocked(
                                             onJoinVoice = { channelId ->
                                                 session.calls.join(accountSession, channelId)
                                                 navController.navigate(CallRoute)
+                                            },
+                                            onOpenChannelSettings = { channelId ->
+                                                navController.navigate(ChannelSettingsRoute(account.id, channelId))
                                             },
                                         )
                                     }
@@ -383,18 +429,77 @@ private fun Unlocked(
                 onOpenChat = { accountId, channelId -> openChat(accountId, ParkedChat(channelId)) },
             )
         }
-        composable<AccountSettingsRoute> { entry ->
-            val accountId = entry.toRoute<AccountSettingsRoute>().accountId
-            AccountSettingsScreen(
-                session,
-                accountId,
-                onBack = { navController.popBackStack() },
-                onOpenBlocked = { navController.navigate(BlockedRoute(accountId)) },
-                onOpenPassword = { navController.navigate(PasswordRoute(accountId)) },
-                onEditProfile = { navController.navigate(EditProfileRoute(accountId)) },
-                onOpenNotifications = { navController.navigate(NotificationsRoute(accountId)) },
+        // ---- 0.9.0 · trilha A: configurações e segurança (só a trilha A muda estes blocos) ----
+        composable<SettingsRoute> { entry ->
+            val route = entry.toRoute<SettingsRoute>()
+            // A conta pedida, se ainda existe; senão a aba Servidor não tem o que mostrar.
+            val accountId = route.accountId?.takeIf { id -> accounts.any { it.id == id } }
+            SettingsScreen(
+                session = session,
+                lock = lock,
+                appVersion = appVersion,
+                accountId = accountId,
+                initialTab = if (route.serverTab && accountId != null) SettingsTab.Server else SettingsTab.App,
+                nav = SettingsNavigation(
+                    back = { navController.popBackStack() },
+                    appearance = { navController.navigate(AppearanceRoute) },
+                    security = { navController.navigate(SecurityRoute) },
+                    deviceData = { navController.navigate(DeviceDataRoute) },
+                    about = {},
+                    editProfile = { navController.navigate(EditProfileRoute(it)) },
+                    accountLocal = { navController.navigate(AccountLocalRoute(it)) },
+                    serverTheme = { navController.navigate(ServerThemeRoute(it)) },
+                    notifications = { navController.navigate(NotificationsRoute(it)) },
+                    blocked = { navController.navigate(BlockedRoute(it)) },
+                    password = { navController.navigate(PasswordRoute(it)) },
+                    devices = { navController.navigate(DevicesRoute(it)) },
+                    serverInfo = { navController.navigate(ServerInfoRoute(it)) },
+                ),
             )
         }
+        composable<SecurityRoute> {
+            SecurityScreen(lock, onBack = { navController.popBackStack() })
+        }
+        composable<DeviceDataRoute> {
+            DeviceDataScreen(onBack = { navController.popBackStack() })
+        }
+        composable<AccountLocalRoute> { entry ->
+            val route = entry.toRoute<AccountLocalRoute>()
+            AccountLocalScreen(session, route.accountId, onBack = { navController.popBackStack() })
+        }
+        composable<DevicesRoute> { entry ->
+            val route = entry.toRoute<DevicesRoute>()
+            DevicesScreen(session, route.accountId, onBack = { navController.popBackStack() })
+        }
+        composable<ServerInfoRoute> { entry ->
+            val route = entry.toRoute<ServerInfoRoute>()
+            ServerInfoScreen(session, route.accountId, onBack = { navController.popBackStack() })
+        }
+        // ---- fim da trilha A ----
+
+        // ---- 0.9.0 · trilha B: tema (só a trilha B muda estes blocos) ----
+        composable<AppearanceRoute> {
+            AppearanceScreen(onBack = { navController.popBackStack() })
+        }
+        composable<ServerThemeRoute> { entry ->
+            val route = entry.toRoute<ServerThemeRoute>()
+            ServerThemeScreen(session, route.accountId, onBack = { navController.popBackStack() })
+        }
+        // ---- fim da trilha B ----
+
+        // ---- 0.9.0 · trilha D: configurações do canal (só a trilha D muda este bloco) ----
+        composable<ChannelSettingsRoute> { entry ->
+            val route = entry.toRoute<ChannelSettingsRoute>()
+            val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
+            val accountSession = sessions[route.accountId]
+            if (accountSession == null) {
+                LaunchedEffect(Unit) { navController.popBackStack(HomeRoute, inclusive = false) }
+            } else {
+                ChannelSettingsScreen(accountSession, route.channelId, onBack = { navController.popBackStack() })
+            }
+        }
+        // ---- fim da trilha D ----
+
         composable<NotificationsRoute> { entry ->
             val route = entry.toRoute<NotificationsRoute>()
             val sessions by session.accounts.sessionMap.collectAsStateWithLifecycle()
@@ -453,9 +558,6 @@ private fun Unlocked(
                 val vm = viewModel(key = "blocked/${route.accountId}/${accountSession.hashCode()}") { BlockedUsersViewModel(accountSession.blocks) }
                 BlockedUsersScreen(accountSession, vm, onBack = { navController.popBackStack() })
             }
-        }
-        composable<AppSettingsRoute> {
-            AppSettingsScreen(lock, appVersion, onBack = { navController.popBackStack() })
         }
         composable<SwitcherRoute> { entry ->
             val route = entry.toRoute<SwitcherRoute>()
@@ -638,6 +740,7 @@ private fun ParkedChatContent(
                 },
                 onOpenProfile = openProfile,
                 onOpenMembers = { membersScope.launch { members.open() } },
+                onOpenChannelSettings = { navController.navigate(ChannelSettingsRoute(accountId, chat.channelId)) },
                 active = active,
             )
         }

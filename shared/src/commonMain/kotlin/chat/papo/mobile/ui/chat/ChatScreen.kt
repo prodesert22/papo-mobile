@@ -253,6 +253,8 @@ fun ChatScreen(
     onOpenProfile: (String) -> Unit,
     /** Abre a lista de membros do servidor. Só é oferecida em canal: numa conversa direta o título já leva ao perfil. */
     onOpenMembers: () -> Unit,
+    /** Abre as configurações do canal (nome e descrição). Só se oferece a quem tem `manage_channels` ([canManageChannels]). */
+    onOpenChannelSettings: () -> Unit = {},
     /**
      * A conversa está à vista. Com o painel dela fechado (a lista de canais por cima), ela segue montada mas não é lida:
      * mensagens novas contam como não lidas, nada é marcado como lido e o vídeo que tocava para.

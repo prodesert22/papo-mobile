@@ -639,4 +639,26 @@
     <string name="crop_zoom">Zoom</string>
     <string name="crop_zoom_percent">%1$d%</string>
     <string name="crop_area">Área de recorte. Arraste para mover a imagem e use dois dedos para ampliar.</string>
+
+    <!-- 0.9.0 · comum (onda 0): nomes que mais de uma trilha usa -->
+    <string name="settings_tab_app">Aplicativo</string>
+    <string name="settings_tab_server">Servidor</string>
+    <string name="settings_appearance">Aparência</string>
+    <string name="settings_server_theme">Aparência deste servidor</string>
+    <string name="settings_privacy">Segurança e privacidade</string>
+    <string name="settings_account_local">Esta conta no aparelho</string>
+    <string name="settings_server_info">Informações do servidor</string>
+    <string name="channel_settings">Configurações do canal</string>
+
+    <!-- 0.9.0 · trilha A: configurações e segurança -->
+    <!-- fim da trilha A -->
+
+    <!-- 0.9.0 · trilha B: tema -->
+    <!-- fim da trilha B -->
+
+    <!-- 0.9.0 · trilha C: lista de canais e conversas diretas -->
+    <!-- fim da trilha C -->
+
+    <!-- 0.9.0 · trilha D: descrição e edição do canal -->
+    <!-- fim da trilha D -->
 </resources>

@@ -52,6 +52,14 @@ class ChatApi(private val client: PapoClient) {
 
     suspend fun closeDm(dmId: String) = http.delete { url(path("/dms/$dmId")) }.requireSuccess()
 
+    /** Edita o nome e a descrição do canal; devolve o canal como ficou. 409 é nome já usado no servidor. */
+    suspend fun updateChannel(channelId: String, request: UpdateChannelRequest): ChannelDto =
+        http.put {
+            url(path("/channels/$channelId"))
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }.bodyOrThrow()
+
     suspend fun users(since: String? = null, lastId: String? = null): UsersPage =
         http.get {
             url(path("/users"))
