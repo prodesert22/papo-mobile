@@ -21,6 +21,15 @@ class LocalCandidate(val candidate: String, val sdpMid: String?, val sdpMLineInd
 
 enum class MediaPermission { Microphone, Camera }
 
+enum class AudioOutputKind { Earpiece, Speaker, Wired, Usb, Bluetooth, HearingAid, Other }
+
+/**
+ * Uma saída de áudio da chamada. [id] é estável enquanto o aparelho estiver ligado;
+ * [name] é o nome que o sistema dá ao aparelho (fone Bluetooth, por exemplo) e é
+ * texto remoto ao app: só se mostra como texto.
+ */
+data class AudioOutput(val id: String, val kind: AudioOutputKind, val name: String? = null)
+
 /**
  * Motor WebRTC da plataforma (libwebrtc no Android). Só cuida de mídia e SDP;
  * quem decide o que negociar e quando é o [CallController].
@@ -67,6 +76,22 @@ interface VoiceEngine {
     suspend fun stopScreen()
 
     fun setSpeakerphone(enabled: Boolean)
+
+    /** Saídas de áudio disponíveis agora; vazia antes de [open] ou onde a plataforma não lista. */
+    val outputs: StateFlow<List<AudioOutput>>
+
+    /** A saída em uso; null antes de [open] ou se a plataforma não informa. */
+    val currentOutput: StateFlow<AudioOutput?>
+
+    /** Fixa a saída da chamada; um [id] que não está em [outputs] é ignorado. */
+    fun selectOutput(id: String)
+
+    /**
+     * Ganho de uma faixa de áudio recebida, pelo id que o servidor dá a ela
+     * (`papo-audio-N`, `papo-screen-audio-N`, os mesmos de `voice_audio_routes`).
+     * 1.0 é o volume normal, 0.0 silencia; id desconhecido é ignorado.
+     */
+    fun setRemoteAudioGain(trackId: String, gain: Double)
 
     fun close()
 }

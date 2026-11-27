@@ -3,6 +3,7 @@ package chat.papo.mobile
 import chat.papo.mobile.data.ws.WsCommand
 import chat.papo.mobile.data.ws.WsEvent
 import chat.papo.mobile.data.ws.WsState
+import chat.papo.mobile.voice.AudioOutput
 import chat.papo.mobile.voice.CallController
 import chat.papo.mobile.voice.CallEnd
 import chat.papo.mobile.voice.CallPhase
@@ -106,6 +107,10 @@ class CallControllerTest {
         }
 
         override fun setSpeakerphone(enabled: Boolean) = Unit
+        override val outputs = MutableStateFlow<List<AudioOutput>>(emptyList())
+        override val currentOutput = MutableStateFlow<AudioOutput?>(null)
+        override fun selectOutput(id: String) = Unit
+        override fun setRemoteAudioGain(trackId: String, gain: Double) = Unit
         override fun close() {
             closed = true
         }

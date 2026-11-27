@@ -11,6 +11,7 @@ import android.media.AudioManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import chat.papo.mobile.voice.AudioOutput
 import chat.papo.mobile.voice.EngineConnection
 import chat.papo.mobile.voice.IceServer
 import chat.papo.mobile.voice.LocalCandidate
@@ -86,6 +87,12 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
 
     private val _localScreen = MutableStateFlow<VideoTrackHandle?>(null)
     override val localScreen: StateFlow<VideoTrackHandle?> = _localScreen
+
+    private val _outputs = MutableStateFlow<List<AudioOutput>>(emptyList())
+    override val outputs: StateFlow<List<AudioOutput>> = _outputs
+
+    private val _currentOutput = MutableStateFlow<AudioOutput?>(null)
+    override val currentOutput: StateFlow<AudioOutput?> = _currentOutput
 
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var previousAudioMode = AudioManager.MODE_NORMAL
@@ -323,6 +330,10 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             audioManager.isSpeakerphoneOn = enabled
         }
     }
+
+    override fun selectOutput(id: String) = Unit
+
+    override fun setRemoteAudioGain(trackId: String, gain: Double) = Unit
 
     override fun close() {
         if (closed) return

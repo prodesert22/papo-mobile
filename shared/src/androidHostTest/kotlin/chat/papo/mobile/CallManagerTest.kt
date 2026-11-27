@@ -1,5 +1,6 @@
 package chat.papo.mobile
 
+import chat.papo.mobile.voice.AudioOutput
 import chat.papo.mobile.voice.CallEnd
 import chat.papo.mobile.voice.CallManager
 import chat.papo.mobile.voice.CallPhase
@@ -51,6 +52,10 @@ class CallManagerTest {
         override suspend fun startScreen() = false
         override suspend fun stopScreen() = Unit
         override fun setSpeakerphone(enabled: Boolean) = Unit
+        override val outputs = MutableStateFlow<List<AudioOutput>>(emptyList())
+        override val currentOutput = MutableStateFlow<AudioOutput?>(null)
+        override fun selectOutput(id: String) = Unit
+        override fun setRemoteAudioGain(trackId: String, gain: Double) = Unit
         override fun close() {
             closed = true
         }

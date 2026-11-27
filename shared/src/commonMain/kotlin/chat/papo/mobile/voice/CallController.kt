@@ -46,6 +46,17 @@ data class VideoKey(val userId: String, val kind: String) {
     }
 }
 
+/**
+ * Quem está tocando numa faixa de áudio recebida, segundo o último `voice_audio_routes`.
+ * [kind] é [MICROPHONE] ou [SCREEN_AUDIO].
+ */
+data class AudioRoute(val userId: String, val kind: String) {
+    companion object {
+        const val MICROPHONE = "audio"
+        const val SCREEN_AUDIO = "screen_audio"
+    }
+}
+
 data class CallState(
     val accountId: String,
     val channelId: String,
@@ -60,6 +71,16 @@ data class CallState(
     val videoSlots: Map<Int, VideoKey> = emptyMap(),
     val end: CallEnd? = null,
     val errorDetail: String? = null,
+    /** Faixa de áudio recebida (id do servidor) → quem toca nela. Vazio até o primeiro `voice_audio_routes`. */
+    val audioRoutes: Map<String, AudioRoute> = emptyMap(),
+    /** Pessoas cujo áudio de transmissão de tela está assinado (no máximo `VoiceSlots.screenAudio`). */
+    val screenAudioSubs: Set<String> = emptySet(),
+    /** Saídas de áudio que o aparelho oferece agora e a que está em uso. */
+    val outputs: List<AudioOutput> = emptyList(),
+    val output: AudioOutput? = null,
+    /** Apertar-para-falar ligado: o microfone só abre enquanto [talking]. Esconde "Silenciar" na notificação e na janela flutuante. */
+    val pushToTalk: Boolean = false,
+    val talking: Boolean = false,
 )
 
 /**
