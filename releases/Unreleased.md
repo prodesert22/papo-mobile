@@ -1,0 +1,1 @@
+- Record a voice message from the clip menu in a conversation: Papo asks for the microphone, records up to 30 minutes, and after you stop you can listen to it, discard it or send it. It is sent as its own audio message, and it plays here and on the web.

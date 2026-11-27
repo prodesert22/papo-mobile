@@ -23,6 +23,8 @@ import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.data.api.ApiException
 import chat.papo.mobile.data.api.OutgoingFile
 import chat.papo.mobile.data.ws.WsEvent
+import chat.papo.mobile.media.VoiceRecording
+import chat.papo.mobile.media.toOutgoingFile
 import chat.papo.mobile.ui.components.UiError
 import chat.papo.mobile.ui.components.toUiError
 import kotlinx.coroutines.CancellationException
@@ -83,8 +85,14 @@ class ChatViewModel(
     private val session: AccountSession,
     val channelId: String,
     private val target: MessageTarget? = null,
+    /** A gravação de mensagens de voz do app (uma por vez); null onde a plataforma não grava. */
+    private val voice: VoiceRecording? = null,
 ) : ViewModel() {
     private val chat = session.chat
+
+    /** De quem é a gravação de voz desta conversa: a conta e o canal, já que o mesmo UUID em outra conta é outra conversa (regra 4). */
+    val voiceOwner = "${session.accountId}/$channelId"
+
     private val limit = MutableStateFlow(PAGE)
 
     val messages: StateFlow<List<Message>> = limit
@@ -295,6 +303,21 @@ class ChatViewModel(
 
     fun dismissAttachProblem() = _state.update { it.copy(attachProblem = null) }
 
+    /**
+     * Envia a gravação de voz desta conversa, pronta na revisão, como uma mensagem só dela: o arquivo `audio_*.webm`, sem
+     * texto. Responde à mensagem que o compositor está respondendo, e a resposta é gasta; o texto escrito e os arquivos
+     * escolhidos ficam no compositor, para a mensagem seguinte. Sem permissão de enviar ou anexar, ou editando, a gravação fica na revisão.
+     */
+    fun sendVoice() {
+        val voice = voice ?: return
+        val s = _state.value
+        if (s.editing != null || !access.value.send || !access.value.attach) return
+        val clip = voice.takeClip(voiceOwner) ?: return
+        chat.enqueue(channelId, "", s.replyTo?.id, listOf(clip.toOutgoingFile()))
+        _state.update { it.copy(replyTo = null, error = null) }
+        saveDraft()
+    }
+
     fun startReply(message: Message) {
         if (_state.value.editing != null) finishEdit()
         _state.update { it.copy(replyTo = message) }
@@ -302,6 +325,8 @@ class ChatViewModel(
     }
 
     fun startEdit(message: Message) {
+        // Editar troca o compositor por inteiro (até os arquivos escolhidos saem): a gravação não tem como ficar.
+        voice?.discard(voiceOwner)
         // Editar uma segunda mensagem em seguida volta ao mesmo rascunho de antes, não ao texto da primeira.
         if (stashed == null) stashed = StashedDraft(draft.text, _state.value.replyTo)
         val shown = renderMentions(message.content) { chat.users.value[it]?.username }
@@ -505,6 +530,7 @@ class ChatViewModel(
 
     override fun onCleared() {
         chat.clearViewing(channelId)
+        voice?.discard(voiceOwner)
     }
 
     private fun launch(block: suspend () -> Unit) {

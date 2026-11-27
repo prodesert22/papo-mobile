@@ -64,6 +64,7 @@ import chat.papo.mobile.ui.chat.ChannelListPane
 import chat.papo.mobile.ui.chat.ChatScreen
 import chat.papo.mobile.ui.chat.ChatViewModel
 import chat.papo.mobile.ui.chat.MessageTarget
+import chat.papo.mobile.ui.chat.LocalVoiceRecording
 import chat.papo.mobile.ui.components.AudioBar
 import chat.papo.mobile.ui.components.LocalAudioPlayback
 import chat.papo.mobile.ui.components.LocalNotificationPermission
@@ -178,7 +179,7 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
             }
             is LockState.Unlocked -> {
                 val session = current.session as AppSession
-                CompositionLocalProvider(LocalAudioPlayback provides session.audio) {
+                CompositionLocalProvider(LocalAudioPlayback provides session.audio, LocalVoiceRecording provides session.voiceRecording) {
                     Unlocked(session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
                 }
             }
@@ -606,7 +607,7 @@ private fun ParkedChatContent(
     key(storeKey) {
         // O ViewModel mora no armazém da conversa, que sobrevive a girar o aparelho e sai quando ela deixa de ser a última da conta.
         val owner = remember(stores, storeKey) { stores.owner(storeKey) }
-        val vm = viewModel(viewModelStoreOwner = owner, key = storeKey) { ChatViewModel(accountSession, chat.channelId, chat.target) }
+        val vm = viewModel(viewModelStoreOwner = owner, key = storeKey) { ChatViewModel(accountSession, chat.channelId, chat.target, session.voiceRecording) }
         val openProfile = { userId: String ->
             navController.navigate(ProfileRoute(accountId, userId)) { launchSingleTop = true }
         }
