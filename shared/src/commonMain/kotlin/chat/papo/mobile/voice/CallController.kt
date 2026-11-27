@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -72,7 +73,6 @@ data class CallState(
     val micMuted: Boolean = true,
     val cameraOn: Boolean = false,
     val screenOn: Boolean = false,
-    val speakerOn: Boolean = true,
     val busy: Boolean = false,
     val videoSlots: Map<Int, VideoKey> = emptyMap(),
     val end: CallEnd? = null,
@@ -185,6 +185,13 @@ class CallController(
         volumes?.let { source -> scope.launch { applyGains(source) } }
         // O botão do fone alterna o mute, com o app em qualquer lugar.
         scope.launch { engine.headsetButton.collect { toggleMute() } }
+        scope.launch {
+            // As saídas de áudio mudam com o aparelho (fone ligado ou tirado): o motor as conta e o estado só as espelha.
+            combine(engine.outputs, engine.currentOutput) { outputs, current -> outputs to current }.collect { (outputs, current) ->
+                _state.update { it.copy(outputs = outputs, output = current) }
+            }
+        }
+        scope.launch { combine(engine.localCamera, engine.localScreen, _state, ::stopEndedCapture).collect() }
         scope.launch { runJoin() }
     }
 
@@ -298,10 +305,7 @@ class CallController(
 
     fun toggleCamera() = action {
         if (_state.value.cameraOn) {
-            ws.send(WsCommand.VoiceCamera(channelId, false))
-            engine.stopCamera()
-            negotiate()
-            _state.update { it.copy(cameraOn = false) }
+            dropCamera()
         } else {
             if (!engine.ensurePermission(MediaPermission.Camera) || !engine.startCamera()) return@action
             try {
@@ -322,10 +326,7 @@ class CallController(
 
     fun toggleScreen() = action {
         if (_state.value.screenOn) {
-            ws.send(WsCommand.ScreenShareStop(channelId))
-            engine.stopScreen()
-            negotiate()
-            _state.update { it.copy(screenOn = false) }
+            dropScreen()
         } else {
             if (!engine.startScreen()) return@action
             try {
@@ -340,11 +341,59 @@ class CallController(
         }
     }
 
-    fun toggleSpeaker() {
-        val on = !_state.value.speakerOn
-        engine.setSpeakerphone(on)
-        _state.update { it.copy(speakerOn = on) }
+    private suspend fun dropCamera() {
+        ws.send(WsCommand.VoiceCamera(channelId, false))
+        engine.stopCamera()
+        negotiate()
+        _state.update { it.copy(cameraOn = false) }
     }
+
+    private suspend fun dropScreen() {
+        ws.send(WsCommand.ScreenShareStop(channelId))
+        engine.stopScreen()
+        negotiate()
+        _state.update { it.copy(screenOn = false) }
+    }
+
+    /**
+     * Uma captura que o sistema encerra por conta própria (a pessoa parou a transmissão pelo aviso do Android, o aparelho
+     * bloqueou a tela, outro app tomou a câmera) deixa o motor sem faixa. O estado e o servidor não podem seguir achando que a
+     * câmera ou a tela ainda saem: a publicação é desfeita como se a pessoa tivesse desligado. A ação confere o estado de novo,
+     * para uma chamada repetida (o estado muda várias vezes até ela começar) não rodar duas vezes; e mesmo que a renegociação
+     * falhe o estado local desliga, senão o aviso voltaria a disparar sem parar.
+     */
+    private fun stopEndedCapture(camera: VideoTrackHandle?, screen: VideoTrackHandle?, state: CallState) {
+        if (state.busy || state.phase == CallPhase.Ended) return
+        if (state.screenOn && screen == null) {
+            action {
+                if (_state.value.screenOn) {
+                    try {
+                        dropScreen()
+                    } finally {
+                        _state.update { it.copy(screenOn = false) }
+                    }
+                }
+            }
+        } else if (state.cameraOn && camera == null) {
+            action {
+                if (_state.value.cameraOn) {
+                    try {
+                        dropCamera()
+                    } finally {
+                        _state.update { it.copy(cameraOn = false) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Alterna entre o alto-falante e o fone do aparelho; sem as duas saídas não há o que alternar. */
+    fun toggleSpeaker() {
+        val target = toggleTarget(_state.value.outputs, _state.value.output) ?: return
+        engine.selectOutput(target.id)
+    }
+
+    fun selectOutput(id: String) = engine.selectOutput(id)
 
     fun leave() {
         scope.launch { finish(CallEnd.Left) }

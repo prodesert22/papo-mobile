@@ -77,8 +77,6 @@ interface VoiceEngine {
 
     suspend fun stopScreen()
 
-    fun setSpeakerphone(enabled: Boolean)
-
     /** Saídas de áudio disponíveis agora; vazia antes de [open] ou onde a plataforma não lista. */
     val outputs: StateFlow<List<AudioOutput>>
 

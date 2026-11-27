@@ -36,7 +36,8 @@ private val backgroundDispatcher by lazy {
 /**
  * Monta o grafo do app com as implementações Android. [notificationIcon] é o ícone de uma cor das notificações, que mora
  * nos recursos do aplicativo; [libraryDefinitionsRes] é o JSON das licenças de terceiros que o plugin gera. [pushTokens] é
- * o mesmo objeto a que o serviço do FCM entrega as trocas de token.
+ * o mesmo objeto a que o serviço do FCM entrega as trocas de token. [callPresentation] é a janela flutuante e a notificação da
+ * chamada, a que a `MainActivity` se liga.
  */
 fun createAndroidGraph(
     context: Context,
@@ -44,6 +45,7 @@ fun createAndroidGraph(
     @DrawableRes notificationIcon: Int,
     @RawRes libraryDefinitionsRes: Int,
     pushTokens: AndroidPushTokens,
+    callPresentation: AndroidCallPresentation,
 ): AppGraph {
     val app = context.applicationContext
     val crypto = JcaCrypto()
@@ -63,6 +65,7 @@ fun createAndroidGraph(
             dispatchers = AppDispatchers(Dispatchers.Main.immediate, Dispatchers.IO, Dispatchers.Default, backgroundDispatcher),
             mediaDirectory = java.io.File(app.cacheDir, "media").absolutePath,
             voice = WebRtcVoiceEngineFactory(app, requests),
+            callPresentation = callPresentation,
             videoPosters = AndroidVideoPosterExtractor(),
             build = buildInfo(app),
             webPlayerData = YouTubeWebData,

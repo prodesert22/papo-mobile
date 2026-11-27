@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -61,6 +62,7 @@ import chat.papo.mobile.ui.addserver.AddServerScreen
 import chat.papo.mobile.ui.addserver.AddServerViewModel
 import chat.papo.mobile.ui.call.CallBar
 import chat.papo.mobile.ui.call.CallScreen
+import chat.papo.mobile.ui.call.PipOverlay
 import chat.papo.mobile.ui.chat.ChannelListPane
 import chat.papo.mobile.ui.chat.ChatScreen
 import chat.papo.mobile.ui.chat.ChatViewModel
@@ -244,11 +246,17 @@ fun PapoApp(graph: AppGraph, platformUi: PlatformUi) {
             is LockState.Unlocked -> {
                 val session = current.session as AppSession
                 CompositionLocalProvider(LocalAudioPlayback provides session.audio, LocalVoiceRecording provides session.voiceRecording) {
-                    // ---- 0.9.0 · trilha B: tema da conta ativa ----
-                    AccountTheme(session, globalTheme) {
-                        Unlocked(graph, session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
+                    // Na janela flutuante só a imagem da chamada cabe: ela cobre o app, que segue montado por baixo (a pilha de
+                    // telas e o que se digitava ficam como estavam para quando a pessoa voltar).
+                    val inPip by graph.inPip.collectAsStateWithLifecycle()
+                    Box(Modifier.fillMaxSize()) {
+                        // ---- 0.9.0 · trilha B: tema da conta ativa ----
+                        AccountTheme(session, globalTheme) {
+                            Unlocked(graph, session, graph.lock, graph.appVersion, chatStores, graph.notificationPrompt, graph.notificationOpens)
+                        }
+                        // ---- fim da trilha B ----
+                        if (inPip) PipOverlay(session)
                     }
-                    // ---- fim da trilha B ----
                 }
             }
         }

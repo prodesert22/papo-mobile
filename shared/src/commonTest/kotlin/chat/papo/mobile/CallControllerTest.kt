@@ -4,6 +4,7 @@ import chat.papo.mobile.data.ws.WsCommand
 import chat.papo.mobile.data.ws.WsEvent
 import chat.papo.mobile.data.ws.WsState
 import chat.papo.mobile.voice.AudioOutput
+import chat.papo.mobile.voice.AudioOutputKind
 import chat.papo.mobile.voice.AudioRoute
 import chat.papo.mobile.voice.CallController
 import chat.papo.mobile.voice.CallEnd
@@ -104,21 +105,32 @@ class CallControllerTest {
             log += "mic:$enabled"
         }
 
-        override suspend fun startCamera(): Boolean = true.also { log += "camera:start" }
+        override suspend fun startCamera(): Boolean = true.also {
+            log += "camera:start"
+            localCamera.value = VideoTrackHandle(Any())
+        }
         override suspend fun stopCamera() {
             log += "camera:stop"
+            localCamera.value = null
         }
 
         override fun switchCamera() = Unit
-        override suspend fun startScreen(): Boolean = true.also { log += "screen:start" }
+        override suspend fun startScreen(): Boolean = true.also {
+            log += "screen:start"
+            localScreen.value = VideoTrackHandle(Any())
+        }
         override suspend fun stopScreen() {
             log += "screen:stop"
+            localScreen.value = null
         }
 
-        override fun setSpeakerphone(enabled: Boolean) = Unit
         override val outputs = MutableStateFlow<List<AudioOutput>>(emptyList())
         override val currentOutput = MutableStateFlow<AudioOutput?>(null)
-        override fun selectOutput(id: String) = Unit
+        val selected = mutableListOf<String>()
+        override fun selectOutput(id: String) {
+            selected += id
+        }
+
         val gains = mutableMapOf<String, Double>()
         override fun setRemoteAudioGain(trackId: String, gain: Double) {
             gains[trackId] = gain
@@ -464,6 +476,86 @@ class CallControllerTest {
         runCurrent()
         assertEquals(emptySet(), f.call.state.value.screenAudioSubs)
         assertEquals(emptySet(), f.call.state.value.screenAudioOverflow)
+        assertEquals(CallPhase.Connected, f.call.state.value.phase)
+    }
+
+    @Test
+    fun estadoEspelhaAsSaidasDoMotor() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        assertTrue(f.call.state.value.outputs.isEmpty())
+        assertEquals(null, f.call.state.value.output)
+
+        val earpiece = AudioOutput("1", AudioOutputKind.Earpiece)
+        val speaker = AudioOutput("2", AudioOutputKind.Speaker)
+        f.engine.outputs.value = listOf(earpiece, speaker)
+        f.engine.currentOutput.value = speaker
+        runCurrent()
+        assertEquals(listOf(earpiece, speaker), f.call.state.value.outputs)
+        assertEquals(speaker, f.call.state.value.output)
+
+        // Fone Bluetooth ligado: o motor troca a saída e a lista, e o estado acompanha.
+        val headset = AudioOutput("3", AudioOutputKind.Bluetooth, "Fone de teste")
+        f.engine.outputs.value = listOf(earpiece, speaker, headset)
+        f.engine.currentOutput.value = headset
+        runCurrent()
+        assertEquals(headset, f.call.state.value.output)
+    }
+
+    @Test
+    fun escolherUmaSaidaChegaAoMotor() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.call.selectOutput("3")
+        assertEquals(listOf("3"), f.engine.selected)
+    }
+
+    @Test
+    fun alternarVaiDoAltoFalanteAoAuricularEVolta() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        val earpiece = AudioOutput("1", AudioOutputKind.Earpiece)
+        val speaker = AudioOutput("2", AudioOutputKind.Speaker)
+        f.engine.outputs.value = listOf(earpiece, speaker)
+        f.engine.currentOutput.value = speaker
+        runCurrent()
+
+        f.call.toggleSpeaker()
+        f.engine.currentOutput.value = earpiece
+        runCurrent()
+        f.call.toggleSpeaker()
+        assertEquals(listOf("1", "2"), f.engine.selected)
+    }
+
+    @Test
+    fun alternarSemSaidasNaoFazNada() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.call.toggleSpeaker()
+        assertTrue(f.engine.selected.isEmpty())
+    }
+
+    @Test
+    fun telaEncerradaPeloSistemaDesfazAPublicacao() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.call.toggleScreen()
+        advanceTimeBy(1.seconds)
+        assertTrue(f.call.state.value.screenOn)
+        f.signal.sent.clear()
+
+        // A pessoa parou a transmissão pelo aviso do Android, ou o aparelho bloqueou a tela: o motor fica sem a faixa.
+        f.engine.localScreen.value = null
+        advanceTimeBy(1.seconds)
+
+        assertEquals(listOf("ScreenShareStop", "VoiceOffer"), f.signal.kinds)
+        assertFalse(f.call.state.value.screenOn)
+        assertEquals(1, f.engine.log.count { it == "screen:stop" })
         assertEquals(CallPhase.Connected, f.call.state.value.phase)
     }
 
@@ -912,5 +1004,73 @@ class CallControllerTest {
         f.call.setTalking(false)
         advanceTimeBy(1.seconds)
         assertEquals(sent, f.signal.sent.size)
+    }
+
+    @Test
+    fun cameraTomadaPorOutroAppDesfazAPublicacao() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.call.toggleCamera()
+        advanceTimeBy(1.seconds)
+        f.signal.sent.clear()
+
+        f.engine.localCamera.value = null
+        advanceTimeBy(1.seconds)
+
+        assertEquals(listOf("VoiceCamera", "VoiceOffer"), f.signal.kinds)
+        assertEquals(WsCommand.VoiceCamera("v1", false), f.signal.sent.first())
+        assertFalse(f.call.state.value.cameraOn)
+    }
+
+    @Test
+    fun cameraETelaEncerradasJuntasSaemUmaDeCadaVez() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.call.toggleCamera()
+        advanceTimeBy(1.seconds)
+        f.call.toggleScreen()
+        advanceTimeBy(1.seconds)
+        f.signal.sent.clear()
+
+        f.engine.localCamera.value = null
+        f.engine.localScreen.value = null
+        advanceTimeBy(1.seconds)
+
+        assertEquals(listOf("ScreenShareStop", "VoiceOffer", "VoiceCamera", "VoiceOffer"), f.signal.kinds)
+        assertFalse(f.call.state.value.cameraOn || f.call.state.value.screenOn)
+    }
+
+    @Test
+    fun capturaEncerradaComRenegociacaoRecusadaNaoFicaTentandoParaSempre() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.call.toggleScreen()
+        advanceTimeBy(1.seconds)
+        f.signal.sent.clear()
+        f.signal.rejectNextOffer = true
+
+        f.engine.localScreen.value = null
+        advanceTimeBy(30.seconds)
+
+        // Uma tentativa só: o estado local desliga mesmo com a oferta recusada, e o erro fica à mostra.
+        assertEquals(listOf("ScreenShareStop", "VoiceOffer"), f.signal.kinds)
+        assertFalse(f.call.state.value.screenOn)
+        assertEquals("SDP inválido", f.call.state.value.errorDetail)
+        assertEquals(CallPhase.Connected, f.call.state.value.phase)
+    }
+
+    @Test
+    fun faixaAusenteComACapturaDesligadaNaoFazNada() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.signal.sent.clear()
+        f.engine.localCamera.value = null
+        f.engine.localScreen.value = null
+        advanceTimeBy(1.seconds)
+        assertTrue(f.signal.sent.isEmpty())
     }
 }

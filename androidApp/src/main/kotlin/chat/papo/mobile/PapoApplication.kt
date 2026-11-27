@@ -5,12 +5,18 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import chat.papo.mobile.platform.ActivityHolder
+import chat.papo.mobile.platform.AndroidCallPresentation
 import chat.papo.mobile.platform.AndroidPushTokens
 import chat.papo.mobile.platform.CallService
 import chat.papo.mobile.platform.createAndroidGraph
 
 class PapoApplication : Application() {
     val activities = ActivityHolder()
+
+    /** A janela flutuante e a notificação da chamada; a `MainActivity` se liga a ela. Só existe depois de [onCreate] (precisa do contexto). */
+    lateinit var callPresentation: AndroidCallPresentation
+        private set
+
     lateinit var graph: AppGraph
         private set
 
@@ -21,8 +27,10 @@ class PapoApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         pushTokens = AndroidPushTokens(this)
-        graph = createAndroidGraph(this, activities, R.drawable.ic_stat_notification, R.raw.aboutlibraries, pushTokens)
+        callPresentation = AndroidCallPresentation(this, activities)
+        graph = createAndroidGraph(this, activities, R.drawable.ic_stat_notification, R.raw.aboutlibraries, pushTokens, callPresentation)
         CallService.hangupHandler = { graph.currentSession()?.calls?.leave() }
+        CallService.muteHandler = { graph.currentSession()?.calls?.toggleMute() }
 
         // O bloqueio automático conta o tempo com o app inteiro fora da tela,
         // não a cada troca de Activity.
