@@ -20,6 +20,9 @@ release notes in [releases/](../releases/) describe each version's changes.
   differ.
 - A quick switcher that finds any conversation of any of your accounts, with
   mentions and unread conversations first.
+- Settings in two tabs, as in Android's own settings: "Aplicativo" for this
+  phone and "Servidor" for the selected account, each a list with a short
+  summary of every item. The server bar shows your avatar on each account.
 
 ## Privacy on the device
 
@@ -27,17 +30,39 @@ release notes in [releases/](../releases/) describe each version's changes.
   opens the stored data stays in the phone's secure hardware.
 - Accounts, sessions, messages, drafts and cached media are stored encrypted and
   are left out of device backups.
-- Optionally block screenshots and hide conversations in the recent apps list.
+- Lock right away or 1, 5 or 15 minutes or an hour after you leave the app.
+- Allow or block screenshots and screen recording, which also hides the
+  conversations in the recent apps list, with or without the app lock.
+- Choose what the app's own notifications show: everything, nothing on the
+  phone's lock screen, or only "Nova mensagem" everywhere. Push notifications
+  shown by Android follow the server's preview instead.
 - The in-app YouTube player is the one exception: while it is open, the phone's
   web component keeps its cookies and cache unencrypted in the app's folder.
   They are deleted when the player closes and when the app locks; a few empty
   databases named after YouTube stay until the app is next opened.
+
+## Appearance
+
+- A theme for the whole app: follow the system, light, dark or OLED, with a
+  black background and black list areas to save energy on OLED screens. Six
+  presets (Papo, Oceano, Floresta, Ametista, Âmbar and Rosa) and a live
+  preview of the channel list and a conversation.
+- A server can have its own theme, used while that account is selected; the
+  lock screen and adding a server always use the app's theme.
 
 ## Messages
 
 - Text channels grouped by category and direct messages, in real time, with
   unread markers and a count of the new messages that arrived while you read
   further up.
+- The channel list has two tabs, "Canais" and "Conversas diretas", each with
+  its mention count; without direct conversations, a button in the middle
+  starts one. Hold a direct conversation to close it: it leaves the list and
+  keeps its history, and a new message or starting it again brings it back.
+- Tap the description under a channel's name to read it in full. People
+  allowed to manage channels can rename a channel and change its
+  description, from the conversation menu, from the description or by
+  holding the channel in the list; nobody else sees the option.
 - Messages show as soon as you send them and go out one at a time; one that
   fails stays with the reason and a button to send it again, and is never sent
   again on its own.
@@ -194,7 +219,11 @@ release notes in [releases/](../releases/) describe each version's changes.
   it; a push notification already in the shade stays until you open or dismiss
   it. A channel set to "nothing" on the server
   gets no notifications from it, so it shows no count.
-- No server administration.
+- No server administration beyond renaming a channel and changing its
+  description.
+- Closing a direct conversation reaches your other devices only when they
+  load the list again, because the server does not announce it.
+- A server's own theme stays on this phone.
 - Your avatar cannot be removed once set, only replaced, and an animated avatar or
   banner is not cropped: it goes as it is when it fits the size limits and is
   refused otherwise; there is no "invisible"

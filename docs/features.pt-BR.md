@@ -21,6 +21,10 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   eles diferem.
 - Troca rápida que acha qualquer conversa de qualquer uma das suas contas, com
   menções e conversas não lidas primeiro.
+- Configurações em duas abas, como as do próprio Android: "Aplicativo" para
+  este celular e "Servidor" para a conta selecionada, cada uma uma lista com
+  um resumo curto de cada item. A barra de servidores mostra o seu avatar em
+  cada conta.
 
 ## Privacidade no aparelho
 
@@ -28,18 +32,40 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   abre os dados guardados fica no hardware seguro do celular.
 - Contas, sessões, mensagens, rascunhos e mídia em cache ficam cifrados e fora
   dos backups do aparelho.
-- Opcionalmente, bloqueie capturas de tela e esconda as conversas na lista de
-  apps recentes.
+- Bloqueio na hora ou 1, 5 ou 15 minutos ou uma hora depois de sair do app.
+- Permita ou bloqueie capturas e gravação de tela, o que também esconde as
+  conversas na lista de apps recentes, com ou sem o bloqueio do app.
+- Escolha o que as notificações do próprio app mostram: tudo, nada na tela de
+  bloqueio do celular, ou só "Nova mensagem" em todo lugar. As notificações
+  push que o Android mostra seguem a prévia do servidor.
 - O player do YouTube dentro do app é a única exceção: enquanto ele está aberto,
   o componente web do celular guarda cookies e cache sem cifrar na pasta do app.
   Eles são apagados quando o player fecha e quando o app trava; algumas bases
   vazias com o nome do YouTube ficam até a próxima vez que o app abrir.
+
+## Aparência
+
+- Um tema para o app inteiro: seguir o sistema, claro, escuro ou OLED, com
+  fundo e áreas da lista em preto para economizar energia em telas OLED. Seis
+  predefinições (Papo, Oceano, Floresta, Ametista, Âmbar e Rosa) e uma prévia
+  ao vivo da lista de canais e de uma conversa.
+- Um servidor pode ter o próprio tema, usado enquanto aquela conta está
+  selecionada; a tela de bloqueio e a de adicionar servidor usam sempre o
+  tema do app.
 
 ## Mensagens
 
 - Canais de texto agrupados por categoria e mensagens diretas, em tempo real,
   com marcação de não lidas e a contagem das mensagens novas que chegaram
   enquanto você lia mais acima.
+- A lista de canais tem duas abas, "Canais" e "Conversas diretas", cada uma
+  com a sua contagem de menções; sem conversas diretas, um botão no meio
+  começa uma. Segure uma conversa direta para fechá-la: ela sai da lista e
+  guarda o histórico, e uma mensagem nova ou começá-la de novo a traz de volta.
+- Toque na descrição abaixo do nome de um canal para lê-la inteira. Quem pode
+  gerenciar canais muda o nome e a descrição de um canal pelo menu da
+  conversa, pela descrição ou segurando o canal na lista; ninguém mais vê a
+  opção.
 - As mensagens aparecem assim que você as envia e saem uma de cada vez; a que
   falha fica com o motivo e um botão para reenviar, e nunca é reenviada sozinha.
 - Um rascunho para cada conversa, com a mensagem que você estava respondendo.
@@ -196,7 +222,11 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   de push que já está na barra fica lá até você abrir ou dispensar. Um canal em
   "nada" no servidor não recebe
   notificações dele, então fica sem número.
-- Sem administração do servidor.
+- Sem administração do servidor além de mudar o nome e a descrição de um
+  canal.
+- Fechar uma conversa direta só chega aos seus outros aparelhos quando eles
+  carregam a lista de novo, porque o servidor não avisa.
+- O tema próprio de um servidor fica só neste celular.
 - O avatar não pode ser removido depois de definido, só trocado, e avatar ou banner
   animado não é recortado: vai como está quando cabe nos limites de tamanho e é
   recusado quando não cabe; não há status
