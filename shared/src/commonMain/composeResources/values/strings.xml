@@ -468,6 +468,7 @@
     <string name="call_volume_unmute">Tirar o silêncio</string>
     <string name="call_volume_adjusted">Volume ajustado só para você</string>
     <string name="call_push_to_talk">Apertar para falar</string>
+    <string name="call_show_controls">Mostrar os controles da chamada</string>
     <string name="call_push_to_talk_hold">Segure para falar</string>
     <string name="call_push_to_talk_talking">Falando</string>
 

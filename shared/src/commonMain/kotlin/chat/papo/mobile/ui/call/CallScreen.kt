@@ -1,12 +1,19 @@
 package chat.papo.mobile.ui.call
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -52,6 +59,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -60,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onClick
@@ -100,6 +109,7 @@ import chat.papo.mobile.resources.call_screen_audio_overflow
 import chat.papo.mobile.resources.call_screen_of
 import chat.papo.mobile.resources.call_screen_off
 import chat.papo.mobile.resources.call_screen_on
+import chat.papo.mobile.resources.call_show_controls
 import chat.papo.mobile.resources.call_switch_camera
 import chat.papo.mobile.resources.call_unmute
 import chat.papo.mobile.resources.call_volume_adjusted
@@ -117,6 +127,7 @@ import chat.papo.mobile.voice.DEFAULT_VOLUME_PERCENT
 import chat.papo.mobile.voice.VideoKey
 import chat.papo.mobile.voice.VideoTrackHandle
 import chat.papo.mobile.voice.VolumeLevels
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
 /** Um quadro da grade: uma pessoa (com ou sem câmera) ou a tela que alguém transmite. */
@@ -154,21 +165,119 @@ fun CallScreen(session: AppSession, onBack: () -> Unit, onOpenChat: (accountId: 
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
-        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            Header(accountSession, state, onBack) { onOpenChat(state.accountId, state.channelId) }
-            if (state.phase == CallPhase.Ended) {
-                Ended(state) {
-                    session.calls.dismissEnded()
-                    onBack()
+        BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
+            // Na horizontal a altura é pouca: os quadros ocupam a tela toda e os controles só aparecem puxando para cima.
+            if (maxWidth > maxHeight && state.phase != CallPhase.Ended) {
+                LandscapeCall(session, accountSession, current, state, onBack) { onOpenChat(state.accountId, state.channelId) }
+                return@BoxWithConstraints
+            }
+            Column(Modifier.fillMaxSize()) {
+                Header(accountSession, state, onBack) { onOpenChat(state.accountId, state.channelId) }
+                if (state.phase == CallPhase.Ended) {
+                    Ended(state) {
+                        session.calls.dismissEnded()
+                        onBack()
+                    }
+                } else {
+                    Participants(accountSession, current, state, Modifier.weight(1f), onFocusChange = session.calls::setFocus)
+                    PushToTalk(current, state)
+                    Controls(current, state)
                 }
-            } else {
-                Participants(accountSession, current, state, Modifier.weight(1f), onFocusChange = session.calls::setFocus)
-                PushToTalk(current, state)
-                Controls(current, state)
             }
         }
     }
 }
+
+/**
+ * A chamada na horizontal: a grade ocupa a tela inteira e o cabeçalho e os controles ficam escondidos. Puxar para cima os
+ * mostra; puxar para baixo os esconde, e eles somem sozinhos depois de [CONTROLS_TIMEOUT_MS] sem toque, menos com o
+ * apertar-para-falar ligado (o botão de falar precisa ficar à mão e não pode sumir enquanto alguém o segura).
+ */
+@Composable
+private fun LandscapeCall(
+    session: AppSession,
+    accountSession: AccountSession,
+    controller: CallController,
+    state: CallState,
+    onBack: () -> Unit,
+    onOpenChat: () -> Unit,
+) {
+    var shown by remember { mutableStateOf(false) }
+    var touches by remember { mutableIntStateOf(0) }
+    LaunchedEffect(shown, touches, state.pushToTalk) {
+        if (shown && !state.pushToTalk) {
+            delay(CONTROLS_TIMEOUT_MS)
+            shown = false
+        }
+    }
+    val scrim = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.92f)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                var total = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { total = 0f },
+                    onDragEnd = {
+                        if (total < -SWIPE_THRESHOLD) shown = true
+                        if (total > SWIPE_THRESHOLD) shown = false
+                    },
+                ) { _, dy -> total += dy }
+            },
+    ) {
+        Participants(accountSession, controller, state, Modifier.fillMaxSize(), onFocusChange = session.calls::setFocus, landscape = true)
+        AnimatedVisibility(
+            visible = shown,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            Box(Modifier.fillMaxWidth().background(scrim)) { Header(accountSession, state, onBack, onOpenChat) }
+        }
+        AnimatedVisibility(
+            visible = shown,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(scrim)
+                    // Cada toque nos controles adia o sumiço.
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent(PointerEventPass.Initial)
+                                touches++
+                            }
+                        }
+                    },
+            ) {
+                PushToTalk(controller, state)
+                Controls(controller, state)
+            }
+        }
+        if (!shown) {
+            // Alça no pé da tela: mostra que dá para puxar e, para quem usa leitor de tela, abre os controles com um toque.
+            val label = stringResource(Res.string.call_show_controls)
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 6.dp)
+                    .size(width = 48.dp, height = 24.dp)
+                    .clickable(onClickLabel = label, role = Role.Button) { shown = true }
+                    .semantics { onClick(label = label) { shown = true; true } },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(width = 36.dp, height = 4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)))
+            }
+        }
+    }
+}
+
+private const val CONTROLS_TIMEOUT_MS = 6_000L
+private const val SWIPE_THRESHOLD = 40f
 
 @Composable
 private fun Header(session: AccountSession, state: CallState, onBack: () -> Unit, onOpenChat: () -> Unit) {
@@ -209,6 +318,7 @@ private fun Participants(
     state: CallState,
     modifier: Modifier,
     onFocusChange: (VideoKey?) -> Unit,
+    landscape: Boolean = false,
 ) {
     val users by session.chat.users.collectAsStateWithLifecycle()
     val remote by controller.remoteVideo.collectAsStateWithLifecycle()
@@ -278,7 +388,29 @@ private fun Participants(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
-        LazyVerticalGrid(
+        if (landscape) {
+            // Na horizontal todos os quadros têm a mesma proporção e o tamanho que deixa todos à vista, sem rolagem.
+            val aspect = if (tiles.any { it.isScreen }) 16f / 9f else 4f / 3f
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
+                val gap = 8.dp
+                val fit = fitGrid(tiles.size, maxWidth.value, maxHeight.value, aspect, gap.value)
+                Column(verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = Alignment.CenterHorizontally) {
+                    tiles.chunked(fit.columns).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                            row.forEach { tile ->
+                                ParticipantTile(
+                                    session, tile, users[tile.userId], state, levels,
+                                    onFocus = { focusedKey = tile.key },
+                                    onVolume = { volumeUserId = tile.userId },
+                                    modifier = Modifier.width(fit.tileWidth.dp),
+                                    aspect = aspect,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else LazyVerticalGrid(
             columns = GridCells.Fixed(if (tiles.size <= 2) 1 else 2),
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(8.dp),
@@ -313,6 +445,8 @@ private fun ParticipantTile(
     levels: VolumeLevels,
     onFocus: () -> Unit,
     onVolume: () -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    aspect: Float = if (tile.isScreen) 16f / 9f else 4f / 3f,
 ) {
     val member = state.members[tile.userId]
     val mine = tile.userId == session.userId
@@ -320,9 +454,8 @@ private fun ParticipantTile(
     val name = if (mine) stringResource(Res.string.call_you) else user?.displayName ?: "?"
     val shape = RoundedCornerShape(18.dp)
     Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(if (tile.isScreen) 16f / 9f else 4f / 3f)
+        modifier
+            .aspectRatio(aspect)
             .clip(shape)
             .background(if (tile.isScreen && tile.video != null) Color.Black else MaterialTheme.colorScheme.surfaceContainer)
             .border(2.dp, if (speaking) LocalPapoColors.current.online else Color.Transparent, shape)
