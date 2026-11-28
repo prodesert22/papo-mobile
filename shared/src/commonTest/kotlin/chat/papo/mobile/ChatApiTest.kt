@@ -261,7 +261,16 @@ class ChatApiTest {
             val content = request.body as OutgoingContent.WriteChannelContent
             coroutineScope {
                 launch(Dispatchers.Default) { runCatching { content.writeTo(channel) } }
-                channel.readAvailable(ByteArray(64))
+                // O corpo começa com as partes de texto: ler só os primeiros bytes podia cortar a rede antes de o
+                // arquivo abrir (no CI o leitor às vezes chegava antes do escritor). 8 KiB já entram no arquivo, que
+                // tem 1 MiB e fica lido só em parte.
+                val start = ByteArray(8192)
+                var read = 0
+                while (read < start.size) {
+                    val n = channel.readAvailable(start, read, start.size - read)
+                    if (n < 0) break
+                    read += n
+                }
                 channel.cancel(IOException("rede caiu"))
             }
             throw IOException("rede caiu")
