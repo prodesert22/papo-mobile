@@ -92,6 +92,12 @@ data class CallState(
 )
 
 /**
+ * O canal de voz em que a conta [accountId] está nesta chamada: o dela, da entrada até a chamada terminar; nulo para
+ * outra conta, mesmo no mesmo servidor, e depois do fim, enquanto o motivo ainda está na tela.
+ */
+fun CallState.channelOf(accountId: String): String? = channelId.takeIf { this.accountId == accountId && phase != CallPhase.Ended }
+
+/**
  * Uma chamada de voz num canal. Sinalização do SFU do Papo:
  *
  * - o cliente cria TODAS as ofertas; o servidor só responde (`voice_answer`);

@@ -127,6 +127,7 @@ import chat.papo.mobile.voice.DEFAULT_VOLUME_PERCENT
 import chat.papo.mobile.voice.VideoKey
 import chat.papo.mobile.voice.VideoTrackHandle
 import chat.papo.mobile.voice.VolumeLevels
+import chat.papo.mobile.voice.channelOf
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
@@ -669,6 +670,15 @@ private fun Ended(state: CallState, onClose: () -> Unit) {
         Spacer(Modifier.height(24.dp))
         Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(Res.string.action_close)) }
     }
+}
+
+/** O canal de voz da chamada em curso, se ela é da conta [accountId] e ainda não terminou ([channelOf]). */
+@Composable
+fun joinedVoiceChannel(session: AppSession, accountId: String): String? {
+    val controller by session.calls.current.collectAsStateWithLifecycle()
+    val current = controller ?: return null
+    val state by current.state.collectAsStateWithLifecycle()
+    return state.channelOf(accountId)
 }
 
 /** Faixa mostrada fora da tela de chamada enquanto há uma em andamento. */

@@ -25,6 +25,22 @@ fun rowStyle(unread: Boolean, mentions: Int, capped: Boolean, muted: Boolean): R
 }
 
 /**
+ * Onde quem usa a conta está numa linha da lista: [InCall] no canal de voz da chamada, [Open] na conversa que o painel
+ * mostra (aberta, ou à espera fora da tela com a lista à vista), [None] em nenhum dos dois.
+ */
+enum class RowPlace { None, Open, InCall }
+
+/**
+ * Onde quem usa a conta está na conversa [id]. [openId] é a conversa do painel e [callId] o canal de voz da chamada,
+ * os dois da mesma conta da lista. A chamada vence: o chat de um canal de voz pode estar no painel enquanto se fala nele.
+ */
+fun rowPlace(id: String, openId: String?, callId: String?): RowPlace = when (id) {
+    callId -> RowPlace.InCall
+    openId -> RowPlace.Open
+    else -> RowPlace.None
+}
+
+/**
  * A conta tem algo a destacar no ícone dela (o ponto de mensagem nova)? Algum canal que ela lê tem mensagem não lida
  * e não está silenciado (nem ele, nem o servidor), ou alguma conversa direta tem mensagem não lida e não está
  * silenciada. Silenciar o servidor não cala as conversas diretas. [channels] são os canais que a conta lê.
