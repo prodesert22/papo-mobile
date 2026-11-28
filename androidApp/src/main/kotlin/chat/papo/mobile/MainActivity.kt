@@ -28,6 +28,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         app.activities.attach(this)
+        app.callPresentation.attach(this)
 
         val lock = app.graph.lock
         // Antes do primeiro quadro, para a prévia nos apps recentes já nascer protegida.
@@ -44,7 +45,7 @@ class MainActivity : FragmentActivity() {
             repeatOnLifecycle(Lifecycle.State.CREATED) { app.graph.theme.spec.collect(::applyGlobalTheme) }
         }
 
-        // Só na primeira criação: girar o aparelho recria a activity com o mesmo intent, e o toque não pode valer duas vezes.
+        // Só na primeira criação: o modo escuro recria a activity com o mesmo intent, e o toque não pode valer duas vezes.
         if (savedInstanceState == null) openFromNotification(intent)
 
         val platformUi = AndroidPlatformUi(this)
@@ -66,7 +67,14 @@ class MainActivity : FragmentActivity() {
         (NotificationIntents.parse(intent) ?: NotificationIntents.parsePush(intent))?.let(app.graph.notificationOpens::submit)
     }
 
+    /** A pessoa saiu do app (Início): a chamada pode virar janela flutuante. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        app.callPresentation.onUserLeaveHint()
+    }
+
     override fun onDestroy() {
+        app.callPresentation.detach(this)
         app.activities.detach(this)
         super.onDestroy()
     }

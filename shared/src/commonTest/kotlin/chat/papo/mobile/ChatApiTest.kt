@@ -254,27 +254,39 @@ class ChatApiTest {
     fun oEnvioFechaOFluxoDeCadaArquivoQueAbriuMesmoSeORestoDoCorpoNaoFoiLido() = runTest {
         val first = GeneratedSource(1L shl 20) // grande o bastante para o motor parar de ler com o arquivo ainda no meio
         val second = ClosingSource(ByteArray(100))
+        var secondOpened = false
         val engine = MockEngine { request ->
-            // A rede cai logo no começo do corpo: só o primeiro arquivo chega a ser aberto, e lido só em parte
-            // (o escritor para quando o canal enche, então o segundo nem começa).
+            // A rede cai no começo do corpo, com o primeiro arquivo aberto e lido só em parte.
             val channel = ByteChannel()
             val content = request.body as OutgoingContent.WriteChannelContent
             coroutineScope {
                 launch(Dispatchers.Default) { runCatching { content.writeTo(channel) } }
-                channel.readAvailable(ByteArray(64))
+                // O corpo começa com as partes de texto: 8 KiB garantem que o primeiro arquivo (1 MiB) já abriu.
+                val start = ByteArray(8192)
+                var read = 0
+                while (read < start.size) {
+                    val n = channel.readAvailable(start, read, start.size - read)
+                    if (n < 0) break
+                    read += n
+                }
                 channel.cancel(IOException("rede caiu"))
             }
             throw IOException("rede caiu")
         }
         val files = listOf(
             OutgoingFile("a.bin", "application/octet-stream", 1L shl 20, open = { ByteReadChannel(first.buffered()) }),
-            OutgoingFile("b.bin", "application/octet-stream", 100, open = { ByteReadChannel(second.buffered()) }),
+            OutgoingFile("b.bin", "application/octet-stream", 100, open = {
+                secondOpened = true
+                ByteReadChannel(second.buffered())
+            }),
         )
 
         assertFailsWith<IOException> { apiOn(engine).sendMessage("c1", "oi", replyTo = null, files = files) }
 
         assertTrue(first.closed)
-        assertFalse(second.closed) // nunca foi aberto: não há o que fechar
+        // Depois da queda o escritor multipart do Ktor às vezes ainda passa para a parte seguinte e abre o segundo
+        // arquivo (visto no CI); isso não é garantido nem proibido. O que vale é que o que foi aberto foi fechado.
+        assertEquals(secondOpened, second.closed)
     }
 
     @Test

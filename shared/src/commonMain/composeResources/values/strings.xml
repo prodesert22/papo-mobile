@@ -436,7 +436,7 @@
     <string name="call_reconnecting">Conexão instável. Reconectando…</string>
     <string name="call_alone">Só você por aqui por enquanto.</string>
     <string name="call_you">Você</string>
-    <string name="call_screen_of">Tela de %1$s</string>
+    <string name="call_screen_of">Transmissão de %1$s</string>
     <string name="call_your_screen">Sua tela está sendo transmitida</string>
     <string name="call_mute">Desligar microfone</string>
     <string name="call_unmute">Ligar microfone</string>
@@ -459,6 +459,18 @@
     <string name="call_end_room_closed">O canal de voz foi encerrado.</string>
     <string name="call_end_failed">Não foi possível entrar na chamada.</string>
     <string name="call_unsupported">Chamadas ainda não estão disponíveis neste aparelho.</string>
+    <string name="call_screen_audio_on">Ouvindo o áudio da tela</string>
+    <string name="call_screen_audio_overflow">Áudio da tela não coube (máximo 2)</string>
+    <string name="call_volume_voice">Voz: %1$d %</string>
+    <string name="call_volume_screen">Áudio da tela: %1$d %</string>
+    <string name="call_volume_distortion">Acima de 100 % o som pode distorcer.</string>
+    <string name="call_volume_mute">Silenciar para mim</string>
+    <string name="call_volume_unmute">Tirar o silêncio</string>
+    <string name="call_volume_adjusted">Volume ajustado só para você</string>
+    <string name="call_push_to_talk">Apertar para falar</string>
+    <string name="call_show_controls">Mostrar os controles da chamada</string>
+    <string name="call_push_to_talk_hold">Segure para falar</string>
+    <string name="call_push_to_talk_talking">Falando</string>
 
     <!-- Embeds e mídia (0.6.0): cada trilha e onda escreve só no seu bloco, para os ramos mesclarem sem conflito. -->
     <!-- 02 · trilha A · onda 1 (galeria e envio) -->
@@ -808,4 +820,25 @@
 
     <!-- 0.9.0 · conexão -->
     <string name="connection_offline">Sem conexão com o servidor</string>
+
+    <!-- Chamadas: saída e janela -->
+    <string name="call_output_title">Saída de áudio</string>
+    <string name="call_output_button">Escolher a saída de áudio</string>
+    <string name="call_output_earpiece">Fone do aparelho</string>
+    <string name="call_output_speaker">Alto-falante</string>
+    <string name="call_output_wired">Fone com fio</string>
+    <string name="call_output_usb">Fone USB</string>
+    <string name="call_output_bluetooth">Bluetooth</string>
+    <string name="call_output_hearing_aid">Aparelho auditivo</string>
+    <string name="call_output_other">Outra saída</string>
+    <string name="call_output_current">Em uso</string>
+    <string name="call_notice_channel">Chamadas</string>
+    <string name="call_notice_title_default">Chamada de voz</string>
+    <string name="call_notice_public">Chamada em andamento</string>
+    <string name="call_notice_mic_on">Microfone ligado</string>
+    <string name="call_notice_mic_off">Microfone desligado</string>
+    <string name="call_notice_camera_on">Câmera ligada</string>
+    <string name="call_notice_sharing_screen">Transmitindo a tela</string>
+    <string name="call_notice_mute">Silenciar</string>
+    <string name="call_notice_unmute">Ativar microfone</string>
 </resources>

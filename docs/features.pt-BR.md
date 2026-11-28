@@ -188,12 +188,33 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 
 ## Voz, câmera e transmissão de tela
 
-- Entre num canal de voz, silencie o microfone, troque de câmera e escolha entre
-  o alto-falante e o fone do aparelho.
-- Transmita sua câmera ou sua tela e veja as que os outros transmitem.
+- Entre num canal de voz, silencie o microfone e troque de câmera.
+- Escolha por onde sai a chamada: alto-falante, fone do aparelho, fone com fio
+  ou USB, ou fone Bluetooth no Android 12 ou mais novo. Um fone que conecta
+  assume; quando o que está em uso some, a chamada passa para o fone do
+  aparelho.
+- Transmita sua câmera ou sua tela, uma de cada vez, e veja as que os outros
+  transmitem. A câmera sai do mesmo jeito que uma tela transmitida, então os
+  clientes web e de terminal também a mostram; ligar uma desliga a outra. O som
+  de uma tela transmitida por outro cliente também toca, até duas ao mesmo tempo.
+- Na horizontal os quadros cabem na tela sem rolagem, e o cabeçalho e os botões
+  ficam escondidos: puxe para cima para mostrá-los e para baixo para escondê-los.
+- Ajuste o volume de cada pessoa e da tela que ela transmite, de 0 a 200 %, ou
+  silencie alguém só para você: toque num quadro sem vídeo ou segure qualquer
+  quadro. O celular guarda isso por conta e o servidor não fica sabendo.
+- Apertar para falar: ligue na chamada e segure o botão para falar. O botão de
+  tocar/pausar do fone liga e desliga o microfone, mesmo com o app em segundo
+  plano.
 - Os canais de voz têm chat próprio, que abre pela lista de canais ou durante a
   chamada.
-- A chamada continua quando você sai do app, com uma notificação para desligar.
+- A chamada continua quando você sai do app. Uma janela flutuante mostra a tela
+  que alguém transmite, a câmera de quem está falando ou a foto da pessoa, com
+  botões para silenciar e desligar; ela abre quando você sai pela tela da
+  chamada, ou de qualquer lugar do app enquanto sua câmera ou sua tela está
+  ligada. A notificação da chamada mostra o canal, o tempo e o que está ligado,
+  e os botões de silenciar e desligar funcionam na tela de bloqueio sem
+  desbloquear o celular; lá ela esconde o nome do canal quando o celular
+  esconde o conteúdo das notificações.
 
 ## Notificações
 
@@ -267,8 +288,14 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
 - O avatar de um webhook só aparece quando está guardado no servidor. A mensagem
   cuja imagem de autor é um endereço em outro site mostra as iniciais, para que
   ler uma conversa nunca contate um terceiro.
-- Nas chamadas: sem o som da tela transmitida, sem volume por pessoa e sem
-  escolha de fone Bluetooth.
+- Nas chamadas: o app não envia o som da sua própria tela, porque a biblioteca
+  de WebRTC que ele usa só envia o microfone. O fone Bluetooth pode ser escolhido
+  no Android 12 ou mais novo. Com o apertar para falar, os outros podem levar
+  até cerca de um segundo para ouvir você, porque o servidor atualiza quem é
+  ouvido uma vez por segundo. Só há chamadas em canais de voz: o servidor não
+  tem chamadas em conversas diretas. Sua câmera e sua tela não podem ser
+  transmitidas ao mesmo tempo, e os outros veem a sua câmera como uma tela
+  transmitida.
 - Emojis em APNG mostram só o primeiro quadro, e os GIFs ficam parados quando o
   celular está com as animações removidas.
 - Vídeos e áudios pausam quando você sai do app e não continuam em segundo plano.

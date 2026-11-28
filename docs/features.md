@@ -188,12 +188,32 @@ release notes in [releases/](../releases/) describe each version's changes.
 
 ## Voice, camera and screen sharing
 
-- Join a voice channel, mute, switch cameras and choose between the speaker and
-  the earpiece.
-- Share your camera or your screen, and watch the ones other people share.
+- Join a voice channel, mute and switch cameras.
+- Choose where the call plays: the speaker, the earpiece, a wired or USB
+  headset, or a Bluetooth headset on Android 12 or newer. A headset that
+  connects takes over; when the one in use goes away, the call moves to the
+  earpiece.
+- Share your camera or your screen, one at a time, and watch the ones other
+  people share. The camera goes out the same way as a shared screen, so the web
+  and terminal clients show it too; turning one on turns the other off. The
+  sound of a screen shared from another client plays too, up to two at a time.
+- In landscape the tiles fit the screen without scrolling, and the header and
+  buttons stay hidden: swipe up to show them and down to hide them.
+- Set the volume of each person and of their shared screen, from 0 to 200 %, or
+  mute someone just for you: touch a tile without video or hold any tile. The
+  phone keeps it for each account and the server is not told.
+- Push to talk: turn it on in the call and hold the button to speak. The
+  headset's play/pause button mutes and unmutes, even with the app in the
+  background.
 - Voice channels have their own chat, which you can open from the channel list
   or during the call.
-- A call continues when you leave the app, with a notification to hang up.
+- A call continues when you leave the app. A floating window shows someone's
+  shared screen, the camera of whoever is talking or their picture, with
+  buttons to mute and hang up; it opens when you leave from the call screen,
+  or from anywhere in the app while your camera or screen is on. The call
+  notification shows the channel, the time and what is on, and its mute and
+  hang-up buttons work on the lock screen without unlocking the phone; there it
+  hides the channel name when the phone hides notification content.
 
 ## Notifications
 
@@ -266,8 +286,13 @@ release notes in [releases/](../releases/) describe each version's changes.
 - A webhook's avatar is shown only when it is stored on the server. A message
   whose author picture is an address on another site shows initials instead, so
   that reading a conversation never contacts a third party.
-- In calls: no sound from a shared screen, no per-person volume and no Bluetooth
-  headset selection.
+- In calls: the app does not send your own screen's sound, because the WebRTC
+  library it uses only sends the microphone. Bluetooth headsets can be chosen
+  on Android 12 or newer. With push to talk, the others can take up to about a
+  second to hear you, since the server updates who is heard once a second.
+  Calls exist only in voice channels: the server has none in direct messages.
+  Your camera and your screen cannot be shared at the same time, and other
+  people see your camera as a shared screen.
 - APNG emoji show only their first frame, and GIFs stay still when the phone has
   animations removed.
 - Videos and audio pause when you leave the app and do not keep playing in the

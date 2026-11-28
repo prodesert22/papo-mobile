@@ -16,7 +16,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -25,6 +30,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 enum class CallPhase { Joining, Connecting, Connected, Reconnecting, Ended }
 
@@ -46,6 +53,17 @@ data class VideoKey(val userId: String, val kind: String) {
     }
 }
 
+/**
+ * Quem está tocando numa faixa de áudio recebida, segundo o último `voice_audio_routes`.
+ * [kind] é [MICROPHONE] ou [SCREEN_AUDIO].
+ */
+data class AudioRoute(val userId: String, val kind: String) {
+    companion object {
+        const val MICROPHONE = "audio"
+        const val SCREEN_AUDIO = "screen_audio"
+    }
+}
+
 data class CallState(
     val accountId: String,
     val channelId: String,
@@ -55,11 +73,22 @@ data class CallState(
     val micMuted: Boolean = true,
     val cameraOn: Boolean = false,
     val screenOn: Boolean = false,
-    val speakerOn: Boolean = true,
     val busy: Boolean = false,
     val videoSlots: Map<Int, VideoKey> = emptyMap(),
     val end: CallEnd? = null,
     val errorDetail: String? = null,
+    /** Faixa de áudio recebida (id do servidor) → quem toca nela. Vazio até o primeiro `voice_audio_routes`. */
+    val audioRoutes: Map<String, AudioRoute> = emptyMap(),
+    /** Pessoas cujo áudio de transmissão de tela está assinado (no máximo `VoiceSlots.screenAudio`). */
+    val screenAudioSubs: Set<String> = emptySet(),
+    /** Quem transmite áudio de tela e não coube nas assinaturas (limite de slots, local ou recusado pelo servidor). */
+    val screenAudioOverflow: Set<String> = emptySet(),
+    /** Saídas de áudio que o aparelho oferece agora e a que está em uso. */
+    val outputs: List<AudioOutput> = emptyList(),
+    val output: AudioOutput? = null,
+    /** Apertar-para-falar ligado: o microfone só abre enquanto [talking]. Esconde "Silenciar" na notificação e na janela flutuante. */
+    val pushToTalk: Boolean = false,
+    val talking: Boolean = false,
 )
 
 /**
@@ -90,6 +119,10 @@ class CallController(
     private val engine: VoiceEngine,
     parentScope: CoroutineScope,
     private val slots: VoiceSlots = VoiceSlots(),
+    /** Relógio do prazo para ligar um erro do servidor ao último pedido de assinatura; os testes passam o virtual. */
+    private val timeSource: TimeSource = TimeSource.Monotonic,
+    /** Os volumes por pessoa da conta; sem eles todas as faixas tocam no normal. */
+    private val volumes: VoiceVolumes? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext.job))
     private val _state = MutableStateFlow(CallState(accountId, channelId))
@@ -105,9 +138,24 @@ class CallController(
     private var answer: CompletableDeferred<String>? = null
     private var joinSent = false
     private var subscriptionsReady = false
+
+    /** Uma conciliação de assinaturas por vez, e o tratamento dos erros dela, que mexem no mesmo estado. */
+    private val subscriptionLock = Mutex()
+
+    /** Os últimos pedidos de assinatura enviados, para ligar um erro do servidor ao pedido que o causou. */
+    private val recentSubscriptions = ArrayDeque<SentSubscription>()
+
+    /** Assinaturas que o servidor recusou, com o código: não se repetem sozinhas (regra 15) até a situação mudar. */
+    private val refused = HashMap<Subscription, String>()
     private val firstOfferSent = CompletableDeferred<Unit>()
     private val outgoingCandidates = Channel<LocalCandidate>(Channel.UNLIMITED)
     private var finished = false
+
+    /** Todo `voice_mute` sai por aqui: um a cada 250 ms no máximo (o limite de sinalização do servidor é 10/s). */
+    private val mute = MuteCoalescer(scope, { muted -> ws.send(WsCommand.VoiceMute(channelId, muted)) })
+
+    /** O estado do microfone antes de ligar o apertar-para-falar, para voltar a ele ao desligar. */
+    private var mutedBeforePushToTalk = true
 
     fun start() {
         scope.launch { ws.events.collect(::onEvent) }
@@ -134,7 +182,29 @@ class CallController(
                 }
             }
         }
+        volumes?.let { source -> scope.launch { applyGains(source) } }
+        // O botão do fone alterna o mute, com o app em qualquer lugar.
+        scope.launch { engine.headsetButton.collect { toggleMute() } }
+        scope.launch {
+            // As saídas de áudio mudam com o aparelho (fone ligado ou tirado): o motor as conta e o estado só as espelha.
+            combine(engine.outputs, engine.currentOutput) { outputs, current -> outputs to current }.collect { (outputs, current) ->
+                _state.update { it.copy(outputs = outputs, output = current) }
+            }
+        }
+        scope.launch { combine(engine.localCamera, engine.localScreen, _state, ::stopEndedCapture).collect() }
         scope.launch { runJoin() }
+    }
+
+    /**
+     * Mantém o ganho de cada faixa de áudio igual ao volume de quem toca nela. O servidor troca as pessoas de
+     * faixa (a cada `voice_audio_routes`), então o ganho se reaplica a cada snapshot de rotas e a cada mudança de
+     * volume. Só começa depois de os volumes guardados serem lidos: ninguém silenciado toca no normal por um instante.
+     */
+    private suspend fun applyGains(source: VoiceVolumes) {
+        source.awaitLoaded()
+        combine(_state.map { it.audioRoutes }.distinctUntilChanged(), source.levels, ::gains).collect { byTrack ->
+            for ((trackId, gain) in byTrack) engine.setRemoteAudioGain(trackId, gain)
+        }
     }
 
     private suspend fun runJoin() {
@@ -151,11 +221,11 @@ class CallController(
             _state.update { it.copy(phase = CallPhase.Connecting) }
             engine.open(servers, slots) { candidate -> outgoingCandidates.trySend(candidate) }
             negotiate()
-            subscriptionsReady = true
-            reconcileVideo()
+            subscriptionLock.withLock { subscriptionsReady = true }
+            reconcileSubscriptions()
 
-            // Chamada no celular começa falando, como uma ligação.
-            setMuted(false)
+            // Chamada no celular começa falando, como uma ligação (a não ser que o apertar-para-falar já esteja ligado).
+            if (!_state.updateAndGet { if (it.pushToTalk) it else it.copy(micMuted = false) }.pushToTalk) applyMute(false)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -176,31 +246,86 @@ class CallController(
 
     // Ações do usuário
 
-    fun toggleMute() = action { setMuted(!_state.value.micMuted) }
-
-    private suspend fun setMuted(muted: Boolean) {
-        if (!ws.send(WsCommand.VoiceMute(channelId, muted))) return
-        engine.setMicrophoneEnabled(!muted)
-        _state.update { it.copy(micMuted = muted) }
+    /** Alterna o microfone. Com apertar-para-falar ligado quem decide é o botão, então não faz nada. */
+    fun toggleMute() {
+        var muted: Boolean? = null
+        _state.update { s ->
+            if (s.live && !s.pushToTalk) {
+                muted = !s.micMuted
+                s.copy(micMuted = !s.micMuted)
+            } else {
+                muted = null
+                s
+            }
+        }
+        muted?.let(::applyMute)
     }
 
+    /**
+     * Liga ou desliga o apertar-para-falar. Ligado, o microfone fica fechado até [setTalking]; desligado, volta ao
+     * estado que tinha antes de ligar.
+     */
+    fun setPushToTalk(enabled: Boolean) {
+        var muted: Boolean? = null
+        _state.update { s ->
+            muted = null
+            when {
+                !s.live || s.pushToTalk == enabled -> s
+                enabled -> {
+                    mutedBeforePushToTalk = s.micMuted
+                    muted = true
+                    s.copy(pushToTalk = true, talking = false, micMuted = true)
+                }
+                else -> {
+                    muted = mutedBeforePushToTalk
+                    s.copy(pushToTalk = false, talking = false, micMuted = mutedBeforePushToTalk)
+                }
+            }
+        }
+        muted?.let(::applyMute)
+    }
+
+    /** O botão de falar foi apertado ([talking] verdadeiro) ou solto. O microfone abre e fecha na hora; o servidor é avisado sem passar do limite. */
+    fun setTalking(talking: Boolean) {
+        var changed = false
+        _state.update { s ->
+            changed = s.pushToTalk && s.phase != CallPhase.Ended && s.talking != talking
+            if (changed) s.copy(talking = talking, micMuted = !talking) else s
+        }
+        if (changed) applyMute(!talking)
+    }
+
+    /** O microfone local acompanha na hora; o `voice_mute` passa pelo [mute], que junta pedidos seguidos. */
+    private fun applyMute(muted: Boolean) {
+        engine.setMicrophoneEnabled(!muted)
+        mute.submit(muted)
+    }
+
+    private val CallState.live: Boolean get() = phase == CallPhase.Connected || phase == CallPhase.Reconnecting
+
+    /*
+     * A câmera sai pelo mesmo caminho da transmissão de tela (`screen_share_start` e o papel de tela no servidor), não como
+     * `voice_camera`: o cliente web e o TUI só mostram transmissões de tela, e assim todos veem a câmera. Como o servidor
+     * aceita uma transmissão por pessoa, câmera e tela se revezam: ligar uma desliga a outra na mesma oferta, com a
+     * intenção de transmitir já anunciada (a m-line antiga fica inativa e a nova assume o papel de tela).
+     */
     fun toggleCamera() = action {
         if (_state.value.cameraOn) {
-            ws.send(WsCommand.VoiceCamera(channelId, false))
-            engine.stopCamera()
-            negotiate()
-            _state.update { it.copy(cameraOn = false) }
+            dropCamera()
         } else {
             if (!engine.ensurePermission(MediaPermission.Camera) || !engine.startCamera()) return@action
+            val replacingScreen = _state.value.screenOn
+            if (replacingScreen) engine.stopScreen()
             try {
                 // O servidor decide o papel da nova m-line pela intenção recebida antes da oferta.
-                ws.send(WsCommand.VoiceCamera(channelId, true))
+                if (!replacingScreen) ws.send(WsCommand.ScreenShareStart(channelId))
                 negotiate()
-                _state.update { it.copy(cameraOn = true) }
+                _state.update { it.copy(cameraOn = true, screenOn = false) }
             } catch (e: Exception) {
                 // Negociação recusada: desfaz para o estado local não divergir do servidor.
-                ws.send(WsCommand.VoiceCamera(channelId, false))
+                ws.send(WsCommand.ScreenShareStop(channelId))
                 engine.stopCamera()
+                _state.update { it.copy(screenOn = false) }
                 throw e
             }
         }
@@ -210,29 +335,78 @@ class CallController(
 
     fun toggleScreen() = action {
         if (_state.value.screenOn) {
-            ws.send(WsCommand.ScreenShareStop(channelId))
-            engine.stopScreen()
-            negotiate()
-            _state.update { it.copy(screenOn = false) }
+            dropScreen()
         } else {
             if (!engine.startScreen()) return@action
+            // A tela toma o lugar da câmera (veja toggleCamera).
+            val replacingCamera = _state.value.cameraOn
+            if (replacingCamera) engine.stopCamera()
             try {
-                ws.send(WsCommand.ScreenShareStart(channelId))
+                if (!replacingCamera) ws.send(WsCommand.ScreenShareStart(channelId))
                 negotiate()
-                _state.update { it.copy(screenOn = true) }
+                _state.update { it.copy(screenOn = true, cameraOn = false) }
             } catch (e: Exception) {
                 ws.send(WsCommand.ScreenShareStop(channelId))
                 engine.stopScreen()
+                _state.update { it.copy(cameraOn = false) }
                 throw e
             }
         }
     }
 
-    fun toggleSpeaker() {
-        val on = !_state.value.speakerOn
-        engine.setSpeakerphone(on)
-        _state.update { it.copy(speakerOn = on) }
+    private suspend fun dropCamera() {
+        ws.send(WsCommand.ScreenShareStop(channelId))
+        engine.stopCamera()
+        negotiate()
+        _state.update { it.copy(cameraOn = false) }
     }
+
+    private suspend fun dropScreen() {
+        ws.send(WsCommand.ScreenShareStop(channelId))
+        engine.stopScreen()
+        negotiate()
+        _state.update { it.copy(screenOn = false) }
+    }
+
+    /**
+     * Uma captura que o sistema encerra por conta própria (a pessoa parou a transmissão pelo aviso do Android, o aparelho
+     * bloqueou a tela, outro app tomou a câmera) deixa o motor sem faixa. O estado e o servidor não podem seguir achando que a
+     * câmera ou a tela ainda saem: a publicação é desfeita como se a pessoa tivesse desligado. A ação confere o estado de novo,
+     * para uma chamada repetida (o estado muda várias vezes até ela começar) não rodar duas vezes; e mesmo que a renegociação
+     * falhe o estado local desliga, senão o aviso voltaria a disparar sem parar.
+     */
+    private fun stopEndedCapture(camera: VideoTrackHandle?, screen: VideoTrackHandle?, state: CallState) {
+        if (state.busy || state.phase == CallPhase.Ended) return
+        if (state.screenOn && screen == null) {
+            action {
+                if (_state.value.screenOn) {
+                    try {
+                        dropScreen()
+                    } finally {
+                        _state.update { it.copy(screenOn = false) }
+                    }
+                }
+            }
+        } else if (state.cameraOn && camera == null) {
+            action {
+                if (_state.value.cameraOn) {
+                    try {
+                        dropCamera()
+                    } finally {
+                        _state.update { it.copy(cameraOn = false) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Alterna entre o alto-falante e o fone do aparelho; sem as duas saídas não há o que alternar. */
+    fun toggleSpeaker() {
+        val target = toggleTarget(_state.value.outputs, _state.value.output) ?: return
+        engine.selectOutput(target.id)
+    }
+
+    fun selectOutput(id: String) = engine.selectOutput(id)
 
     fun leave() {
         scope.launch { finish(CallEnd.Left) }
@@ -268,17 +442,21 @@ class CallController(
             is WsEvent.VoiceStateUpdated -> if (event.channelId == channelId) {
                 val member = CallMember(event.userId, event.muted, event.cameraOn, event.screenSharing, event.screenAudio)
                 _state.update { it.copy(members = it.members + (event.userId to member)) }
-                reconcileVideo()
+                reconcileSubscriptions()
             }
             is WsEvent.VoiceLeft -> if (event.channelId == channelId) {
                 if (event.userId == myUserId) {
                     if (_state.value.phase != CallPhase.Joining) finish(CallEnd.Left)
                 } else {
                     _state.update { it.copy(members = it.members - event.userId, speakers = it.speakers - event.userId) }
-                    reconcileVideo()
+                    reconcileSubscriptions()
                 }
             }
             is WsEvent.ActiveSpeakers -> if (event.channelId == channelId) _state.update { it.copy(speakers = event.userIds.toSet()) }
+            is WsEvent.VoiceAudioRoutes -> if (event.channelId == channelId) {
+                val routes = event.routes.associate { it.trackId to AudioRoute(it.userId, it.kind) }
+                _state.update { it.copy(audioRoutes = routes) }
+            }
             is WsEvent.ServerError -> onServerError(event)
             else -> Unit
         }
@@ -291,10 +469,15 @@ class CallController(
         when (code) {
             "voice-forbidden" -> finish(CallEnd.Denied, error.message)
             "voice-room-closed" -> finish(CallEnd.RoomClosed, error.message)
-            "voice-room-full" -> if (joining) finish(CallEnd.Full, error.message)
+            "voice-room-full" -> if (joining) finish(CallEnd.Full, error.message) else refuseLastSubscription(code)
             "voice-already-in-room" -> if (joining) finish(CallEnd.Failed, error.message)
             // Fora da entrada, costuma ser corrida (ex.: assinar quem acabou de parar de transmitir).
-            "voice-not-found" -> if (joining) finish(CallEnd.Failed, error.message)
+            "voice-not-found" -> if (joining) finish(CallEnd.Failed, error.message) else refuseLastSubscription(code)
+            // Não mexe nas assinaturas: o servidor tem um limitador próprio para track_subscribe (checkSubscribe, 5/s com
+            // rajada 10, webrtc/manager.go:236,486,531) que o app não alcança (no máximo 6 vídeos e 2 áudios de tela). O que
+            // dispara na prática é o de sinalização (checkSignal: ICE, mute, câmera, tela), com o mesmo código e a mesma
+            // mensagem; ligá-lo à última assinatura derrubaria uma que está funcionando.
+            "voice-rate-limited" -> _state.update { it.copy(errorDetail = error.message) }
             "voice-invalid-sdp", "voice-codec-unsupported" -> {
                 answer?.completeExceptionally(IllegalStateException(error.message))
                 _state.update { it.copy(errorDetail = error.message) }
@@ -315,33 +498,110 @@ class CallController(
      * servidor coloca cada assinatura no primeiro slot livre; repetir a mesma
      * regra aqui diz em qual faixa o vídeo de cada um vai chegar.
      */
+    private suspend fun reconcileSubscriptions() = subscriptionLock.withLock {
+        if (!subscriptionsReady) return@withLock
+        reconcileVideo()
+        reconcileScreenAudio()
+    }
+
     private suspend fun reconcileVideo() {
-        if (!subscriptionsReady) return
         val wanted = LinkedHashSet<VideoKey>()
         for (member in _state.value.members.values) {
             if (member.userId == myUserId) continue
             if (member.screenSharing) wanted += VideoKey(member.userId, VideoKey.SCREEN)
             if (member.cameraOn) wanted += VideoKey(member.userId, VideoKey.CAMERA)
         }
+        // O servidor recusou e a pessoa ainda faz o mesmo: não insiste. Quando ela desliga, o aviso se apaga.
+        refused.keys.retainAll { it.kind == AudioRoute.SCREEN_AUDIO || VideoKey(it.userId, it.kind) in wanted }
         val current = _state.value.videoSlots.toMutableMap()
         for ((slot, key) in current.toMap()) {
             if (key !in wanted) {
-                ws.send(WsCommand.TrackUnsubscribe(channelId, key.userId, key.kind))
+                sendSubscription(Subscription(key.userId, key.kind), subscribe = false)
                 current.remove(slot)
             }
         }
         for (key in wanted) {
-            if (key in current.values) continue
+            if (key in current.values || Subscription(key.userId, key.kind) in refused) continue
             val free = (0 until slots.video).firstOrNull { it !in current } ?: break
-            if (ws.send(WsCommand.TrackSubscribe(channelId, key.userId, key.kind))) current[free] = key
+            if (sendSubscription(Subscription(key.userId, key.kind), subscribe = true)) current[free] = key
         }
         _state.update { it.copy(videoSlots = current) }
+    }
+
+    /**
+     * Assina o áudio das transmissões de tela de quem tem `screenAudio`, até `slots.screenAudio`. Quem já
+     * está assinado fica na frente (como no cliente web): uma transmissão nova não tira o lugar de outra.
+     * Cada mudança é um comando; a assinatura sai quando a flag cai ou a pessoa sai.
+     */
+    private suspend fun reconcileScreenAudio() {
+        val members = _state.value.members.values.filter { it.userId != myUserId && it.screenAudio }.map { it.userId }
+        val wanted = members.toSet()
+        refused.keys.retainAll { it.kind != AudioRoute.SCREEN_AUDIO || it.userId in wanted }
+        val subs = LinkedHashSet(_state.value.screenAudioSubs)
+        for (userId in subs.toList()) {
+            if (userId in wanted) continue
+            sendSubscription(Subscription(userId, AudioRoute.SCREEN_AUDIO), subscribe = false)
+            subs -= userId
+        }
+        for (userId in members) {
+            if (userId in subs || Subscription(userId, AudioRoute.SCREEN_AUDIO) in refused) continue
+            if (subs.size >= slots.screenAudio) break
+            if (sendSubscription(Subscription(userId, AudioRoute.SCREEN_AUDIO), subscribe = true)) subs += userId
+        }
+        publishScreenAudio(subs)
+    }
+
+    /**
+     * Guarda as assinaturas de áudio de tela e quem ficou de fora por falta de lugar: o limite local cheio ou o
+     * "sala cheia" do servidor. Outras recusas e pedidos que não saíram não viram o aviso de limite.
+     */
+    private fun publishScreenAudio(subs: Set<String>) = _state.update { state ->
+        val overflow = state.members.values
+            .filter { it.userId != myUserId && it.screenAudio && it.userId !in subs }
+            .filter { refused[Subscription(it.userId, AudioRoute.SCREEN_AUDIO)].let { code -> code == CODE_ROOM_FULL || (code == null && subs.size >= slots.screenAudio) } }
+            .map { it.userId }
+            .toSet()
+        state.copy(screenAudioSubs = subs, screenAudioOverflow = overflow)
+    }
+
+    private suspend fun sendSubscription(key: Subscription, subscribe: Boolean): Boolean {
+        val command = if (subscribe) {
+            WsCommand.TrackSubscribe(channelId, key.userId, key.kind)
+        } else {
+            WsCommand.TrackUnsubscribe(channelId, key.userId, key.kind)
+        }
+        if (!ws.send(command)) return false
+        recentSubscriptions.addLast(SentSubscription(key, subscribe, timeSource.markNow()))
+        if (recentSubscriptions.size > MAX_RECENT_SUBSCRIPTIONS) recentSubscriptions.removeFirst()
+        return true
+    }
+
+    /**
+     * O servidor recusou algo e o erro (`voice-room-full`, `voice-not-found`) só traz código e
+     * texto: não diz canal, pessoa nem tipo, e não há confirmação do que deu certo. A ligação é conservadora: o erro
+     * vale para o pedido de assinatura mais recente, desde que tenha saído há menos de [SUBSCRIPTION_ERROR_WINDOW]
+     * (o servidor atende em ordem, e uma recusa chega logo). Se esse pedido foi um cancelamento, ou nenhum é recente,
+     * o erro é de outra coisa (mute, candidato) e nada muda. A assinatura recusada sai do estado local e só volta se
+     * a pessoa desligar e ligar de novo (regra 15: nada é reenviado sozinho).
+     */
+    private suspend fun refuseLastSubscription(code: String) = subscriptionLock.withLock {
+        val last = recentSubscriptions.lastOrNull() ?: return@withLock
+        if (last.at.elapsedNow() > SUBSCRIPTION_ERROR_WINDOW) return@withLock
+        recentSubscriptions.removeLast()
+        if (!last.subscribe) return@withLock
+        refused[last.key] = code
+        if (last.key.kind == AudioRoute.SCREEN_AUDIO) {
+            publishScreenAudio(_state.value.screenAudioSubs - last.key.userId)
+        } else {
+            _state.update { state -> state.copy(videoSlots = state.videoSlots.filterValues { it != VideoKey(last.key.userId, last.key.kind) }) }
+        }
     }
 
     private suspend fun finish(end: CallEnd, detail: String? = null) {
         if (finished) return
         finished = true
-        _state.update { it.copy(phase = CallPhase.Ended, end = end, errorDetail = detail ?: it.errorDetail) }
+        // Sair segurando o botão de falar: o microfone fecha junto com o motor (abaixo) e o estado não fica "falando".
+        _state.update { it.copy(phase = CallPhase.Ended, end = end, errorDetail = detail ?: it.errorDetail, talking = false) }
         withContext(NonCancellable) {
             if (joinSent) runCatching { ws.send(WsCommand.VoiceLeave(channelId)) }
             runCatching { engine.close() }
@@ -349,8 +609,16 @@ class CallController(
         scope.cancel()
     }
 
+    /** Uma assinatura de vídeo (`video`, `screen`) ou de áudio de tela (`screen_audio`) de uma pessoa. */
+    private data class Subscription(val userId: String, val kind: String)
+
+    private class SentSubscription(val key: Subscription, val subscribe: Boolean, val at: TimeMark)
+
     private companion object {
         val JOIN_TIMEOUT = 10.seconds
         val ANSWER_TIMEOUT = 12.seconds
+        val SUBSCRIPTION_ERROR_WINDOW = 3.seconds
+        const val MAX_RECENT_SUBSCRIPTIONS = 16
+        const val CODE_ROOM_FULL = "voice-room-full"
     }
 }

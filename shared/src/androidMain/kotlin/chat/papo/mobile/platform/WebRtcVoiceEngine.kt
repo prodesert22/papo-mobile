@@ -5,12 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
-import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import chat.papo.mobile.voice.AudioOutput
 import chat.papo.mobile.voice.EngineConnection
 import chat.papo.mobile.voice.IceServer
 import chat.papo.mobile.voice.LocalCandidate
@@ -19,7 +19,11 @@ import chat.papo.mobile.voice.VideoTrackHandle
 import chat.papo.mobile.voice.VoiceEngine
 import chat.papo.mobile.voice.VoiceEngineFactory
 import chat.papo.mobile.voice.VoiceSlots
+import chat.papo.mobile.voice.answerTrackIds
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -38,6 +42,7 @@ import org.webrtc.MediaStream
 import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpParameters
 import org.webrtc.RtpReceiver
 import org.webrtc.RtpTransceiver
 import org.webrtc.ScreenCapturerAndroid
@@ -87,6 +92,11 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     private val _localScreen = MutableStateFlow<VideoTrackHandle?>(null)
     override val localScreen: StateFlow<VideoTrackHandle?> = _localScreen
 
+    // Dono dos ouvintes de saída de áudio: começam em startAudioSession e saem em stopAudioSession.
+    private val audioOutputs = AndroidAudioOutputs(context)
+    override val outputs: StateFlow<List<AudioOutput>> get() = audioOutputs.outputs
+    override val currentOutput: StateFlow<AudioOutput?> get() = audioOutputs.current
+
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var previousAudioMode = AudioManager.MODE_NORMAL
     private var focusRequest: AudioFocusRequest? = null
@@ -113,6 +123,10 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     private var serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
     private var remoteDescriptionSet = false
     private val queuedCandidates = ArrayList<IceCandidate>()
+    private val remoteAudio = RemoteAudio()
+    private val _headsetButton = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val headsetButton: Flow<Unit> = _headsetButton
+    private val headset = HeadsetButtons(context) { _headsetButton.tryEmit(Unit) }
     private var closed = false
 
     override suspend fun ensurePermission(permission: MediaPermission): Boolean {
@@ -131,8 +145,9 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     override suspend fun open(iceServers: List<IceServer>, slots: VoiceSlots, onCandidate: (LocalCandidate) -> Unit) {
         withContext(Dispatchers.Default) {
             WebRtcRuntime.initialize(context)
-            CallService.ensure(context, serviceTypes, "")
+            CallService.ensure(context, serviceTypes)
             startAudioSession()
+            headset.start()
 
             val adm = JavaAudioDeviceModule.builder(context)
                 .setUseHardwareAcousticEchoCanceler(true)
@@ -162,6 +177,10 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             val connection = created.createPeerConnection(config, Observer(onCandidate))
                 ?: error("não foi possível criar a conexão WebRTC")
             pc = connection
+            // O libwebrtc começa estimando ~300 kbps e sobe aos poucos: a câmera saía em 270x480 e levava uns 20 s para
+            // chegar a 720p (visto num Galaxy S23). Começar mais alto encurta isso; o servidor manda o retorno de
+            // congestionamento (TWCC), então numa rede que não aguenta a estimativa cai logo.
+            connection.setBitrate(MIN_BITRATE_BPS, START_BITRATE_BPS, null)
 
             // A ordem das m-lines é o contrato com o SFU: vídeo, microfones, áudio de transmissões.
             val recvOnly = RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
@@ -170,6 +189,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
                 connection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, recvOnly)
             }
             _remoteVideo.value = video.map { transceiver -> (transceiver.receiver.track() as? VideoTrack)?.let(::VideoTrackHandle) }
+            synchronized(remoteAudio) { remoteAudio.transceivers = audio }
 
             // O microfone ocupa a primeira m-line de áudio (vira sendrecv), como no cliente web.
             val constraints = MediaConstraints().apply {
@@ -199,6 +219,11 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
     override suspend fun applyAnswer(sdp: String) {
         val connection = pc ?: error("conexão fechada")
         awaitSet { connection.setRemoteDescription(it, SessionDescription(SessionDescription.Type.ANSWER, sdp)) }
+        // O servidor diz em cada m-line de áudio qual faixa (papo-audio-N) ele pôs nela; é por aí que o ganho acha o receptor.
+        synchronized(remoteAudio) {
+            remoteAudio.trackIdsByMid = answerTrackIds(sdp)
+            remoteAudio.applyAll()
+        }
         val queued = synchronized(queuedCandidates) {
             remoteDescriptionSet = true
             queuedCandidates.toList().also { queuedCandidates.clear() }
@@ -229,7 +254,24 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
                 ?: enumerator.deviceNames.firstOrNull()
                 ?: return@withContext false
             frontCamera = enumerator.isFrontFacing(name)
-            val capturer = enumerator.createCapturer(name, null)
+            // Câmera tomada por outro app ou que falhou: o controlador vê a faixa sumir e desfaz a publicação.
+            val capturer = enumerator.createCapturer(
+                name,
+                object : CameraVideoCapturer.CameraEventsHandler {
+                    override fun onCameraError(errorDescription: String?) {
+                        _localCamera.value = null
+                    }
+
+                    override fun onCameraDisconnected() {
+                        _localCamera.value = null
+                    }
+
+                    override fun onCameraFreezed(errorDescription: String?) = Unit
+                    override fun onCameraOpening(cameraName: String?) = Unit
+                    override fun onFirstFrameAvailable() = Unit
+                    override fun onCameraClosed() = Unit
+                },
+            )
             val helper = SurfaceTextureHelper.create("papo-camera", WebRtcRuntime.egl.eglBaseContext)
             val source = created.createVideoSource(false)
             capturer.initialize(helper, context, source.capturerObserver)
@@ -240,7 +282,11 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             cameraSource = source
             cameraTrack = track
             // Uma m-line guarda o papel dela (câmera) pela vida da conexão: reaproveita ao religar.
-            cameraTransceiver = publish(connection, cameraTransceiver, track, "papo-camera", maxBitrate = 1_800_000, maxFps = 30)
+            cameraTransceiver = publish(
+                connection, cameraTransceiver, track, "papo-camera", maxBitrate = 1_800_000, maxFps = 30,
+                // Rosto em movimento: com pouca banda vale perder um pouco de cada (o padrão do libwebrtc).
+                degradation = RtpParameters.DegradationPreference.BALANCED,
+            )
             _localCamera.value = VideoTrackHandle(track, mirrored = frontCamera)
             true
         } catch (e: Exception) {
@@ -295,7 +341,11 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
                 screenHelper = helper
                 screenSource = source
                 screenTrack = track
-                screenTransceiver = publish(connection, screenTransceiver, track, "papo-screen", maxBitrate = 2_500_000, maxFps = 15)
+                screenTransceiver = publish(
+                    connection, screenTransceiver, track, "papo-screen", maxBitrate = 2_500_000, maxFps = 15,
+                    // Tela tem texto: com pouca banda, menos quadros por segundo em vez de letras borradas.
+                    degradation = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION,
+                )
                 _localScreen.value = VideoTrackHandle(track)
                 true
             } catch (e: Exception) {
@@ -309,27 +359,25 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         unpublish(screenTransceiver)
         releaseScreen()
         serviceTypes = serviceTypes and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION.inv()
-        CallService.ensure(context, serviceTypes, "")
+        CallService.ensure(context, serviceTypes)
         Unit
     }
 
-    override fun setSpeakerphone(enabled: Boolean) {
-        if (Build.VERSION.SDK_INT >= 31) {
-            val wanted = if (enabled) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
-            val device = audioManager.availableCommunicationDevices.firstOrNull { it.type == wanted }
-            if (device != null) audioManager.setCommunicationDevice(device) else audioManager.clearCommunicationDevice()
-        } else {
-            @Suppress("DEPRECATION")
-            audioManager.isSpeakerphoneOn = enabled
-        }
+    override fun selectOutput(id: String) = audioOutputs.select(id)
+
+    override fun setRemoteAudioGain(trackId: String, gain: Double) {
+        synchronized(remoteAudio) { remoteAudio.setGain(trackId, gain) }
     }
 
     override fun close() {
         if (closed) return
         closed = true
         _connection.value = EngineConnection.Closed
+        headset.stop()
         releaseCamera()
         releaseScreen()
+        // Os receptores morrem com a conexão: nenhum ganho pode tocar neles depois daqui.
+        synchronized(remoteAudio) { remoteAudio.clear() }
         runCatching { pc?.dispose() }
         pc = null
         runCatching { audioSource?.dispose() }
@@ -348,6 +396,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         streamId: String,
         maxBitrate: Int,
         maxFps: Int,
+        degradation: RtpParameters.DegradationPreference,
     ): RtpTransceiver {
         val transceiver = existing?.also {
             it.sender.setTrack(track, false)
@@ -361,6 +410,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             it.maxBitrateBps = maxBitrate
             it.maxFramerate = maxFps
         }
+        parameters.degradationPreference = degradation
         transceiver.sender.parameters = parameters
         return transceiver
     }
@@ -375,7 +425,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
 
     private suspend fun promoteService(type: Int): Boolean {
         serviceTypes = serviceTypes or type
-        return CallService.ensure(context, serviceTypes, "")
+        return CallService.ensure(context, serviceTypes)
     }
 
     private fun releaseCamera() {
@@ -417,12 +467,12 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         focusRequest = request
         audioManager.requestAudioFocus(request)
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        setSpeakerphone(true)
+        audioOutputs.start()
     }
 
     private fun stopAudioSession() {
+        runCatching { audioOutputs.stop() }
         runCatching {
-            if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice()
             audioManager.mode = previousAudioMode
             focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         }
@@ -487,3 +537,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) = Unit
     }
 }
+
+/** Piso e início da estimativa de banda de envio (o teto fica com o libwebrtc e os limites de cada faixa). */
+private const val MIN_BITRATE_BPS = 150_000
+private const val START_BITRATE_BPS = 1_200_000
