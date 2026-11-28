@@ -224,6 +224,7 @@
     <string name="channels_reconnecting">Sem conexão em tempo real. Tentando reconectar…</string>
     <string name="channels_sync_failed">Não foi possível atualizar a lista.</string>
     <string name="channels_in_voice">%1$d na chamada</string>
+    <string name="channels_in_call_state">Você está nesta chamada</string>
     <string name="channels_open_chat">Abrir chat</string>
     <string name="channels_join_call">Entrar na chamada</string>
     <string name="channels_none_visible">Você não tem acesso a nenhum canal deste servidor.</string>

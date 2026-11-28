@@ -63,6 +63,7 @@ import chat.papo.mobile.ui.addserver.AddServerViewModel
 import chat.papo.mobile.ui.call.CallBar
 import chat.papo.mobile.ui.call.CallScreen
 import chat.papo.mobile.ui.call.PipOverlay
+import chat.papo.mobile.ui.call.joinedVoiceChannel
 import chat.papo.mobile.ui.chat.ChannelListPane
 import chat.papo.mobile.ui.chat.ChatScreen
 import chat.papo.mobile.ui.chat.ChatViewModel
@@ -369,6 +370,8 @@ private fun Unlocked(
                                         AudioBar(onOpen = { openChat(it.accountId, parkedChatOf(it)) })
                                         ChannelListPane(
                                             session = accountSession,
+                                            openId = panel.chats[account.id]?.channelId,
+                                            callChannelId = joinedVoiceChannel(session, account.id),
                                             onOpen = { channelId -> panel.open(account.id, ParkedChat(channelId)) },
                                             onJoinVoice = { channelId ->
                                                 session.calls.join(accountSession, channelId)

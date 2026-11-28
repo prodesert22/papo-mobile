@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -49,6 +51,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,6 +66,7 @@ import chat.papo.mobile.chat.DmNotificationSettings
 import chat.papo.mobile.chat.Dm
 import chat.papo.mobile.chat.Presence
 import chat.papo.mobile.chat.User
+import chat.papo.mobile.chat.RowPlace
 import chat.papo.mobile.chat.RowStyle
 import chat.papo.mobile.chat.canManageChannels
 import chat.papo.mobile.chat.conversationAccess
@@ -68,6 +74,7 @@ import chat.papo.mobile.chat.effective
 import chat.papo.mobile.chat.effectiveDm
 import chat.papo.mobile.chat.groupChannels
 import chat.papo.mobile.chat.renderMentions
+import chat.papo.mobile.chat.rowPlace
 import chat.papo.mobile.chat.rowStyle
 import chat.papo.mobile.chat.searchByName
 import chat.papo.mobile.chat.showsUnreadDot
@@ -78,6 +85,7 @@ import chat.papo.mobile.resources.action_close
 import chat.papo.mobile.resources.action_retry
 import chat.papo.mobile.resources.channels_direct
 import chat.papo.mobile.resources.channels_direct_empty
+import chat.papo.mobile.resources.channels_in_call_state
 import chat.papo.mobile.resources.channels_in_voice
 import chat.papo.mobile.resources.channels_new_dm
 import chat.papo.mobile.resources.channels_new_dm_button
@@ -111,6 +119,10 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun ChannelListPane(
     session: AccountSession,
+    /** A conversa que o painel mostra nesta conta (aberta ou à espera fora da tela): a linha dela fica marcada. */
+    openId: String?,
+    /** O canal de voz em que esta conta está numa chamada: a linha dele ganha o verde da faixa de chamada. */
+    callChannelId: String?,
     onOpen: (channelId: String) -> Unit,
     onJoinVoice: (channelId: String) -> Unit,
     /** Abre as configurações do canal (nome e descrição). Só se oferece a quem tem `manage_channels` ([canManageChannels]). */
@@ -191,6 +203,7 @@ fun ChannelListPane(
                             channel,
                             voice[channel.id].orEmpty().size,
                             style,
+                            rowPlace(channel.id, openId, callChannelId),
                             onOpenChat = if (chatButton) ({ onOpen(channel.id) }) else null,
                             onLongClick = { sheetChannel = channel },
                         ) {
@@ -214,7 +227,11 @@ fun ChannelListPane(
                     items(dms, key = { "dm-" + it.id }) { dm ->
                         val muted = !showsUnreadDot(effectiveDm(serverSettings, dmSettings[dm.id] ?: DmNotificationSettings(), Clock.System.now()))
                         val style = rowStyle(dm.unreadCount > 0, mentions.perDm[dm.id] ?: 0, capped = false, muted = muted)
-                        DmRow(session, dm, users[dm.userId], presence[dm.userId], users, style, onLongClick = { sheetDm = dm }) { onOpen(dm.id) }
+                        DmRow(
+                            session, dm, users[dm.userId], presence[dm.userId], users, style,
+                            place = rowPlace(dm.id, openId, callId = null),
+                            onLongClick = { sheetDm = dm },
+                        ) { onOpen(dm.id) }
                     }
                 }
             }
@@ -372,33 +389,69 @@ private fun SectionHeader(title: String, action: @Composable () -> Unit = {}) {
     }
 }
 
-/** A cor do nome e do ícone de uma linha: destaque, comum ou esmaecida, como diz [RowStyle]. */
+/**
+ * A cor do nome e do ícone de uma linha: destaque, comum ou esmaecida, como diz [RowStyle]. Onde a pessoa está
+ * ([RowPlace]) o nome sai na cor de texto mais forte, sem o negrito do destaque de mensagem nova.
+ */
 @Composable
-private fun rowColor(style: RowStyle) = when {
+private fun rowColor(style: RowStyle, place: RowPlace) = when {
     style.emphasized -> LocalPapoColors.current.unreadName
+    place != RowPlace.None -> MaterialTheme.colorScheme.onSurface
     else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/** O peso do nome: negrito com mensagem nova, médio onde a pessoa está, comum no resto. */
+private fun rowWeight(style: RowStyle, place: RowPlace) = when {
+    style.emphasized -> FontWeight.SemiBold
+    place != RowPlace.None -> FontWeight.Medium
+    else -> FontWeight.Normal
 }
 
 /** A opacidade do que esmaece numa conversa silenciada. */
 private const val DIMMED_ALPHA = 0.45f
 
+/** O fundo da conversa aberta: a cor do texto bem clara, que aparece sobre qualquer fundo de tema. */
+private const val OPEN_ALPHA = 0.1f
+
+/** O fundo do canal da chamada: o mesmo verde translúcido da faixa de chamada no topo da lista ([chat.papo.mobile.ui.call.CallBar]). */
+private const val IN_CALL_ALPHA = 0.18f
+
+/** A forma do fundo de uma linha, recuada das bordas, que também limita a ondulação do toque. */
+private val RowShape = RoundedCornerShape(10.dp)
+
+/** O recuo da linha até a borda da lista; somado ao de dentro dá os 16 dp das outras linhas da tela. */
+private val RowInset = 8.dp
+
+/**
+ * A moldura de uma linha da lista: recuada das bordas, com o fundo de onde a pessoa está ([RowPlace]) e o toque
+ * ([onClick], [onLongClick]) dentro dela; [padding] é o recuo do conteúdo. O leitor de tela ouve "selecionado" na
+ * conversa aberta e que a pessoa está na chamada no canal dela.
+ */
 @Composable
-private fun ChannelRow(
-    channel: Channel,
-    inVoice: Int,
-    style: RowStyle,
-    onOpenChat: (() -> Unit)?,
-    onLongClick: () -> Unit,
+private fun ListRow(
+    place: RowPlace,
+    padding: PaddingValues,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    content: @Composable RowScope.() -> Unit,
 ) {
-    val accent = LocalPapoColors.current.accent
     val haptics = LocalHapticFeedback.current
-    val emphasis = rowColor(style)
-    // Com o botão de chat no fim a linha ganha a altura dele, então o recuo de cima e de baixo sai.
-    val hasChatButton = onOpenChat != null
+    val inCall = stringResource(Res.string.channels_in_call_state)
+    val ground = when (place) {
+        RowPlace.None -> Color.Transparent
+        RowPlace.Open -> MaterialTheme.colorScheme.onSurface.copy(alpha = OPEN_ALPHA)
+        RowPlace.InCall -> LocalPapoColors.current.online.copy(alpha = IN_CALL_ALPHA)
+    }
     Row(
         Modifier
             .fillMaxWidth()
+            .padding(horizontal = RowInset, vertical = 1.dp)
+            .clip(RowShape)
+            .background(ground)
+            .semantics {
+                selected = place == RowPlace.Open
+                if (place == RowPlace.InCall) stateDescription = inCall
+            }
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = {
@@ -406,13 +459,42 @@ private fun ChannelRow(
                     onLongClick()
                 },
             )
-            .padding(start = 16.dp, end = if (hasChatButton) 4.dp else 16.dp)
-            .padding(vertical = if (hasChatButton) 0.dp else 9.dp),
+            .padding(padding),
         verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+@Composable
+private fun ChannelRow(
+    channel: Channel,
+    inVoice: Int,
+    style: RowStyle,
+    place: RowPlace,
+    onOpenChat: (() -> Unit)?,
+    onLongClick: () -> Unit,
+    onClick: () -> Unit,
+) {
+    val accent = LocalPapoColors.current.accent
+    val emphasis = rowColor(style, place)
+    // Com o botão de chat no fim a linha ganha a altura dele, então o recuo de cima e de baixo sai.
+    val hasChatButton = onOpenChat != null
+    val vertical = if (hasChatButton) 0.dp else 9.dp
+    ListRow(
+        place,
+        PaddingValues(start = 16.dp - RowInset, end = if (hasChatButton) 0.dp else 16.dp - RowInset, top = vertical, bottom = vertical),
+        onClick,
+        onLongClick,
     ) {
         Row(Modifier.weight(1f).alpha(if (style.dimmed) DIMMED_ALPHA else 1f), verticalAlignment = Alignment.CenterVertically) {
+            // Na chamada o alto-falante vira o telefone da faixa de chamada, na cor do nome como lá: o verde fica no fundo,
+            // e a forma diz o mesmo a quem não distingue a cor. Verde sobre verde quase some no tema claro.
             Icon(
-                if (channel.type == ChannelType.Voice) Icons.AutoMirrored.Filled.VolumeUp else Icons.Filled.Tag,
+                when {
+                    place == RowPlace.InCall -> Icons.Filled.PhoneInTalk
+                    channel.type == ChannelType.Voice -> Icons.AutoMirrored.Filled.VolumeUp
+                    else -> Icons.Filled.Tag
+                },
                 contentDescription = null,
                 tint = emphasis,
                 modifier = Modifier.size(20.dp),
@@ -422,7 +504,7 @@ private fun ChannelRow(
                 Text(
                     channel.name,
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (style.emphasized) FontWeight.SemiBold else FontWeight.Normal,
+                    fontWeight = rowWeight(style, place),
                     color = emphasis,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -455,23 +537,11 @@ private fun DmRow(
     presence: Presence?,
     users: Map<String, User>,
     style: RowStyle,
+    place: RowPlace,
     onLongClick: () -> Unit,
     onClick: () -> Unit,
 ) {
-    val haptics = LocalHapticFeedback.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onLongClick()
-                },
-            )
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    ListRow(place, PaddingValues(horizontal = 16.dp - RowInset, vertical = 8.dp), onClick, onLongClick) {
         Row(Modifier.weight(1f).alpha(if (style.dimmed) DIMMED_ALPHA else 1f), verticalAlignment = Alignment.CenterVertically) {
             Box {
                 UserAvatar(session, user, size = 40.dp)
@@ -482,8 +552,8 @@ private fun DmRow(
                 Text(
                     user?.displayName ?: "?",
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (style.emphasized) FontWeight.SemiBold else FontWeight.Normal,
-                    color = rowColor(style),
+                    fontWeight = rowWeight(style, place),
+                    color = rowColor(style, place),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

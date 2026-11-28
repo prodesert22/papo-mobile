@@ -79,6 +79,9 @@ release notes in [releases/](../releases/) describe each version's changes.
   its mention count; without direct conversations, a button in the middle
   starts one. Hold a direct conversation to close it: it leaves the list and
   keeps its history, and a new message or starting it again brings it back.
+- The channel list marks where you are: the conversation open in the panel,
+  channel or direct conversation, has a gray background, and the voice channel
+  of your call has the green of the call bar and a phone icon.
 - Tap the description under a channel's name to read it in full. People
   allowed to manage channels can rename a channel and change its
   description, from the conversation menu, from the description or by
@@ -206,7 +209,8 @@ release notes in [releases/](../releases/) describe each version's changes.
   headset's play/pause button mutes and unmutes, even with the app in the
   background.
 - Voice channels have their own chat, which you can open from the channel list
-  or during the call.
+  or during the call. In the list, the channel of your call stays green with a
+  phone icon until you leave it.
 - A call continues when you leave the app. A floating window shows someone's
   shared screen, the camera of whoever is talking or their picture, with
   buttons to mute and hang up; it opens when you leave from the call screen,

@@ -80,6 +80,9 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   com a sua contagem de menções; sem conversas diretas, um botão no meio
   começa uma. Segure uma conversa direta para fechá-la: ela sai da lista e
   guarda o histórico, e uma mensagem nova ou começá-la de novo a traz de volta.
+- A lista de canais marca onde você está: a conversa aberta no painel, canal ou
+  conversa direta, fica com fundo cinza, e o canal de voz da sua chamada fica
+  com o verde da faixa de chamada e um ícone de telefone.
 - Toque na descrição abaixo do nome de um canal para lê-la inteira. Quem pode
   gerenciar canais muda o nome e a descrição de um canal pelo menu da
   conversa, pela descrição ou segurando o canal na lista; ninguém mais vê a
@@ -206,7 +209,8 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   tocar/pausar do fone liga e desliga o microfone, mesmo com o app em segundo
   plano.
 - Os canais de voz têm chat próprio, que abre pela lista de canais ou durante a
-  chamada.
+  chamada. Na lista, o canal da sua chamada fica verde, com um ícone de
+  telefone, até você sair dela.
 - A chamada continua quando você sai do app. Uma janela flutuante mostra a tela
   que alguém transmite, a câmera de quem está falando ou a foto da pessoa, com
   botões para silenciar e desligar; ela abre quando você sai pela tela da
