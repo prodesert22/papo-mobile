@@ -23,9 +23,17 @@
   can take up to about a second to hear you.
 - The headset's play/pause button mutes and unmutes the microphone, even with
   the app in the background.
+- In landscape the tiles fit the screen without scrolling, and the header and
+  buttons stay hidden: swipe up to show them and down to hide them; they hide
+  again after a few seconds.
+- Your camera and your screen are shared one at a time: turning one on turns
+  the other off. Someone else's camera or screen shows as "Transmissão de"
+  followed by their name.
 
 ## Fixes
 
+- Your camera now shows in the web and terminal clients, not only in the app:
+  it goes out the same way as a shared screen.
 - When Android stops your screen sharing (from its own notice, or when the
   phone locks) or another app takes the camera, the call now stops sending it,
   instead of the app and the server still treating it as on.

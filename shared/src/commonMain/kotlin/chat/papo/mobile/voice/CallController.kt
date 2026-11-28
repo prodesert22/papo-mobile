@@ -303,20 +303,29 @@ class CallController(
 
     private val CallState.live: Boolean get() = phase == CallPhase.Connected || phase == CallPhase.Reconnecting
 
+    /*
+     * A câmera sai pelo mesmo caminho da transmissão de tela (`screen_share_start` e o papel de tela no servidor), não como
+     * `voice_camera`: o cliente web e o TUI só mostram transmissões de tela, e assim todos veem a câmera. Como o servidor
+     * aceita uma transmissão por pessoa, câmera e tela se revezam: ligar uma desliga a outra na mesma oferta, com a
+     * intenção de transmitir já anunciada (a m-line antiga fica inativa e a nova assume o papel de tela).
+     */
     fun toggleCamera() = action {
         if (_state.value.cameraOn) {
             dropCamera()
         } else {
             if (!engine.ensurePermission(MediaPermission.Camera) || !engine.startCamera()) return@action
+            val replacingScreen = _state.value.screenOn
+            if (replacingScreen) engine.stopScreen()
             try {
                 // O servidor decide o papel da nova m-line pela intenção recebida antes da oferta.
-                ws.send(WsCommand.VoiceCamera(channelId, true))
+                if (!replacingScreen) ws.send(WsCommand.ScreenShareStart(channelId))
                 negotiate()
-                _state.update { it.copy(cameraOn = true) }
+                _state.update { it.copy(cameraOn = true, screenOn = false) }
             } catch (e: Exception) {
                 // Negociação recusada: desfaz para o estado local não divergir do servidor.
-                ws.send(WsCommand.VoiceCamera(channelId, false))
+                ws.send(WsCommand.ScreenShareStop(channelId))
                 engine.stopCamera()
+                _state.update { it.copy(screenOn = false) }
                 throw e
             }
         }
@@ -329,20 +338,24 @@ class CallController(
             dropScreen()
         } else {
             if (!engine.startScreen()) return@action
+            // A tela toma o lugar da câmera (veja toggleCamera).
+            val replacingCamera = _state.value.cameraOn
+            if (replacingCamera) engine.stopCamera()
             try {
-                ws.send(WsCommand.ScreenShareStart(channelId))
+                if (!replacingCamera) ws.send(WsCommand.ScreenShareStart(channelId))
                 negotiate()
-                _state.update { it.copy(screenOn = true) }
+                _state.update { it.copy(screenOn = true, cameraOn = false) }
             } catch (e: Exception) {
                 ws.send(WsCommand.ScreenShareStop(channelId))
                 engine.stopScreen()
+                _state.update { it.copy(cameraOn = false) }
                 throw e
             }
         }
     }
 
     private suspend fun dropCamera() {
-        ws.send(WsCommand.VoiceCamera(channelId, false))
+        ws.send(WsCommand.ScreenShareStop(channelId))
         engine.stopCamera()
         negotiate()
         _state.update { it.copy(cameraOn = false) }

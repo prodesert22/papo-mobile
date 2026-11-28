@@ -436,7 +436,7 @@
     <string name="call_reconnecting">Conexão instável. Reconectando…</string>
     <string name="call_alone">Só você por aqui por enquanto.</string>
     <string name="call_you">Você</string>
-    <string name="call_screen_of">Tela de %1$s</string>
+    <string name="call_screen_of">Transmissão de %1$s</string>
     <string name="call_your_screen">Sua tela está sendo transmitida</string>
     <string name="call_mute">Desligar microfone</string>
     <string name="call_unmute">Ligar microfone</string>

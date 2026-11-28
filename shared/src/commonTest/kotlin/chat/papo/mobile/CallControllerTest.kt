@@ -192,7 +192,7 @@ class CallControllerTest {
     }
 
     @Test
-    fun cameraAnunciaAIntencaoAntesDaOfertaERenegocia() = runTest {
+    fun cameraAnunciaATransmissaoAntesDaOfertaERenegocia() = runTest {
         val f = Fixture(this)
         f.call.start()
         advanceTimeBy(1.seconds)
@@ -200,19 +200,20 @@ class CallControllerTest {
 
         f.call.toggleCamera()
         advanceTimeBy(1.seconds)
-        assertEquals<List<WsCommand>>(listOf(WsCommand.VoiceCamera("v1", true), WsCommand.VoiceOffer("v1", "offer-2")), f.signal.sent)
+        // A câmera vai como transmissão de tela, para o web e o TUI a mostrarem.
+        assertEquals<List<WsCommand>>(listOf(WsCommand.ScreenShareStart("v1"), WsCommand.VoiceOffer("v1", "offer-2")), f.signal.sent)
         assertTrue(f.call.state.value.cameraOn)
 
         f.signal.sent.clear()
         f.call.toggleCamera()
         advanceTimeBy(1.seconds)
-        assertEquals<List<WsCommand>>(listOf(WsCommand.VoiceCamera("v1", false), WsCommand.VoiceOffer("v1", "offer-3")), f.signal.sent)
+        assertEquals<List<WsCommand>>(listOf(WsCommand.ScreenShareStop("v1"), WsCommand.VoiceOffer("v1", "offer-3")), f.signal.sent)
         assertEquals("camera:stop", f.engine.log[f.engine.log.indexOf("offer-3") - 1])
         assertFalse(f.call.state.value.cameraOn)
     }
 
     @Test
-    fun cameraETelaVaoEmOfertasSeparadas() = runTest {
+    fun telaTomaOLugarDaCameraNumaOfertaSo() = runTest {
         val f = Fixture(this)
         f.call.start()
         advanceTimeBy(1.seconds)
@@ -222,8 +223,35 @@ class CallControllerTest {
         advanceTimeBy(1.seconds)
         f.call.toggleScreen()
         advanceTimeBy(1.seconds)
-        assertEquals(listOf("VoiceCamera", "VoiceOffer", "ScreenShareStart", "VoiceOffer"), f.signal.kinds)
-        assertTrue(f.call.state.value.cameraOn && f.call.state.value.screenOn)
+        // A transmissão já estava anunciada: a troca vai numa oferta, com a câmera parada antes dela.
+        assertEquals(listOf("ScreenShareStart", "VoiceOffer", "VoiceOffer"), f.signal.kinds)
+        assertEquals("camera:stop", f.engine.log[f.engine.log.indexOf("offer-3") - 1])
+        assertFalse(f.call.state.value.cameraOn)
+        assertTrue(f.call.state.value.screenOn)
+    }
+
+    @Test
+    fun cameraTomaOLugarDaTelaNumaOfertaSo() = runTest {
+        val f = Fixture(this)
+        f.call.start()
+        advanceTimeBy(1.seconds)
+        f.signal.sent.clear()
+
+        f.call.toggleScreen()
+        advanceTimeBy(1.seconds)
+        f.call.toggleCamera()
+        advanceTimeBy(1.seconds)
+        assertEquals(listOf("ScreenShareStart", "VoiceOffer", "VoiceOffer"), f.signal.kinds)
+        assertEquals("screen:stop", f.engine.log[f.engine.log.indexOf("offer-3") - 1])
+        assertTrue(f.call.state.value.cameraOn)
+        assertFalse(f.call.state.value.screenOn)
+
+        // Desligar a câmera encerra a transmissão.
+        f.signal.sent.clear()
+        f.call.toggleCamera()
+        advanceTimeBy(1.seconds)
+        assertEquals(listOf("ScreenShareStop", "VoiceOffer"), f.signal.kinds)
+        assertFalse(f.call.state.value.cameraOn || f.call.state.value.screenOn)
     }
 
     @Test
@@ -236,8 +264,8 @@ class CallControllerTest {
 
         f.call.toggleCamera()
         advanceTimeBy(1.seconds)
-        assertEquals(listOf("VoiceCamera", "VoiceOffer", "VoiceCamera"), f.signal.kinds)
-        assertEquals(WsCommand.VoiceCamera("v1", false), f.signal.sent.last())
+        assertEquals(listOf("ScreenShareStart", "VoiceOffer", "ScreenShareStop"), f.signal.kinds)
+        assertEquals(WsCommand.ScreenShareStop("v1"), f.signal.sent.last())
         assertEquals("camera:stop", f.engine.log.last())
         assertFalse(f.call.state.value.cameraOn)
         assertEquals(CallPhase.Connected, f.call.state.value.phase)
@@ -1018,28 +1046,27 @@ class CallControllerTest {
         f.engine.localCamera.value = null
         advanceTimeBy(1.seconds)
 
-        assertEquals(listOf("VoiceCamera", "VoiceOffer"), f.signal.kinds)
-        assertEquals(WsCommand.VoiceCamera("v1", false), f.signal.sent.first())
+        assertEquals(listOf("ScreenShareStop", "VoiceOffer"), f.signal.kinds)
+        assertEquals(WsCommand.ScreenShareStop("v1"), f.signal.sent.first())
         assertFalse(f.call.state.value.cameraOn)
     }
 
     @Test
-    fun cameraETelaEncerradasJuntasSaemUmaDeCadaVez() = runTest {
+    fun trocaDeTelaParaCameraNaoDisparaOAvisoDeCapturaEncerrada() = runTest {
         val f = Fixture(this)
         f.call.start()
-        advanceTimeBy(1.seconds)
-        f.call.toggleCamera()
         advanceTimeBy(1.seconds)
         f.call.toggleScreen()
         advanceTimeBy(1.seconds)
         f.signal.sent.clear()
 
-        f.engine.localCamera.value = null
-        f.engine.localScreen.value = null
-        advanceTimeBy(1.seconds)
+        // Durante a troca a tela fica sem faixa antes de o estado mudar: isso não pode ser lido como captura encerrada.
+        f.call.toggleCamera()
+        advanceTimeBy(5.seconds)
 
-        assertEquals(listOf("ScreenShareStop", "VoiceOffer", "VoiceCamera", "VoiceOffer"), f.signal.kinds)
-        assertFalse(f.call.state.value.cameraOn || f.call.state.value.screenOn)
+        assertEquals(listOf("VoiceOffer"), f.signal.kinds)
+        assertTrue(f.call.state.value.cameraOn)
+        assertFalse(f.call.state.value.screenOn)
     }
 
     @Test

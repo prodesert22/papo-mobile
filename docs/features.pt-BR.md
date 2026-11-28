@@ -193,8 +193,12 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   ou USB, ou fone Bluetooth no Android 12 ou mais novo. Um fone que conecta
   assume; quando o que está em uso some, a chamada passa para o fone do
   aparelho.
-- Transmita sua câmera ou sua tela e veja as que os outros transmitem. O som de
-  uma tela transmitida por outro cliente também toca, até duas ao mesmo tempo.
+- Transmita sua câmera ou sua tela, uma de cada vez, e veja as que os outros
+  transmitem. A câmera sai do mesmo jeito que uma tela transmitida, então os
+  clientes web e de terminal também a mostram; ligar uma desliga a outra. O som
+  de uma tela transmitida por outro cliente também toca, até duas ao mesmo tempo.
+- Na horizontal os quadros cabem na tela sem rolagem, e o cabeçalho e os botões
+  ficam escondidos: puxe para cima para mostrá-los e para baixo para escondê-los.
 - Ajuste o volume de cada pessoa e da tela que ela transmite, de 0 a 200 %, ou
   silencie alguém só para você: toque num quadro sem vídeo ou segure qualquer
   quadro. O celular guarda isso por conta e o servidor não fica sabendo.
@@ -289,7 +293,9 @@ versão, em [releases/](../releases/) (em inglês), descrevem o que mudou nela.
   no Android 12 ou mais novo. Com o apertar para falar, os outros podem levar
   até cerca de um segundo para ouvir você, porque o servidor atualiza quem é
   ouvido uma vez por segundo. Só há chamadas em canais de voz: o servidor não
-  tem chamadas em conversas diretas.
+  tem chamadas em conversas diretas. Sua câmera e sua tela não podem ser
+  transmitidas ao mesmo tempo, e os outros veem a sua câmera como uma tela
+  transmitida.
 - Emojis em APNG mostram só o primeiro quadro, e os GIFs ficam parados quando o
   celular está com as animações removidas.
 - Vídeos e áudios pausam quando você sai do app e não continuam em segundo plano.
