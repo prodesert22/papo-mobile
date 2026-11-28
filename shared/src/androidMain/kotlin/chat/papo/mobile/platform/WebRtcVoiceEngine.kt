@@ -42,6 +42,7 @@ import org.webrtc.MediaStream
 import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpParameters
 import org.webrtc.RtpReceiver
 import org.webrtc.RtpTransceiver
 import org.webrtc.ScreenCapturerAndroid
@@ -176,6 +177,10 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             val connection = created.createPeerConnection(config, Observer(onCandidate))
                 ?: error("não foi possível criar a conexão WebRTC")
             pc = connection
+            // O libwebrtc começa estimando ~300 kbps e sobe aos poucos: a câmera saía em 270x480 e levava uns 20 s para
+            // chegar a 720p (visto num Galaxy S23). Começar mais alto encurta isso; o servidor manda o retorno de
+            // congestionamento (TWCC), então numa rede que não aguenta a estimativa cai logo.
+            connection.setBitrate(MIN_BITRATE_BPS, START_BITRATE_BPS, null)
 
             // A ordem das m-lines é o contrato com o SFU: vídeo, microfones, áudio de transmissões.
             val recvOnly = RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
@@ -277,7 +282,11 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             cameraSource = source
             cameraTrack = track
             // Uma m-line guarda o papel dela (câmera) pela vida da conexão: reaproveita ao religar.
-            cameraTransceiver = publish(connection, cameraTransceiver, track, "papo-camera", maxBitrate = 1_800_000, maxFps = 30)
+            cameraTransceiver = publish(
+                connection, cameraTransceiver, track, "papo-camera", maxBitrate = 1_800_000, maxFps = 30,
+                // Rosto em movimento: com pouca banda vale perder um pouco de cada (o padrão do libwebrtc).
+                degradation = RtpParameters.DegradationPreference.BALANCED,
+            )
             _localCamera.value = VideoTrackHandle(track, mirrored = frontCamera)
             true
         } catch (e: Exception) {
@@ -332,7 +341,11 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
                 screenHelper = helper
                 screenSource = source
                 screenTrack = track
-                screenTransceiver = publish(connection, screenTransceiver, track, "papo-screen", maxBitrate = 2_500_000, maxFps = 15)
+                screenTransceiver = publish(
+                    connection, screenTransceiver, track, "papo-screen", maxBitrate = 2_500_000, maxFps = 15,
+                    // Tela tem texto: com pouca banda, menos quadros por segundo em vez de letras borradas.
+                    degradation = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION,
+                )
                 _localScreen.value = VideoTrackHandle(track)
                 true
             } catch (e: Exception) {
@@ -383,6 +396,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         streamId: String,
         maxBitrate: Int,
         maxFps: Int,
+        degradation: RtpParameters.DegradationPreference,
     ): RtpTransceiver {
         val transceiver = existing?.also {
             it.sender.setTrack(track, false)
@@ -396,6 +410,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
             it.maxBitrateBps = maxBitrate
             it.maxFramerate = maxFps
         }
+        parameters.degradationPreference = degradation
         transceiver.sender.parameters = parameters
         return transceiver
     }
@@ -522,3 +537,7 @@ class WebRtcVoiceEngine(private val context: Context, private val requests: Acti
         override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) = Unit
     }
 }
+
+/** Piso e início da estimativa de banda de envio (o teto fica com o libwebrtc e os limites de cada faixa). */
+private const val MIN_BITRATE_BPS = 150_000
+private const val START_BITRATE_BPS = 1_200_000
