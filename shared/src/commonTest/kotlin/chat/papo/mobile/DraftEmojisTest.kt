@@ -165,4 +165,12 @@ class DraftEmojisTest {
         assertEquals("oi tudo", state.text.toString())
         assertEquals(TextRange(7), state.selection)
     }
+
+    @Test
+    fun shownOffsetDescontaOsEmojisAntesDaPosicao() {
+        val text = "a :ok: @joao"
+        assertEquals(2, emojis.shownOffset(text, 2))
+        assertEquals(2 + slot.length + 1, emojis.shownOffset(text, 7))
+        assertEquals(2 + slot.length + 6, emojis.shownOffset(text, text.length))
+    }
 }

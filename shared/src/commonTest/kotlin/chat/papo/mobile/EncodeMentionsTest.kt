@@ -2,6 +2,9 @@ package chat.papo.mobile
 
 import chat.papo.mobile.chat.User
 import chat.papo.mobile.chat.encodeMentions
+import chat.papo.mobile.chat.DraftMention
+import chat.papo.mobile.chat.findEveryone
+import chat.papo.mobile.chat.findMentions
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -209,5 +212,65 @@ class EncodeMentionsTest {
     fun nomeQueSoComecaComEveryoneContinuaSendoUmNomeComum() {
         val who = users + user("0b0e7c1e-0000-4000-8000-0000000000ef", "everyone.silva")
         assertEquals(mention("0b0e7c1e-0000-4000-8000-0000000000ef"), encode("@everyone.silva", who = who))
+    }
+
+    // Username com espaço
+
+    private val yog = "0b0e7c1e-0000-4000-8000-00000000000d"
+    private val yogUser = "0b0e7c1e-0000-4000-8000-00000000000e"
+
+    @Test
+    fun usernameComEspacoEscolhidoNaListaViraMencaoInteira() {
+        val who = users + user(yog, "yog Sothoth")
+        assertEquals("oi ${mention(yog)} tudo bem?", encode("oi @yog Sothoth tudo bem?", picked = mapOf("yog Sothoth" to yog), who = who))
+    }
+
+    @Test
+    fun usernameComEspacoDigitadoAMaoViraMencaoSemDiferenciarMaiusculas() {
+        val who = users + user(yog, "yog Sothoth")
+        assertEquals("${mention(yog)}, oi", encode("@yog Sothoth, oi", who = who))
+        assertEquals("${mention(yog)}.", encode("@YOG sothoth.", who = who))
+        assertEquals(mention(yog), encode("@yog Sothoth", who = who))
+    }
+
+    @Test
+    fun usernameComEspacoGanhaDoUsernameQueEComecoDele() {
+        val who = users + user(yogUser, "yog") + user(yog, "yog Sothoth")
+        assertEquals("${mention(yog)} e ${mention(yogUser)} sozinho", encode("@yog Sothoth e @yog sozinho", who = who))
+    }
+
+    @Test
+    fun usernameComEspacoSoValeQuandoONomeAcabaAli() {
+        val who = users + user(yogUser, "yog") + user(yog, "yog Sothoth")
+        // "Sothothx" não é o nome: fica a menção do "yog".
+        assertEquals("${mention(yogUser)} Sothothx", encode("@yog Sothothx", who = who))
+        assertEquals("@yog Soth", encode("@yog Soth", who = listOf(user(yog, "yog Sothoth"))))
+    }
+
+    @Test
+    fun usernameComEspacoDentroDeCodigoOuDepoisDeLetraFicaComoTexto() {
+        val who = users + user(yog, "yog Sothoth")
+        assertEquals("`@yog Sothoth` a@yog Sothoth", encode("`@yog Sothoth` a@yog Sothoth", who = who))
+    }
+
+    // O que o compositor destaca
+
+    @Test
+    fun findMentionsAchaOQueEncodeMentionsTroca() {
+        val who = users + user(yog, "yog Sothoth")
+        val text = "oi @joao e @yog Sothoth, `@bia` e @maria"
+        assertEquals(
+            listOf(DraftMention(3, 8, joao), DraftMention(11, 23, yog)),
+            findMentions(text, emptyMap(), who),
+        )
+        assertEquals(listOf(DraftMention(0, 5, bia)), findMentions("@joao!", mapOf("joao" to bia), listOf(user(joao, "Joao"), user(bia, "joao"))))
+        assertEquals(emptyList(), findMentions("sem menção", emptyMap(), who))
+    }
+
+    @Test
+    fun findEveryoneAchaOAvisoATodosForaDeCodigo() {
+        assertEquals(listOf(0 until 9, 13 until 22), findEveryone("@everyone e a@everyone"))
+        assertEquals(listOf(28 until 37), findEveryone("oi `@everyone` x @everyones @everyone."))
+        assertEquals(emptyList(), findEveryone("@everyones e `@everyone`"))
     }
 }

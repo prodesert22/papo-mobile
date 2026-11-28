@@ -101,7 +101,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -112,6 +114,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.NavigationEventInfo
@@ -141,12 +145,15 @@ import chat.papo.mobile.chat.authorsByRecency
 import chat.papo.mobile.chat.completeMention
 import chat.papo.mobile.chat.continuesGroup
 import chat.papo.mobile.chat.filterPinned
+import chat.papo.mobile.chat.findEveryone
+import chat.papo.mobile.chat.findMentions
 import chat.papo.mobile.chat.isHighlightedFor
 import chat.papo.mobile.chat.mentionQueryAt
 import chat.papo.mobile.chat.newArrivals
 import chat.papo.mobile.chat.offersEveryone
 import chat.papo.mobile.chat.renderMentions
 import chat.papo.mobile.chat.suggestMentions
+import chat.papo.mobile.ui.theme.LocalPapoColors
 import chat.papo.mobile.core.dayKey
 import chat.papo.mobile.core.formatDate
 import chat.papo.mobile.data.api.OutgoingFile
@@ -237,6 +244,7 @@ import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -336,6 +344,12 @@ fun ChatScreen(
         }
     }
     var actionsFor by remember { mutableStateOf<Message?>(null) }
+    // Muda a cada resposta começada (deslizando ou pelo menu): o compositor põe o foco no campo e abre o teclado.
+    var replyFocus by remember { mutableIntStateOf(0) }
+    val startReply: (Message) -> Unit = { message ->
+        viewModel.startReply(message)
+        replyFocus++
+    }
     var reactingTo by remember { mutableStateOf<Message?>(null) }
     var selecting by remember { mutableStateOf<Message?>(null) }
     var columnPx by remember { mutableIntStateOf(0) }
@@ -673,7 +687,7 @@ fun ChatScreen(
                                 canRemoveOwnReaction = access.removeOwnReaction,
                                 onOpenReply = { viewModel.openReply(message) },
                                 // Sem envio não se responde, nem deslizando nem pela acessibilidade; sem reação, nem o toque duplo.
-                                onReply = { viewModel.startReply(message) }.takeIf { access.send },
+                                onReply = { startReply(message) }.takeIf { access.send },
                                 onQuickReact = { viewModel.quickReact(message) }.takeIf { access.react },
                                 // A folha só abre se tiver o que oferecer (copiar não existe numa mensagem só de anexo).
                                 onLongPress = {
@@ -813,6 +827,8 @@ fun ChatScreen(
                 voice = voice,
                 voiceOwner = viewModel.voiceOwner,
                 onSendVoice = viewModel::sendVoice,
+                focusRequests = replyFocus,
+                pickedMentions = viewModel.picked,
             )
         }
     }
@@ -831,7 +847,7 @@ fun ChatScreen(
                 actionsFor = null
                 reactingTo = message
             },
-            onReply = { viewModel.startReply(message) },
+            onReply = { startReply(message) },
             onEdit = { viewModel.startEdit(message) },
             onDelete = { confirmDelete = message },
             onTogglePin = { viewModel.setPinned(message, !isPinned) },
@@ -1149,10 +1165,35 @@ private fun Composer(
     voice: VoiceRecording?,
     voiceOwner: String,
     onSendVoice: () -> Unit,
+    /** Muda quando o campo deve receber o foco com o teclado aberto, como ao começar uma resposta. */
+    focusRequests: Int,
+    /** Os nomes escolhidos no autocompletar deste rascunho (username para id). */
+    pickedMentions: Map<String, String>,
 ) {
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    // Sair do app com o campo em foco o deixava em foco, e a janela reabria o teclado ao voltar. O foco só volta ao campo
+    // quando a pessoa toca nele.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        keyboard?.hide()
+        focusManager.clearFocus(force = true)
+    }
+    // A folha de ações é outra janela: o foco e o teclado só pegam depois que a janela da conversa volta a ter o foco.
+    // Um pedido de antes de o compositor entrar na composição (a barra de somente leitura no lugar dele) não vale mais.
+    val windowInfo = LocalWindowInfo.current
+    var handledFocusRequest by remember { mutableIntStateOf(focusRequests) }
+    LaunchedEffect(focusRequests) {
+        if (focusRequests == handledFocusRequest) return@LaunchedEffect
+        handledFocusRequest = focusRequests
+        snapshotFlow { windowInfo.isWindowFocused }.first { it }
+        try {
+            focus.requestFocus()
+            keyboard?.show()
+        } catch (e: IllegalStateException) {
+            // campo fora da composição (a barra de gravação de voz no lugar dele)
+        }
+    }
     val density = LocalDensity.current
     val panelScope = rememberCoroutineScope()
     val panel = remember { EmojiPanelState(panelScope) }
@@ -1237,6 +1278,18 @@ private fun Composer(
     }
     // Os `:nome:` de emojis do servidor aparecem como imagem no campo, mas o texto do rascunho continua `:nome:`.
     val draftEmojis = remember(serverEmojis.idByName) { DraftEmojis(serverEmojis.idByName) }
+    // O que vai virar menção no envio (a regra de `encodeMentions`) e o `@everyone` de quem pode usá-lo aparecem no campo
+    // na cor das menções da conversa, sobre um fundo da mesma cor, para quem escreve ver que está marcando alguém.
+    val mentionColor = LocalPapoColors.current.accent
+    val mentionStyle = remember(mentionColor) {
+        SpanStyle(color = mentionColor, fontWeight = FontWeight.SemiBold, background = mentionColor.copy(alpha = MENTION_BACKGROUND_ALPHA))
+    }
+    val mentionHighlights = remember(users, pickedMentions, mentionEveryone) {
+        { text: String ->
+            val people = findMentions(text, pickedMentions, users.values).map { it.start until it.end }
+            if (mentionEveryone) (people + findEveryone(text)).sortedBy { it.first } else people
+        }
+    }
     // Cada mudança do campo chega aqui depois de feita: `:atalho:` completo vira o emoji ao digitar o segundo dois-pontos
     // (nome de emoji do servidor fica como texto), e o rascunho é guardado. Uma mudança em andamento no teclado
     // (composição) espera: o atalho só vale para uma tecla `:` digitada, nunca no meio de uma sugestão.
@@ -1392,6 +1445,8 @@ private fun Composer(
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ),
+                    highlights = mentionHighlights,
+                    highlightStyle = mentionStyle,
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focus)
@@ -1532,6 +1587,9 @@ private val SUGGESTION_ROW = 48.dp
 
 /** Linhas visíveis da lista de menções: seis e meia, para a meia linha de baixo mostrar que a lista rola. */
 private const val MAX_SUGGESTION_ROWS = 6.5f
+
+/** Opacidade do fundo de uma menção no campo, na cor da menção: marca o trecho sem tirar o contraste do texto. */
+private const val MENTION_BACKGROUND_ALPHA = 0.18f
 
 /** Última altura do teclado vista neste processo, para a gaveta já abrir certa em outra conversa. Só em memória. */
 private object KeyboardMemory {
